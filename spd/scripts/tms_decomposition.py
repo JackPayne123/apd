@@ -64,8 +64,11 @@ class Model(nn.Module):
             torch.empty((config.n_instances, config.k, config.n_hidden), device=device)
         )
 
-        self.b_final = torch.zeros(
-            (config.n_instances, config.n_features), device=device, requires_grad=False
+        # self.b_final = torch.zeros(
+        #     (config.n_instances, config.n_features), device=device, requires_grad=False
+        # )
+        self.b_final = nn.Parameter(
+            torch.zeros((config.n_instances, config.n_features), device=device)
         )
         # nn.init.xavier_normal_(self.W)
         if init_file is None:
@@ -81,15 +84,15 @@ class Model(nn.Module):
             # # # init B to be the same as W from the initial run
             self.B.data = weight_info["A"] @ weight_info["B"]
 
-        if bias_file is not None:
-            print(f"Loading bias from {bias_file}")
-            loaded_bias = torch.load(bias_file)
-            assert loaded_bias.shape == self.b_final.shape
-            assert loaded_bias.abs().sum() > 0
-            self.b_final.data = loaded_bias
-        elif bias_val is not None:
-            print(f"Setting bias to a constant value of {bias_val}")
-            self.b_final = torch.ones_like(self.b_final) * bias_val
+        # if bias_file is not None:
+        #     print(f"Loading bias from {bias_file}")
+        #     loaded_bias = torch.load(bias_file)
+        #     assert loaded_bias.shape == self.b_final.shape
+        #     assert loaded_bias.abs().sum() > 0
+        #     self.b_final.data = loaded_bias
+        # elif bias_val is not None:
+        #     print(f"Setting bias to a constant value of {bias_val}")
+        #     self.b_final = torch.ones_like(self.b_final) * bias_val
 
         if feature_probability is None:
             feature_probability = torch.ones(())
@@ -366,10 +369,10 @@ if __name__ == "__main__":
         n_batch=1024,
         steps=40_000,
         print_freq=5000,
-        lr=5e-2,
+        lr=1e-3,
         lr_scale=cosine_decay_lr,
         pnorm=0.75,
-        max_sparsity_coeff=0.002,
+        max_sparsity_coeff=0.000,
         # sparsity_warmup_pct=0.2,
         # init_file="tms_factors_features.pt",
         # bias_file="b_final.pt",
