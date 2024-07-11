@@ -48,7 +48,7 @@ jobs:
           echo "./venv/bin" >> $GITHUB_PATH
 
       - name: Run pyright
-        run: pyright --pythonpath ./venv/bin/python
+        run: python -m pyright
 
       - name: Print dependencies
         run: pip freeze
