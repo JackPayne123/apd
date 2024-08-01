@@ -82,7 +82,75 @@ for inputs, labels in train_dataloader:
     print(f"{labels.shape=}, {labels}")
     break
 
-# %%
+# %% Collect activations via PyTorch hooks
 
+
+def get_activations(model: BoolCircuitTransformer, inputs: torch.Tensor) -> dict[str, torch.Tensor]:
+    activations = {}
+
+    def hook_fn(name: str):
+        def fn(_, __, output):
+            activations[name] = output.detach()
+
+        return fn
+
+    handles = []
+    handles.append(model.W_E.register_forward_hook(hook_fn("W_E")))
+    handles.append(model.W_U.register_forward_hook(hook_fn("W_U")))
+
+    for i, layer in enumerate(model.layers):
+        handles.append(layer.register_forward_hook(hook_fn(f"layer_{i}")))
+
+    model(inputs)
+
+    for handle in handles:
+        handle.remove()
+
+    return activations
+
+
+# Function to cache activations
+def cache_activations(
+    model: BoolCircuitTransformer, dataloader: torch.utils.data.DataLoader, device: str
+) -> dict[str, torch.Tensor]:
+    all_activations = {}
+    all_inputs = []
+    all_labels = []
+
+    model.eval()
+    with torch.no_grad():
+        for inputs, labels in dataloader:
+            inputs = inputs.to(device)
+            activations = get_activations(model, inputs)
+
+            for name, activation in activations.items():
+                if name not in all_activations:
+                    all_activations[name] = []
+                all_activations[name].append(activation.cpu())
+
+            all_inputs.append(inputs.cpu())
+            all_labels.append(labels)
+
+    # Concatenate all activations, inputs, and labels
+    for name in all_activations:
+        all_activations[name] = torch.cat(all_activations[name], dim=0)
+
+    all_inputs = torch.cat(all_inputs, dim=0)
+    all_labels = torch.cat(all_labels, dim=0)
+
+    return {"activations": all_activations, "inputs": all_inputs, "labels": all_labels}
+
+
+# Cache activations for both trained and handcoded models
+trained_cache = cache_activations(trained_model, train_dataloader, device)
+handcoded_cache = cache_activations(handcoded_model, train_dataloader, device)
+
+logger.info("Activations cached for both trained and handcoded models")
+# %% Example of how to access the cached data
+print("Shapes of cached data for trained model:")
+for name, activation in handcoded_cache["activations"].items():
+    print(f"{name}: {activation.shape}")
+print(f"Inputs shape: {handcoded_cache['inputs'].shape}")
+print(f"Labels shape: {handcoded_cache['labels'].shape}")
 
 # %%
