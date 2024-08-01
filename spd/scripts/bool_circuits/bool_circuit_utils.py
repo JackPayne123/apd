@@ -87,6 +87,22 @@ def create_circuit_str(circuit: list[BooleanOperation], n_inputs: int) -> str:
     return str(outputs[-1])
 
 
+def print_simplified_circuit(circuit: list[BooleanOperation], n_inputs: int) -> None:
+    """Simplify the circuit via DNF, CNF, and simplify, and print the representations"""
+    inputs = sympy.symbols(f"x:{n_inputs}")
+    outputs = list(inputs)
+    for operation in circuit:
+        outputs.append(operation.call_sympy(outputs))
+    expr = outputs[-1]
+    dnf_expr = sympy.to_dnf(expr)
+    cnf_expr = sympy.to_cnf(expr)
+    simplified_expr = sympy.simplify(expr)
+    print(f"       DNF: {dnf_expr}")
+    print(f"       CNF: {cnf_expr}")
+    print(f"Simplified: {simplified_expr}")
+    return None
+
+
 def generate_circuit(
     n_inputs: int,
     n_operations: int,
@@ -240,7 +256,7 @@ def plot_circuit(
     # Add operation nodes
     for i, op in enumerate(circuit):
         op_id = f"op{i}"
-        label = f"[{i}] {op.name}"
+        label = f"[{i+num_inputs}] {op.name}"
         if show_out_idx:
             label += f"\nout_idx: {op.out_idx if op.out_idx is not None else '?'}"
         dot.node(op_id, label)
