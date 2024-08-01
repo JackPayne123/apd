@@ -94,12 +94,21 @@ def get_activations(model: BoolCircuitTransformer, inputs: torch.Tensor) -> dict
 
         return fn
 
+    def mlp_hook_fn(name: str):
+        def fn(module, input, output):
+            activations[f"{name}_in"] = input[0].detach()
+            activations[f"{name}_mid"] = module.linear1(input[0]).detach()
+            activations[f"{name}_out"] = output.detach()
+
+        return fn
+
     handles = []
     handles.append(model.W_E.register_forward_hook(hook_fn("W_E")))
     handles.append(model.W_U.register_forward_hook(hook_fn("W_U")))
 
     for i, layer in enumerate(model.layers):
-        handles.append(layer.register_forward_hook(hook_fn(f"layer_{i}")))
+        # Hook for MLP activations
+        handles.append(layer.register_forward_hook(mlp_hook_fn(f"mlp_{i}")))
 
     model(inputs)
 
@@ -152,5 +161,11 @@ for name, activation in handcoded_cache["activations"].items():
     print(f"{name}: {activation.shape}")
 print(f"Inputs shape: {handcoded_cache['inputs'].shape}")
 print(f"Labels shape: {handcoded_cache['labels'].shape}")
+
+# %% Print all out activations of the first batch
+print(f"{'Input':25} = {' '.join([str(x.int().item()) for x in handcoded_cache['inputs'][0]])}")
+for name, activation in handcoded_cache["activations"].items():
+    print(f"{name:25} = {' '.join([str(x.int().item()) for x in activation[0]])}")
+
 
 # %%
