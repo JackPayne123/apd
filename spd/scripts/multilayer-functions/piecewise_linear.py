@@ -6,6 +6,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import torch
 import torch.nn as nn
+from einops import rearrange
 
 # %%
 
@@ -17,7 +18,9 @@ class PiecewiseLinear(nn.Module):
     num_neurons relus with biases given by np.linspace(start, end, num_neurons) that computes a
     piecewise linear approximation to the function"""
 
-    def __init__(self, f: Callable[[float], float], start: float, end: float, num_neurons: int):
+    def __init__(
+        self, f: Callable[[torch.Tensor], torch.Tensor], start: float, end: float, num_neurons: int
+    ) -> None:
         super().__init__()
         self.f = f
         self.start = start
@@ -46,7 +49,7 @@ class PiecewiseLinear(nn.Module):
 
         self.output_layer.bias.data = torch.tensor(0, dtype=torch.float32)
 
-        xs = np.linspace(self.start, self.end, self.num_neurons)
+        xs = torch.linspace(self.start, self.end, self.num_neurons)
         self.function_values = torch.tensor([self.f(x) for x in xs], dtype=torch.float32)
         self.function_values = torch.cat(
             [torch.tensor([0], dtype=torch.float32), self.function_values]
@@ -64,8 +67,8 @@ class PiecewiseLinear(nn.Module):
         return x
 
     def plot(self, ax: plt.Axes, start: float, end: float, num_points: int):
-        x = np.linspace(start, end, num_points)
-        y = np.array([self.f(x) for x in x])
+        x = torch.linspace(start, end, num_points)
+        y = np.array([self.f(x).detach().numpy() for x in x])
         ax.plot(x, y, label="f(x)")
         # print("input shape", torch.tensor(x, dtype=torch.float32).unsqueeze(1).shape)
         ax.plot(
@@ -82,14 +85,23 @@ class PiecewiseLinear(nn.Module):
         ax.axvline(x=self.end, color="r", linestyle="--")
 
 
-test = PiecewiseLinear(lambda x: np.sin(2 * x) + 1, 0, 5, 40)
+test = PiecewiseLinear(lambda x: torch.sin(2 * x) + 1, 0, 5, 40)
 # plot the function and the neural network
 
-# fig, ax = plt.subplots()
-# test.plot(ax, -2, 6, 10000)
+fig, ax = plt.subplots()
+test.plot(ax, -2, 6, 10000)
 
 
 # %%
+class FunctionModule(torch.nn.Module):
+    def __init__(self, functions: list[Callable[[torch.Tensor], torch.Tensor]]) -> None:
+        super().__init__()
+        self.functions = functions
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return torch.stack([f(x) for f in self.functions])
+
+
 class ControlledPiecewiseLinear(nn.Module):
     """
     Takes in a list of num_functions functions, and a range (start, end), and a num_neurons. It
@@ -101,7 +113,7 @@ class ControlledPiecewiseLinear(nn.Module):
 
     def __init__(
         self,
-        functions: list[Callable[[float], float]],
+        functions: list[Callable[[torch.Tensor], torch.Tensor]],
         start: float,
         end: float,
         num_neurons: int,
@@ -212,96 +224,6 @@ class ControlledPiecewiseLinear(nn.Module):
         plt.show()
 
 
-# test
-# make a list of 50 different cubic functions
-def generate_cubics(num_cubics: int):
-    def create_cubic(a, b, c, d):
-        return lambda x: a * x**3 + b * x**2 + c * x + d
-
-    cubics = []
-    for _ in range(num_cubics):
-        a = np.random.uniform(-1, 1)
-        b = np.random.uniform(-2, 2)
-        c = np.random.uniform(-4, 4)
-        d = np.random.uniform(-8, 8)
-        cubics.append(create_cubic(a, b, c, d))
-    return cubics
-
-
-def generate_trig_functions(num_trig_functions: int):
-    def create_trig_function(a, b, c, d, e, f, g):
-        return lambda x: a * np.sin(b * x + c) + d * np.cos(e * x + f) + g
-
-    trig_functions = []
-    for _ in range(num_trig_functions):
-        a = np.random.uniform(-1, 1)
-        b = np.exp(np.random.uniform(-1, 3))
-        c = np.random.uniform(-np.pi, np.pi)
-        d = np.random.uniform(-1, 1)
-        e = np.exp(np.random.uniform(-1, 3))
-        f = np.random.uniform(-np.pi, np.pi)
-        g = np.random.uniform(-1, 1)
-        trig_functions.append(create_trig_function(a, b, c, d, e, f, g))
-    return trig_functions
-
-
-def generate_regular_simplex(num_vertices):
-    # Create the standard basis in num_vertices dimensions
-    basis = torch.eye(num_vertices)
-
-    # Create the (1,1,...,1) vector
-    ones = torch.ones(num_vertices)
-
-    # Compute the Householder transformation
-    v = ones / torch.norm(ones)
-    last_basis_vector = torch.zeros(num_vertices)
-    last_basis_vector[-1] = 1
-    u = v - last_basis_vector
-    u = u / torch.norm(u)
-
-    # Apply the Householder transformation
-    H = torch.eye(num_vertices) - 2 * u.outer(u)
-    rotated_basis = basis @ H
-
-    # Remove the last coordinate
-    simplex = rotated_basis[:, :-1]
-
-    # Center the simplex at the origin
-    centroid = simplex.mean(dim=0)
-    simplex = simplex - centroid
-
-    return simplex / simplex.norm(dim=1).unsqueeze(1)
-
-
-num_functions = 50
-dim = 49
-
-trigs = generate_trig_functions(num_functions)
-if num_functions == dim:
-    control_W_E = torch.eye(num_functions)
-elif num_functions == dim + 1:
-    control_W_E = generate_regular_simplex(num_functions)
-    control_W_E = control_W_E / control_W_E.norm(dim=1).unsqueeze(1)
-else:
-    control_W_E = torch.randn(num_functions, dim)
-    control_W_E = control_W_E / control_W_E.norm(dim=1).unsqueeze(1)
-test = ControlledPiecewiseLinear(trigs, 0, 5, 32, dim, control_W_E, negative_suppression=6)
-
-if num_functions == dim:
-    control_bits = torch.ones(num_functions, dtype=torch.float32)
-else:
-    control_bits = torch.zeros(num_functions, dtype=torch.float32)
-    control_bits[4] = 1
-    control_bits[9] = 1
-    control_bits[17] = 1
-
-test.plot(-0.1, 5.1, 1000, control_bits=control_bits)
-
-# %%
-plt.imshow((control_W_E @ control_W_E.T).abs().log())
-plt.colorbar()
-
-
 # %%
 class MLP(nn.Module):
     def __init__(self, d_model: int, d_mlp: int, initialise_zero=True):
@@ -337,18 +259,20 @@ class ControlledResNet(nn.Module):
 
     def __init__(
         self,
-        functions: list[Callable[[float], float]],
+        functions: FunctionModule,
         start: float,
         end: float,
         num_neurons: int,
         num_layers: int,
         d_control: int,
         negative_suppression: int = 100,
+        random_params: bool = False,
     ):
         super().__init__()
-        self.functions = functions
+        self.function_module = functions
+        self.functions = functions.functions
         self.d_control = d_control
-        self.num_functions = len(functions)
+        self.num_functions = len(self.functions)
         self.start = start
         self.end = end
         self.num_neurons = num_neurons
@@ -362,16 +286,18 @@ class ControlledResNet(nn.Module):
         # piecewise linear)
         self.d_model = self.d_control + 2
         self.mlps = nn.ModuleList([MLP(self.d_model, self.d_mlp) for _ in range(num_layers)])
-        self.initialise_params()
+        self.control_W_E = nn.Parameter(torch.randn(self.d_control, self.num_functions))
+        if not random_params:
+            self.initialise_params()
 
     def initialise_params(self):
         if self.d_control == self.num_functions:
             print("control_W_E is identity")
-            self.control_W_E = torch.eye(self.d_control)
+            self.control_W_E.data = torch.eye(self.num_functions)
         else:
             random_matrix = torch.randn(self.d_control, self.num_functions)
             # normalise rows
-            self.control_W_E = random_matrix / random_matrix.norm(dim=1).unsqueeze(1)
+            self.control_W_E.data = random_matrix / random_matrix.norm(dim=1).unsqueeze(1)
 
         self.controlled_piecewise_linear = ControlledPiecewiseLinear(
             self.functions,
@@ -505,45 +431,68 @@ class ControlledResNet(nn.Module):
         ax.set_ylim([target.min().item() - 2, target.max().item() + 2])  # type: ignore
         plt.show()
 
+    def plot_functions(
+        self, intervals: int = 1000, start: float | None = None, end: float | None = None
+    ):
+        # make a figure with self.num_functions subplots. For each function, plot the function and
+        # the neural network output for that function
+        if start is None:
+            start = self.start
+        if end is None:
+            end = self.end
+        fig, axs = plt.subplots(self.num_functions, 1, figsize=(10, 5 * self.num_functions))
+        inputs = torch.linspace(self.start, self.end, intervals, dtype=torch.float32)
+        control_bits = torch.eye(self.num_functions, dtype=torch.float32)
+        x = torch.einsum("x, cd -> xcd", inputs, control_bits)
+        x = rearrange(x, "input control1 control2 -> (input control1) control2")
+        for i in range(self.num_functions):
+            current_x = x[:, i]
+            target = self.ideal_forward(current_x)
+            axs[i].plot(inputs, target, label="f(x)")
+            # create input with control bits
+            # inputs_tensor = torch.tensor(inputs, dtype=torch.float32).unsqueeze(1)
+            # x = torch.cat(
+            #     [inputs_tensor, control_bits[i].unsqueeze(0).repeat(len(inputs), 1)], dim=1
+            # )
+            axs[i].plot(
+                current_x.detach().numpy(), self.forward(current_x).detach().numpy(), label="NN(x)"
+            )
+            axs[i].legend()
+            axs[i].set_title(f"Piecewise Linear Approximation of function {i}")
+            axs[i].set_xlabel("x")
+            axs[i].set_ylabel("y")
+            # add vertical lines to show start and end
+            axs[i].axvline(x=self.start, color="r", linestyle="--")
+            axs[i].axvline(x=self.end, color="r", linestyle="--")
+        plt.show()
 
-# test
-if __name__ == "__main__":
-    num_functions = 50
-    dim = 50
-
-    trigs = generate_trig_functions(num_functions)
-    if num_functions == dim:
-        control_W_E = torch.eye(num_functions)
-    elif num_functions == dim + 1:
-        control_W_E = generate_regular_simplex(num_functions)
-        control_W_E = control_W_E / control_W_E.norm(dim=1).unsqueeze(1)
-    else:
-        control_W_E = torch.randn(num_functions, dim)
-        control_W_E = control_W_E / control_W_E.norm(dim=1).unsqueeze(1)
-    # test = ControlledPiecewiseLinear(trigs, 0, 5, 32, control_W_E, negative_suppression=6)
-    test = ControlledResNet(trigs, 0, 5, 40, 5, dim, negative_suppression=100)
-
-    if num_functions == dim:
-        control_bits = torch.ones(num_functions, dtype=torch.float32)
-    else:
-        control_bits = torch.zeros(num_functions, dtype=torch.float32)
-        control_bits[0] = 1
-        control_bits[1] = 1
-    # control_bits = torch.zeros(num_functions, dtype=torch.float32)
-    # control_bits[torch.tensor([4, 9, 12])] = 1
-    # test.controlled_piecewise_linear.plot(-0.1, 5.1, 1000, control_bits=control_bits)
-
-    test.plot(-0.1, 5.1, 1000, control_bits=control_bits)
-    # test = ControlledResNet(
-    #     [lambda x: x**2 - 0.1 * x**4, lambda x: 10 * np.sin(5 * x)], 0, 5, 40, 5
-    # )
-
-    # test.plot(-2, 6, 1000, control_bits=torch.tensor([0, 0], dtype=torch.float32))
+    def ideal_forward(self, x: torch.Tensor) -> torch.Tensor:
+        # return the value of
+        input = x[:, 0].unsqueeze(1)
+        control_bits = x[:, 1:]
+        assert control_bits.shape[1] == self.num_functions
+        assert torch.all((control_bits == 0) | (control_bits == 1))
+        function_outputs = self.function_module(input)
+        assert function_outputs.shape == control_bits.shape
+        return torch.einsum("bf, bf -> b", function_outputs, control_bits)
 
 
-# %%
-a = torch.randn((50, 20))
-# normalise rows of a
-a = a / a.norm(dim=1).unsqueeze(1)
-plt.imshow(a @ a.T)
-plt.colorbar()
+# def vectorized_function_selection(functions, indices, inputs):
+#     # Convert functions to a PyTorch module
+
+#     function_module = FunctionModule(functions)
+
+#     # Create a batch index
+#     batch_size = inputs.shape[0]
+#     batch_indices = torch.arange(batch_size).unsqueeze(1).expand(-1, indices.shape[1])
+
+#     # Apply all functions to all inputs
+#     all_outputs = function_module(inputs.unsqueeze(1))  # Shape: (batch_size, num_functions)
+
+#     # Use indices to select the relevant function outputs
+#     selected_outputs = all_outputs[batch_indices, indices]
+
+#     # Sum the selected outputs
+#     output = selected_outputs.sum(dim=1)
+
+#     return output

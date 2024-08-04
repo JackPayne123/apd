@@ -1,3 +1,5 @@
+from collections.abc import Callable
+
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
@@ -21,8 +23,8 @@ def generate_cubics(num_cubics: int):
 
 
 def generate_trig_functions(num_trig_functions: int):
-    def create_trig_function(a, b, c, d, e, f, g):
-        return lambda x: a * np.sin(b * x + c) + d * np.cos(e * x + f) + g
+    def create_trig_function(a, b, c, d, e, f, g) -> Callable[[torch.Tensor], torch.Tensor]:
+        return lambda x: a * torch.sin(b * x + c) + d * torch.cos(e * x + f) + g
 
     trig_functions = []
     for _ in range(num_trig_functions):
