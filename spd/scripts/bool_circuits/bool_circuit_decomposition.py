@@ -90,13 +90,16 @@ def main(
     dataset = BooleanCircuitDataset(circuit=form_circuit(circuit_repr), n_inputs=dl_model.n_inputs)
     dataloader = DataLoader(dataset, batch_size=config.batch_size, shuffle=True)
 
+    pretrained_model = BoolCircuitTransformer.from_pretrained(
+        model_config.pretrained_model_path
+    ).to(device)
+
     optimize(
         model=dlc_model,
         config=config,
         out_dir=out_dir,
         device=device,
-        pretrained_model_path=model_config.pretrained_model_path,
-        pretrained_model_class=BoolCircuitTransformer,
+        pretrained_model=pretrained_model,
         dataloader=dataloader,
     )
 
