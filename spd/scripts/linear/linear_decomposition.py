@@ -70,15 +70,25 @@ def main(
     model_config = config.torch_model_config
     assert isinstance(model_config, DeepLinearModelConfig)
 
-    dl_model = DeepLinearModel.from_pretrained(model_config.pretrained_model_path).to(device)
-    assert (
-        model_config.n_features is None
-        and model_config.n_layers is None
-        and model_config.n_instances is None
-    ), "n_features, n_layers, and n_instances must not be set if pretrained_model_path is set"
-    n_features = dl_model.n_features
-    n_layers = dl_model.n_layers
-    n_instances = dl_model.n_instances
+    if model_config.pretrained_model_path is not None:
+        dl_model = DeepLinearModel.from_pretrained(model_config.pretrained_model_path).to(device)
+        assert (
+            model_config.n_features is None
+            and model_config.n_layers is None
+            and model_config.n_instances is None
+        ), "n_features, n_layers, and n_instances must not be set if pretrained_model_path is set"
+        n_features = dl_model.n_features
+        n_layers = dl_model.n_layers
+        n_instances = dl_model.n_instances
+    else:
+        assert config.loss_type == "behavioral", "Only behavioral loss allows no pretrained model"
+        dl_model = None
+        n_features = model_config.n_features
+        n_layers = model_config.n_layers
+        n_instances = model_config.n_instances
+        assert (
+            n_features is not None and n_layers is not None and n_instances is not None
+        ), "n_features, n_layers, and n_instances must be set"
 
     dlc_model = DeepLinearComponentModel(
         n_features=n_features, n_layers=n_layers, n_instances=n_instances, k=model_config.k
@@ -87,17 +97,13 @@ def main(
     dataset = DeepLinearDataset(n_features, n_instances)
     dataloader = DeepLinearDataLoader(dataset, batch_size=config.batch_size, shuffle=True)
 
-    pretrained_model = DeepLinearModel.from_pretrained(model_config.pretrained_model_path).to(
-        device
-    )
-
     optimize(
         model=dlc_model,
         config=config,
         out_dir=out_dir,
         device=device,
         dataloader=dataloader,
-        pretrained_model=pretrained_model,
+        pretrained_model=dl_model if model_config.pretrained_model_path is not None else None,
     )
 
     if config.wandb_project:

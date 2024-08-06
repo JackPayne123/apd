@@ -36,7 +36,7 @@ class DeepLinearModelConfig(BaseModel):
     n_layers: int | None = None
     n_instances: int | None = None
     k: int | None = None
-    pretrained_model_path: RootPath
+    pretrained_model_path: RootPath | None = None
 
 
 class Config(BaseModel):
@@ -227,7 +227,7 @@ def optimize(
     out_dir: Path,
     device: str,
     dataloader: DataLoader[tuple[Float[Tensor, "... n_features"], Float[Tensor, "... n_features"]]],
-    pretrained_model: Model,
+    pretrained_model: Model | None,
 ) -> None:
     assert (
         (config.pnorm is None and config.pnorm_end is not None)
@@ -235,8 +235,12 @@ def optimize(
         or config.topk is not None
     ), "Exactly one of pnorm and pnorm_end must be set"
 
-    pretrained_model.requires_grad_(False)
-    pretrained_weights = pretrained_model.all_decomposable_params
+    if config.loss_type == "param_match":
+        assert pretrained_model is not None, "Need a pretrained model for param_match loss"
+        pretrained_model.requires_grad_(False)
+        pretrained_weights = pretrained_model.all_decomposable_params
+    else:
+        pretrained_weights = None
 
     opt = torch.optim.AdamW(model.parameters(), lr=config.lr)
 
@@ -308,7 +312,6 @@ def optimize(
 
             param_match_loss = torch.zeros(1, device=device)
             if config.loss_type == "param_match":
-                # If the user passed a pretrained model, then calculate the param_match_loss
                 assert pretrained_weights is not None
                 for i, (A, B) in enumerate(zip(model.all_As, model.all_Bs, strict=False)):
                     normed_A = A / A.norm(p=2, dim=-2, keepdim=True)
