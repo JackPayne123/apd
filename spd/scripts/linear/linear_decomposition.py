@@ -103,7 +103,7 @@ def main(
         out_dir=out_dir,
         device=device,
         dataloader=dataloader,
-        pretrained_model=dl_model if model_config.pretrained_model_path is not None else None,
+        pretrained_model=dl_model,
     )
 
     if config.wandb_project:
