@@ -1,5 +1,6 @@
 """Run SPD on a model."""
 
+import json
 from collections.abc import Callable
 from pathlib import Path
 from typing import Literal
@@ -18,7 +19,7 @@ from tqdm import tqdm
 from spd.log import logger
 from spd.models.base import Model, SPDModel
 from spd.models.linear_models import DeepLinearComponentModel
-from spd.types import RootPath
+from spd.types import RootPath, TrigParams
 from spd.utils import permute_to_identity
 
 
@@ -256,6 +257,7 @@ def optimize(
     device: str,
     dataloader: DataLoader[tuple[Float[Tensor, "... n_features"], Float[Tensor, "... n_features"]]],
     pretrained_model: Model | None,
+    function_params: TrigParams | None = None,
 ) -> None:
     assert (
         (config.pnorm is None and config.pnorm_end is not None)
@@ -331,9 +333,15 @@ def optimize(
                 for param_matrix_idx in range(model.n_param_matrices):
                     all_grads[param_matrix_idx] += grads[param_matrix_idx]
 
-            # Now do a full forward pass with topk
+            assert len(inner_acts) == len(all_grads) == model.n_param_matrices
+            all_grads_stacked = torch.stack(all_grads, dim=0)
+            inner_acts_stacked = torch.stack(inner_acts, dim=0)
+            attribution_scores = (inner_acts_stacked * all_grads_stacked).sum(dim=0)
+            # Get the topk indices of the attribution scores
+            topk_indices = attribution_scores.abs().topk(config.topk, dim=-1).indices
+
             out_topk, layer_acts, inner_acts_topk = model.forward_topk(
-                batch, config.topk, all_grads
+                batch, topk_indices=topk_indices
             )
             assert len(inner_acts_topk) == model.n_param_matrices
         else:
@@ -424,6 +432,13 @@ def optimize(
             if config.save_freq is not None and step % config.save_freq == config.save_freq - 1:
                 torch.save(model.state_dict(), out_dir / f"model_{step}.pth")
                 tqdm.write(f"Saved model to {out_dir / f'model_{step}.pth'}")
+                with open(out_dir / "config.json", "w") as f:
+                    json.dump(config.model_dump(), f, indent=4)
+                tqdm.write(f"Saved config to {out_dir / 'config.json'}")
+                if function_params is not None:
+                    with open(out_dir / "function_params.json", "w") as f:
+                        json.dump(function_params, f, indent=4)
+                    tqdm.write(f"Saved function params to {out_dir / 'function_params.json'}")
 
         out_recon_loss = out_recon_loss.mean()
         sparsity_loss = sparsity_loss.mean()

@@ -1,7 +1,6 @@
 """Linear decomposition script."""
 
 import time
-from collections.abc import Callable
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
@@ -9,8 +8,6 @@ import fire
 import torch
 import wandb
 import yaml
-from jaxtyping import Float
-from torch import Tensor
 from torch.utils.data import DataLoader
 
 from spd.log import logger
@@ -20,6 +17,7 @@ from spd.models.piecewise_models import (
 )
 from spd.run_spd import Config, PiecewiseConfig, calc_recon_mse, optimize
 from spd.scripts.piecewise.piecewise_dataset import PiecewiseDataset
+from spd.scripts.piecewise.trig_functions import generate_trig_functions
 from spd.utils import (
     init_wandb,
     load_config,
@@ -27,27 +25,6 @@ from spd.utils import (
 )
 
 wandb.require("core")
-
-
-def generate_trig_functions(
-    num_trig_functions: int,
-) -> list[Callable[[Float[Tensor, " n_inputs"]], Float[Tensor, " n_inputs"]]]:
-    def create_trig_function(
-        a: float, b: float, c: float, d: float, e: float, f: float, g: float
-    ) -> Callable[[Float[Tensor, " n_inputs"]], Float[Tensor, " n_inputs"]]:
-        return lambda x: a * torch.sin(b * x + c) + d * torch.cos(e * x + f) + g
-
-    trig_functions = []
-    for _ in range(num_trig_functions):
-        a = torch.rand(1).item() * 2 - 1  # Uniform(-1, 1)
-        b = torch.exp(torch.rand(1) * 4 - 1).item()  # exp(Uniform(-1, 3))
-        c = torch.rand(1).item() * 2 * torch.pi - torch.pi  # Uniform(-π, π)
-        d = torch.rand(1).item() * 2 - 1  # Uniform(-1, 1)
-        e = torch.exp(torch.rand(1) * 4 - 1).item()  # exp(Uniform(-1, 3))
-        f = torch.rand(1).item() * 2 * torch.pi - torch.pi  # Uniform(-π, π)
-        g = torch.rand(1).item() * 2 - 1  # Uniform(-1, 1)
-        trig_functions.append(create_trig_function(a, b, c, d, e, f, g))
-    return trig_functions
 
 
 def get_run_name(config: Config) -> str:
@@ -98,7 +75,7 @@ def main(
     assert isinstance(config.task_config, PiecewiseConfig)
     assert config.task_config.k is not None
 
-    functions = generate_trig_functions(config.task_config.n_functions)
+    functions, function_params = generate_trig_functions(config.task_config.n_functions)
 
     piecewise_model = PiecewiseFunctionTransformer.from_handcoded(
         functions=functions,
@@ -136,8 +113,8 @@ def main(
     )
     dataloader = DataLoader(dataset, batch_size=config.batch_size, shuffle=False)
 
-    # Evaluate the pretrained model on 2 batches to get the labels
-    n_batches = 2
+    # Evaluate the pretrained model on 5 batches to get the labels
+    n_batches = 5
     loss = 0
     for i, (batch, labels) in enumerate(dataloader):
         if i >= n_batches:
@@ -154,6 +131,7 @@ def main(
         device=device,
         pretrained_model=piecewise_model,
         dataloader=dataloader,
+        function_params=function_params,
     )
 
     if config.wandb_project:
