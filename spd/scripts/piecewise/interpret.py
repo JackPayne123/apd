@@ -20,7 +20,7 @@ if __name__ == "__main__":
         # "/root/spd/spd/scripts/piecewise/out/sp1.0_lr0.01_pNone_topk4_bs2048_/model_19999.pth"
         # "/root/spd/spd/scripts/piecewise/out/test_sp1.0_lr0.01_pNone_topk4_bs2048_/model_20000.pth"
         # "/root/spd/spd/scripts/piecewise/out/test2_sp1.0_lr0.01_pNone_topk4_bs2048_/model_15999.pth"
-        "/root/spd/spd/scripts/piecewise/out/100-neurons-per-func_sp1.0_lr0.01_pNone_topk4_bs2048_/model_20000.pth"
+        "out/sp1.0_lr0.01_pNone_topk4_bs2048_/model_20000.pth"
     )
 
     with open(pretrained_path.parent / "config.json") as f:
@@ -99,18 +99,27 @@ if __name__ == "__main__":
     print(f"Attribution scores: {attribution_scores}")
     # Plot a matshow of the attribution scores
     # Each row should have it's own color scale
-    # Normalize the data to have mean 0 and std 1
+    # Normalize each row to have mean 0 and std 1
     attribution_scores_normed = (
-        attribution_scores - attribution_scores.mean()
-    ) / attribution_scores.std()
+        attribution_scores - attribution_scores.mean(dim=1, keepdim=True)
+    ) / attribution_scores.std(dim=1, keepdim=True)
 
+    # Find the max absolute value in the attribution scores
+    max_abs_value = attribution_scores_normed.abs().max()
     # matshow
-    plt.matshow(attribution_scores_normed.detach().cpu().numpy())
+    plt.matshow(
+        attribution_scores_normed.detach().cpu().numpy(),
+        cmap="coolwarm",
+        vmin=-max_abs_value,
+        vmax=max_abs_value,
+    )
+    # plt.matshow(attribution_scores_normed.detach().cpu().numpy(), cmap="coolwarm")
     # ylabel should be the function index
     plt.ylabel("Function index")
     plt.xlabel("subnetwork index")
     # Add title saying it's the attribution scores
     plt.title("Attribution scores")
+    # Use coolwarm colormap
     plt.colorbar()
     plt.show()
 
@@ -121,3 +130,5 @@ if __name__ == "__main__":
     # Do a forward_topk pass
     out_topk, layer_acts_topk, inner_acts_topk = model.forward_topk(x, top_k_indices)
     print(f"Top-k output: {out_topk}")
+
+# %%

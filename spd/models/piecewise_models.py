@@ -6,7 +6,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import torch
 import torch.nn as nn
-from jaxtyping import Bool, Float
+from jaxtyping import Float, Int
 from torch import Tensor
 
 from spd.models.base import Model, SPDModel
@@ -679,7 +679,7 @@ class PiecewiseFunctionSPDTransformer(SPDModel):
         return self.W_U(residual), layer_acts, inner_acts
 
     def forward_topk(
-        self, x: Float[Tensor, "... inputs"], topk_indices: Bool[Tensor, "... topk"]
+        self, x: Float[Tensor, "... inputs"], topk_indices: Int[Tensor, "... topk"]
     ) -> tuple[
         Float[Tensor, "... outputs"],
         list[Float[Tensor, "... d_embed"] | Float[Tensor, "... d_mlp"]],

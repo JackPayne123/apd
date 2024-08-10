@@ -435,10 +435,6 @@ def optimize(
                 with open(out_dir / "config.json", "w") as f:
                     json.dump(config.model_dump(), f, indent=4)
                 tqdm.write(f"Saved config to {out_dir / 'config.json'}")
-                if function_params is not None:
-                    with open(out_dir / "function_params.json", "w") as f:
-                        json.dump(function_params, f, indent=4)
-                    tqdm.write(f"Saved function params to {out_dir / 'function_params.json'}")
 
         out_recon_loss = out_recon_loss.mean()
         sparsity_loss = sparsity_loss.mean()

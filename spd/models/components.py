@@ -1,5 +1,5 @@
 import torch
-from jaxtyping import Bool, Float
+from jaxtyping import Float, Int
 from torch import Tensor, nn
 
 from spd.utils import init_param_
@@ -25,21 +25,19 @@ class ParamComponents(nn.Module):
         """
         super().__init__()
 
-        a = None
-        b = None
         if resid_component is not None:
-            assert resid_dim is not None and resid_dim in [0, 1]
             if resid_dim == 0:
-                # Will use resid_component for A matrix, only need to set B
                 a = resid_component
                 b = nn.Parameter(torch.empty(k, out_dim))
-            else:
-                # Will use resid_component for B matrix, only need to set A
+            elif resid_dim == 1:
                 a = nn.Parameter(torch.empty(in_dim, k))
                 b = resid_component
+            else:
+                raise ValueError("Invalid resid_dim value. Must be 0 or 1.")
+        else:
+            a = nn.Parameter(torch.empty(in_dim, k))
+            b = nn.Parameter(torch.empty(k, out_dim))
 
-        assert a is not None
-        assert b is not None
         init_param_(a)
         init_param_(b)
         self.A = a
@@ -57,7 +55,7 @@ class ParamComponents(nn.Module):
     def forward_topk(
         self,
         x: Float[Tensor, "... dim1"],
-        topk_indices: Bool[Tensor, "... topk"] | None = None,
+        topk_indices: Int[Tensor, "... topk"] | None = None,
     ) -> tuple[Float[Tensor, "... dim2"], Float[Tensor, "... k"]]:
         """
         Performs a forward pass using only the top-k components.
@@ -135,7 +133,7 @@ class MLPComponents(nn.Module):
         return x, layer_acts, inner_acts
 
     def forward_topk(
-        self, x: Float[Tensor, "... d_embed"], topk_indices: Bool[Tensor, "... topk"]
+        self, x: Float[Tensor, "... d_embed"], topk_indices: Int[Tensor, "... topk"]
     ) -> tuple[
         Float[Tensor, "... d_embed"],
         list[Float[Tensor, "... d_embed"] | Float[Tensor, "... d_mlp"]],

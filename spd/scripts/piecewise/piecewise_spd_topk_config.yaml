@@ -1,6 +1,6 @@
-# wandb_project: spd-piecewise
+wandb_project: spd-piecewise
 wandb_run_name: null
-wandb_run_name_prefix: "100-neurons-per-func_"
+wandb_run_name_prefix: ""
 seed: 0
 topk: 4
 max_sparsity_coeff: 1

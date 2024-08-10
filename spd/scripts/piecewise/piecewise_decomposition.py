@@ -1,5 +1,6 @@
 """Linear decomposition script."""
 
+import json
 import time
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -67,8 +68,6 @@ def main(
     if config.wandb_project:
         assert wandb.run, "wandb.run must be initialized before training"
         wandb.run.name = run_name
-    out_dir = Path(__file__).parent / "out" / run_name
-    out_dir.mkdir(parents=True, exist_ok=True)
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
     logger.info(f"Using device: {device}")
@@ -76,6 +75,12 @@ def main(
     assert config.task_config.k is not None
 
     functions, function_params = generate_trig_functions(config.task_config.n_functions)
+
+    out_dir = Path(__file__).parent / "out" / run_name
+    out_dir.mkdir(parents=True, exist_ok=True)
+    with open(out_dir / "function_params.json", "w") as f:
+        json.dump(function_params, f, indent=4)
+    logger.write(f"Saved function params to {out_dir / 'function_params.json'}")
 
     piecewise_model = PiecewiseFunctionTransformer.from_handcoded(
         functions=functions,
