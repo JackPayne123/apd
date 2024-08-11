@@ -11,7 +11,7 @@ class ParamComponents(nn.Module):
         in_dim: int,
         out_dim: int,
         k: int,
-        resid_component: nn.Parameter | None,
+        resid_component: torch.Tensor | None,
         resid_dim: int | None,
     ):
         """
@@ -28,20 +28,20 @@ class ParamComponents(nn.Module):
         if resid_component is not None:
             if resid_dim == 0:
                 a = resid_component
-                b = nn.Parameter(torch.empty(k, out_dim))
+                b = torch.empty(k, out_dim)
             elif resid_dim == 1:
-                a = nn.Parameter(torch.empty(in_dim, k))
+                a = torch.empty(in_dim, k)
                 b = resid_component
             else:
                 raise ValueError("Invalid resid_dim value. Must be 0 or 1.")
         else:
-            a = nn.Parameter(torch.empty(in_dim, k))
-            b = nn.Parameter(torch.empty(k, out_dim))
+            a = torch.empty(in_dim, k)
+            b = torch.empty(k, out_dim)
 
-        init_param_(a)
-        init_param_(b)
-        self.A = a
-        self.B = b
+        self.A = nn.Parameter(a)
+        self.B = nn.Parameter(b)
+        init_param_(self.A)
+        init_param_(self.B)
 
     def forward(
         self,
@@ -55,7 +55,7 @@ class ParamComponents(nn.Module):
     def forward_topk(
         self,
         x: Float[Tensor, "... dim1"],
-        topk_indices: Int[Tensor, "... topk"] | None = None,
+        topk_indices: Int[Tensor, "... topk"],
     ) -> tuple[Float[Tensor, "... dim2"], Float[Tensor, "... k"]]:
         """
         Performs a forward pass using only the top-k components.
@@ -74,6 +74,7 @@ class ParamComponents(nn.Module):
         topk_values = inner_acts.gather(dim=-1, index=topk_indices)
         inner_acts_topk = torch.zeros_like(inner_acts)
         inner_acts_topk.scatter_(dim=-1, index=topk_indices, src=topk_values)
+
         out = torch.einsum("bk,kg->bg", inner_acts_topk, self.B)
 
         return out, inner_acts_topk
@@ -93,8 +94,8 @@ class MLPComponents(nn.Module):
         d_mlp: int,
         k: int,
         input_bias: Float[Tensor, " d_mlp"] | None = None,
-        input_component: nn.Parameter | None = None,
-        output_component: nn.Parameter | None = None,
+        input_component: torch.Tensor | None = None,
+        output_component: torch.Tensor | None = None,
     ):
         super().__init__()
         self.linear1 = ParamComponents(

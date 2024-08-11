@@ -80,7 +80,7 @@ def main(
     out_dir.mkdir(parents=True, exist_ok=True)
     with open(out_dir / "function_params.json", "w") as f:
         json.dump(function_params, f, indent=4)
-    logger.write(f"Saved function params to {out_dir / 'function_params.json'}")
+    logger.info(f"Saved function params to {out_dir / 'function_params.json'}")
 
     piecewise_model = PiecewiseFunctionTransformer.from_handcoded(
         functions=functions,
@@ -136,7 +136,6 @@ def main(
         device=device,
         pretrained_model=piecewise_model,
         dataloader=dataloader,
-        function_params=function_params,
     )
 
     if config.wandb_project:

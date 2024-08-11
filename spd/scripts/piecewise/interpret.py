@@ -11,7 +11,7 @@ from spd.models.piecewise_models import (
     PiecewiseFunctionSPDTransformer,
     PiecewiseFunctionTransformer,
 )
-from spd.run_spd import Config
+from spd.run_spd import Config, PiecewiseConfig
 from spd.scripts.piecewise.trig_functions import create_trig_function
 
 # %%
@@ -32,6 +32,7 @@ if __name__ == "__main__":
         function_params = json.load(f)
     functions = [create_trig_function(*param) for param in function_params]
 
+    assert isinstance(config.task_config, PiecewiseConfig)
     hardcoded_model = PiecewiseFunctionTransformer.from_handcoded(
         functions=functions,
         neurons_per_function=config.task_config.neurons_per_function,

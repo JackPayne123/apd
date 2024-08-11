@@ -57,7 +57,7 @@
             "type": "debugpy",
             "request": "launch",
             "program": "${workspaceFolder}/spd/scripts/linear/linear_decomposition.py",
-            "args": "${workspaceFolder}/spd/scripts/linear/linear_topkmatch_param_config.yaml",
+            "args": "${workspaceFolder}/spd/scripts/linear/linear_topk_match_param_config.yaml",
             "console": "integratedTerminal",
             "justMyCode": true,
             "env": {

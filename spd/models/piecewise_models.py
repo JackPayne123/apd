@@ -11,7 +11,6 @@ from torch import Tensor
 
 from spd.models.base import Model, SPDModel
 from spd.models.bool_circuit_models import MLPComponents
-from spd.utils import init_param_
 
 
 def initialize_embeds(
@@ -619,10 +618,8 @@ class PiecewiseFunctionSPDTransformer(SPDModel):
         self.W_U = nn.Linear(self.d_embed, self.n_outputs, bias=False)
         initialize_embeds(self.W_E, self.W_U, n_inputs, self.d_embed, self.superposition)
 
-        self.input_component = nn.Parameter(torch.empty(self.d_embed, self.k))
-        self.output_component = nn.Parameter(torch.empty(self.k, self.d_embed))
-        init_param_(self.input_component)
-        init_param_(self.output_component)
+        self.input_component = torch.empty(self.d_embed, self.k)
+        self.output_component = torch.empty(self.k, self.d_embed)
 
         self.mlps = nn.ModuleList(
             [
