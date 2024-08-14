@@ -655,6 +655,30 @@ class PiecewiseFunctionSPDTransformer(SPDModel):
         assert len(As) == self.n_param_matrices
         return As
 
+    def set_handcoded_AB(self, target_transformer: PiecewiseFunctionTransformer):
+        assert self.n_inputs == target_transformer.n_inputs
+        assert self.n_layers == target_transformer.n_layers
+        assert self.d_embed == target_transformer.d_embed
+        assert self.d_control == target_transformer.d_control
+        # assert self.d_mlp == target_transformer.d_mlp
+        assert self.n_layers == 1, "Only implemented for n_layers = 1"
+        k = self.k
+        d_mlp = target_transformer.d_mlp
+        # Input layer
+        self.mlps[0].linear1.A.data[:k, :] = torch.eye(k)
+        self.mlps[0].linear1.A.data[-1, :] = torch.zeros(k)
+        self.mlps[0].linear1.B.data = target_transformer.mlps[0].input_layer.weight.T[:k, :]
+        # Output layer
+        original_Wout_last_col = target_transformer.mlps[0].output_layer.weight.T[:, -1]
+        norm = torch.norm(original_Wout_last_col, dim=0)
+        self.mlps[0].linear2.A.data[:, 0] = original_Wout_last_col / norm
+        self.mlps[0].linear2.A.data[:, 1:] = torch.ones(d_mlp, k - 1)
+        self.mlps[0].linear2.B.data[:, :] = torch.zeros(k, self.d_embed)
+        self.mlps[0].linear2.B.data[0, -1] = 1.0 * norm
+        # Assert biases
+        assert torch.allclose(self.mlps[0].bias1, target_transformer.mlps[0].input_layer.bias)
+        assert torch.allclose(torch.tensor(0.0), target_transformer.mlps[0].output_layer.bias)
+
     def forward(
         self, x: Float[Tensor, "... inputs"]
     ) -> tuple[

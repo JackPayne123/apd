@@ -3,12 +3,12 @@ wandb_run_name: null
 wandb_run_name_prefix: ""
 seed: 0
 topk: 4
-max_sparsity_coeff: 1
+max_sparsity_coeff: 1e-2 # was 1
 batch_size: 2048
 steps: 20_000
 print_freq: 500
 save_freq: 10_000
-lr: 1e-2
+lr: 1e-4 # was 1e-2
 lr_scale: constant
 lr_warmup_pct: 0.1
 loss_type: param_match
@@ -16,8 +16,8 @@ task_config:
   task_name: piecewise
   n_functions: 10
   neurons_per_function: 10
-  n_layers: 2
-  feature_probability: 0.2
+  n_layers: 1 # was 2
+  feature_probability: 0.05 # was 0.2
   range_min: 0
   range_max: 5
   k: 11

@@ -121,6 +121,9 @@ def main(
         input_biases=input_biases,
     ).to(device)
 
+    logger.info("Setting handcoded A and B matrices (!)")
+    piecewise_model_spd.set_handcoded_AB(piecewise_model)
+
     # Set requires_grad to False for all embeddings and all input biases
     for i in range(piecewise_model_spd.n_layers):
         piecewise_model_spd.mlps[i].bias1.requires_grad_(False)
