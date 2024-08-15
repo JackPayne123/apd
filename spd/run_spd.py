@@ -272,7 +272,7 @@ def optimize(
     else:
         pretrained_weights = None
 
-    opt = torch.optim.AdamW(model.parameters(), lr=config.lr)
+    opt = torch.optim.AdamW(model.parameters(), lr=config.lr, weight_decay=0.0)
 
     lr_scale_fn = get_lr_scale_fn(config.lr_scale)
 
