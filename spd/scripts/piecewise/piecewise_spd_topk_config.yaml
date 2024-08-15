@@ -1,26 +1,24 @@
-# wandb_project: spd-piecewise
+wandb_project: spd-piecewise
 wandb_run_name: null
-wandb_run_name_prefix: "jake_"
+wandb_run_name_prefix: "reproduce_good_"
 seed: 0
 topk: 4
-max_sparsity_coeff: 1e-1
+max_sparsity_coeff: 1
+l2_topk_penalty_scale: 0.05
+lr: 5e-2
 batch_size: 2048
 steps: 20_000
-print_freq: 500
-save_freq: 10_000
-lr: 5e-2
-# lr_scale: linear_to_const
+print_freq: 50
+save_freq: 5_000
 lr_warmup_pct: 0.01
 loss_type: param_match
-# l2_topk_penalty_scale: 1e-1
-handcoded_AB: true
-
+handcoded_AB: false
 task_config:
   task_name: piecewise
   n_functions: 10
   neurons_per_function: 10
   n_layers: 1
-  feature_probability: 0.1
+  feature_probability: 0.05
   range_min: 0
   range_max: 5
   k: 11
