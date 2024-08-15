@@ -1,0 +1,24 @@
+wandb_project: spd-piecewise
+wandb_run_name: null
+wandb_run_name_prefix: "changeme_"
+seed: 0
+topk: 4
+max_sparsity_coeff: 1e-5
+batch_size: 2048
+steps: 20_000
+print_freq: 50
+save_freq: 10_000
+lr: 5e-3
+# lr_scale: linear_to_const
+lr_warmup_pct: 0.01
+loss_type: param_match
+handcoded_AB: true
+task_config:
+  task_name: piecewise
+  n_functions: 10
+  neurons_per_function: 10
+  n_layers: 1
+  feature_probability: 0.05
+  range_min: 0
+  range_max: 5
+  k: 11
