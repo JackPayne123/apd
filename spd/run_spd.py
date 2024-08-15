@@ -71,6 +71,7 @@ class Config(BaseModel):
     sparsity_loss_type: Literal["jacobian"] = "jacobian"
     loss_type: Literal["param_match", "behavioral"] = "param_match"
     sparsity_warmup_pct: float = 0.0
+    handcoded_AB: bool = False
     task_config: DeepLinearConfig | BoolCircuitConfig | PiecewiseConfig = Field(
         ..., discriminator="task_name"
     )
