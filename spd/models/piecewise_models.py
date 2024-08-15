@@ -184,9 +184,9 @@ class ControlledPiecewiseLinear(nn.Module):
                 i * self.num_neurons : (i + 1) * self.num_neurons
             ] = -self.negative_suppression
 
-            self.input_layer.weight.data[
-                i * self.num_neurons : (i + 1) * self.num_neurons, 0
-            ] = piecewise_linear.input_layer.weight.data.squeeze()
+            self.input_layer.weight.data[i * self.num_neurons : (i + 1) * self.num_neurons, 0] = (
+                piecewise_linear.input_layer.weight.data.squeeze()
+            )
             self.input_layer.weight.data[i * self.num_neurons : (i + 1) * self.num_neurons, 1:] += (
                 self.control_W_E[i]
                 * (self.negative_suppression + piecewise_linear.input_layer.bias.data.unsqueeze(1))
@@ -198,9 +198,9 @@ class ControlledPiecewiseLinear(nn.Module):
         for i in range(self.num_functions):
             piecewise_linear = self.piecewise_linears[i]
             self.output_layer.bias.data[i] = piecewise_linear.output_layer.bias.data
-            self.output_layer.weight.data[
-                i, i * self.num_neurons : (i + 1) * self.num_neurons
-            ] = piecewise_linear.output_layer.weight.data.squeeze()
+            self.output_layer.weight.data[i, i * self.num_neurons : (i + 1) * self.num_neurons] = (
+                piecewise_linear.output_layer.weight.data.squeeze()
+            )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         control_bits = x[:, 1:]
@@ -350,11 +350,11 @@ class ControlledResNet(nn.Module):
         # set the weights of the residual layers to be the weights of the corresponding neurons in
         # the controlled piecewise linear
         for i in range(self.n_layers):
-            self.mlps[i].input_layer.weight.data[
-                :, :-1
-            ] = self.controlled_piecewise_linear.input_layer.weight.data[
-                self.neuron_permutations[i]
-            ]
+            self.mlps[i].input_layer.weight.data[:, :-1] = (
+                self.controlled_piecewise_linear.input_layer.weight.data[
+                    self.neuron_permutations[i]
+                ]
+            )
             self.mlps[
                 i
             ].input_layer.bias.data = self.controlled_piecewise_linear.input_layer.bias.data[
@@ -641,6 +641,7 @@ class PiecewiseFunctionSPDTransformer(SPDModel):
         super().__init__()
         self.n_inputs = n_inputs
         self.n_layers = n_layers
+        self.d_mlp = d_mlp
         self.k = k
         self.d_embed = self.n_inputs + 1 if d_embed is None else d_embed
         self.d_control = self.d_embed - 2
