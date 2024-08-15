@@ -1,34 +1,26 @@
 # wandb_project: spd-piecewise
-<<<<<<< HEAD
-# wandb_run_name: null
-# wandb_run_name_prefix: ""
-=======
 wandb_run_name: null
 wandb_run_name_prefix: "jake_"
->>>>>>> origin/feature/multilayer_functions
 seed: 0
 topk: 4
-max_sparsity_coeff: 1e0
+max_sparsity_coeff: 1e-1
 batch_size: 2048
-steps: 2_000
+steps: 20_000
 print_freq: 500
 save_freq: 10_000
 lr: 5e-2
 # lr_scale: linear_to_const
 lr_warmup_pct: 0.01
 loss_type: param_match
-<<<<<<< HEAD
-# l2_topk_penalty_scale: 1e-10
+# l2_topk_penalty_scale: 1e-1
+handcoded_AB: true
 
-=======
-handcoded_AB: false
->>>>>>> origin/feature/multilayer_functions
 task_config:
   task_name: piecewise
   n_functions: 10
   neurons_per_function: 10
   n_layers: 1
-  feature_probability: 0.05
+  feature_probability: 0.1
   range_min: 0
   range_max: 5
   k: 11
