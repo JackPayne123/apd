@@ -137,7 +137,7 @@ if __name__ == "__main__":
     ) -> None:
         fig, ax = plt.subplots()
         max_abs_value = x.abs().max()
-        ax.matshow(
+        im = ax.matshow(
             x.detach().cpu().numpy(),
             cmap="coolwarm",
             vmin=-max_abs_value,
@@ -147,7 +147,7 @@ if __name__ == "__main__":
         ax.set_xlabel(xlabel)
         ax.set_title(title)
         assert ax.figure is not None
-        cbar = ax.figure.colorbar(ax.matshow(x.detach().cpu().numpy(), cmap="coolwarm"))
+        cbar = ax.figure.colorbar(im)
         cbar.ax.set_ylabel(title, rotation=-90, va="bottom")
         plt.savefig(save_path)
         plt.show()
