@@ -8,9 +8,7 @@ import time
 from collections.abc import Callable
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from typing import Literal
 
-import einops
 import fire
 import matplotlib.pyplot as plt
 import numpy as np
@@ -18,50 +16,47 @@ import torch
 import wandb
 import yaml
 from jaxtyping import Float
-from pydantic import BaseModel, ConfigDict
 from torch import Tensor, nn
 from torch.nn import functional as F
-from tqdm import tqdm
 
 from spd.log import logger
-from spd.types import RootPath
+from spd.run_spd import Config, TMSConfig, optimize
+from spd.scripts.tms.train_tms import TMSModel
 from spd.utils import (
-    calculate_closeness_to_identity,
     init_wandb,
     load_config,
-    permute_to_identity,
     set_seed,
 )
 
 wandb.require("core")
 
 
-class Config(BaseModel):
-    model_config = ConfigDict(extra="forbid", frozen=True)
-    wandb_project: str | None = None
-    wandb_run_name: str | None = None
-    wandb_run_name_prefix: str = ""
-    seed: int = 0
-    topk: int
-    topk_coeff: float
-    n_features: int
-    n_hidden: int
-    n_instances: int
-    batch_size: int
-    steps: int
-    print_freq: int
-    lr: float
-    k: int | None = None
-    lr_scale: Literal["linear", "constant", "cosine"] = "constant"
-    lr_warmup_pct: float = 0.0
-    bias_val: float = 0.0
-    train_bias: bool = False
-    feature_probability: float = 0.05
-    pretrained_model_path: RootPath | None = None
+# class Config(BaseModel):
+#     model_config = ConfigDict(extra="forbid", frozen=True)
+#     wandb_project: str | None = None
+#     wandb_run_name: str | None = None
+#     wandb_run_name_prefix: str = ""
+#     seed: int = 0
+#     topk: int
+#     topk_coeff: float
+#     n_features: int
+#     n_hidden: int
+#     n_instances: int
+#     batch_size: int
+#     steps: int
+#     print_freq: int
+#     lr: float
+#     k: int | None = None
+#     lr_scale: Literal["linear", "constant", "cosine"] = "constant"
+#     lr_warmup_pct: float = 0.0
+#     bias_val: float = 0.0
+#     train_bias: bool = False
+#     feature_probability: float = 0.05
+#     pretrained_model_path: RootPath | None = None
 
 
-class Model(nn.Module):
-    def __init__(self, config: Config, device: str = "cuda"):
+class TMSSPDModel(nn.Module):
+    def __init__(self, config: TMSConfig, device: str = "cuda"):
         super().__init__()
         self.config = config
 
@@ -220,137 +215,137 @@ def get_lr_with_warmup(
     return lr * lr_scale_fn(step - warmup_steps, steps - warmup_steps)
 
 
-def optimize(
-    model: Model,
-    config: Config,
-    out_dir: Path,
-    device: str,
-    pretrained_model_path: RootPath | None = None,
-) -> None:
-    pretrained_W = None
-    if pretrained_model_path:
-        pretrained_W = torch.load(pretrained_model_path, weights_only=True, map_location="cpu")[
-            "W"
-        ].to(device)
-        # Set requires_grad to False for the pretrained W
-        pretrained_W.requires_grad = False
-    opt = torch.optim.AdamW(list(model.parameters()), lr=config.lr)
+# def optimize(
+#     model: TMSSPDModel,
+#     config: Config,
+#     out_dir: Path,
+#     device: str,
+#     pretrained_model_path: RootPath | None = None,
+# ) -> None:
+#     pretrained_W = None
+#     if pretrained_model_path:
+#         pretrained_W = torch.load(pretrained_model_path, weights_only=True, map_location="cpu")[
+#             "W"
+#         ].to(device)
+#         # Set requires_grad to False for the pretrained W
+#         pretrained_W.requires_grad = False
+#     opt = torch.optim.AdamW(list(model.parameters()), lr=config.lr)
 
-    lr_scale_fn: Callable[[int, int], float]
-    if config.lr_scale == "linear":
-        lr_scale_fn = linear_lr
-    elif config.lr_scale == "constant":
-        lr_scale_fn = constant_lr
-    elif config.lr_scale == "cosine":
-        lr_scale_fn = cosine_decay_lr
-    else:
-        lr_scale_fn = constant_lr
+#     lr_scale_fn: Callable[[int, int], float]
+#     if config.lr_scale == "linear":
+#         lr_scale_fn = linear_lr
+#     elif config.lr_scale == "constant":
+#         lr_scale_fn = constant_lr
+#     elif config.lr_scale == "cosine":
+#         lr_scale_fn = cosine_decay_lr
+#     else:
+#         lr_scale_fn = constant_lr
 
-    total_samples = 0
+#     total_samples = 0
 
-    for step in tqdm(range(config.steps)):
-        step_lr = get_lr_with_warmup(
-            step=step,
-            steps=config.steps,
-            lr=config.lr,
-            lr_scale_fn=lr_scale_fn,
-            lr_warmup_pct=config.lr_warmup_pct,
-        )
+#     for step in tqdm(range(config.steps)):
+#         step_lr = get_lr_with_warmup(
+#             step=step,
+#             steps=config.steps,
+#             lr=config.lr,
+#             lr_scale_fn=lr_scale_fn,
+#             lr_warmup_pct=config.lr_warmup_pct,
+#         )
 
-        for group in opt.param_groups:
-            group["lr"] = step_lr
-        opt.zero_grad(set_to_none=True)
-        batch = model.generate_batch(config.batch_size)
+#         for group in opt.param_groups:
+#             group["lr"] = step_lr
+#         opt.zero_grad(set_to_none=True)
+#         batch = model.generate_batch(config.batch_size)
 
-        total_samples += batch.shape[0]  # don't include the number of instances
+#         total_samples += batch.shape[0]  # don't include the number of instances
 
-        with torch.autocast(device_type=device, dtype=torch.bfloat16):
-            # Stage 1: Do a full forward pass and get the gradients w.r.t h_0 and h_1
-            out, h_0, h_1, _, _, normed_A = model(batch)
-            all_grads = [torch.zeros_like(h_0), torch.zeros_like(h_1)]
-            for feature_idx in range(out.shape[-1]):
-                grads = torch.autograd.grad(
-                    out[:, :, feature_idx].sum(), [h_0, h_1], retain_graph=True
-                )
-                all_grads[0] += grads[0]
-                all_grads[1] += grads[1]
+#         with torch.autocast(device_type=device, dtype=torch.bfloat16):
+#             # Stage 1: Do a full forward pass and get the gradients w.r.t h_0 and h_1
+#             out, h_0, h_1, _, _, normed_A = model(batch)
+#             all_grads = [torch.zeros_like(h_0), torch.zeros_like(h_1)]
+#             for feature_idx in range(out.shape[-1]):
+#                 grads = torch.autograd.grad(
+#                     out[:, :, feature_idx].sum(), [h_0, h_1], retain_graph=True
+#                 )
+#                 all_grads[0] += grads[0]
+#                 all_grads[1] += grads[1]
 
-            # Stage 2: Do a forward pass with topk
-            out_topk, _, _, _, _, _ = model.forward_topk(batch, config.topk, all_grads)
+#             # Stage 2: Do a forward pass with topk
+#             out_topk, _, _, _, _, _ = model.forward_topk(batch, config.topk, all_grads)
 
-            param_match_loss = torch.zeros(model.config.n_instances, device=device)
-            if pretrained_model_path:
-                # If the user passed a pretrained model, then calculate the param_match_loss
-                assert pretrained_W is not None
-                W = torch.einsum("ifk,ikh->ifh", normed_A, model.B)
-                param_match_loss = ((pretrained_W[: model.config.n_instances] - W) ** 2).sum(
-                    dim=(-2, -1)
-                )
+#             param_match_loss = torch.zeros(model.config.n_instances, device=device)
+#             if pretrained_model_path:
+#                 # If the user passed a pretrained model, then calculate the param_match_loss
+#                 assert pretrained_W is not None
+#                 W = torch.einsum("ifk,ikh->ifh", normed_A, model.B)
+#                 param_match_loss = ((pretrained_W[: model.config.n_instances] - W) ** 2).sum(
+#                     dim=(-2, -1)
+#                 )
 
-            error = model.importance * (batch - out) ** 2
-            recon_loss = einops.reduce(error, "b i f -> i", "mean")
+#             error = model.importance * (batch - out) ** 2
+#             recon_loss = einops.reduce(error, "b i f -> i", "mean")
 
-            error_topk = model.importance * (batch - out_topk) ** 2
-            recon_loss_topk = einops.reduce(error_topk, "b i f -> i", "mean")
+#             error_topk = model.importance * (batch - out_topk) ** 2
+#             recon_loss_topk = einops.reduce(error_topk, "b i f -> i", "mean")
 
-            with torch.inference_mode():
-                if step % config.print_freq == config.print_freq - 1 or step == 0:
-                    recon_repr = [f"{x:.4f}" for x in recon_loss]
-                    recon_repr_topk = [f"{x:.4f}" for x in recon_loss_topk]
-                    tqdm.write(f"Step {step}")
-                    tqdm.write(f"Reconstruction loss: \n{recon_repr}")
-                    tqdm.write(f"Reconstruction loss (topk): \n{recon_repr_topk}")
-                    if pretrained_model_path:
-                        param_match_repr = [f"{x:.4f}" for x in param_match_loss]
-                        tqdm.write(f"Param match loss: \n{param_match_repr}")
+#             with torch.inference_mode():
+#                 if step % config.print_freq == config.print_freq - 1 or step == 0:
+#                     recon_repr = [f"{x:.4f}" for x in recon_loss]
+#                     recon_repr_topk = [f"{x:.4f}" for x in recon_loss_topk]
+#                     tqdm.write(f"Step {step}")
+#                     tqdm.write(f"Reconstruction loss: \n{recon_repr}")
+#                     tqdm.write(f"Reconstruction loss (topk): \n{recon_repr_topk}")
+#                     if pretrained_model_path:
+#                         param_match_repr = [f"{x:.4f}" for x in param_match_loss]
+#                         tqdm.write(f"Param match loss: \n{param_match_repr}")
 
-                    closeness_vals: list[float] = []
-                    permuted_A_T_list: list[torch.Tensor] = []
-                    for i in range(model.config.n_instances):
-                        permuted_matrix = permute_to_identity(normed_A[i].T.abs())
-                        closeness = calculate_closeness_to_identity(permuted_matrix)
-                        closeness_vals.append(closeness)
-                        permuted_A_T_list.append(permuted_matrix)
-                    permuted_A_T = torch.stack(permuted_A_T_list, dim=0)
+#                     closeness_vals: list[float] = []
+#                     permuted_A_T_list: list[torch.Tensor] = []
+#                     for i in range(model.config.n_instances):
+#                         permuted_matrix = permute_to_identity(normed_A[i].T.abs())
+#                         closeness = calculate_closeness_to_identity(permuted_matrix)
+#                         closeness_vals.append(closeness)
+#                         permuted_A_T_list.append(permuted_matrix)
+#                     permuted_A_T = torch.stack(permuted_A_T_list, dim=0)
 
-                    fig = plot_A_matrix(permuted_A_T, pos_only=True)
+#                     fig = plot_A_matrix(permuted_A_T, pos_only=True)
 
-                    fig.savefig(out_dir / f"A_{step}.png")
-                    plt.close(fig)
-                    tqdm.write(f"Saved A matrix to {out_dir / f'A_{step}.png'}")
-                    if config.wandb_project:
-                        wandb.log(
-                            {
-                                "step": step,
-                                "lr": step_lr,
-                                "recon_loss": recon_loss[1:].mean().item(),
-                                "recon_loss_topk": recon_loss_topk[1:].mean().item(),
-                                "param_match_loss": param_match_loss[1:].mean().item(),
-                                "closeness": sum(closeness_vals[1:])
-                                / (model.config.n_instances - 1),
-                                "A_matrix": wandb.Image(fig),
-                            },
-                            step=step,
-                        )
+#                     fig.savefig(out_dir / f"A_{step}.png")
+#                     plt.close(fig)
+#                     tqdm.write(f"Saved A matrix to {out_dir / f'A_{step}.png'}")
+#                     if config.wandb_project:
+#                         wandb.log(
+#                             {
+#                                 "step": step,
+#                                 "lr": step_lr,
+#                                 "recon_loss": recon_loss[1:].mean().item(),
+#                                 "recon_loss_topk": recon_loss_topk[1:].mean().item(),
+#                                 "param_match_loss": param_match_loss[1:].mean().item(),
+#                                 "closeness": sum(closeness_vals[1:])
+#                                 / (model.config.n_instances - 1),
+#                                 "A_matrix": wandb.Image(fig),
+#                             },
+#                             step=step,
+#                         )
 
-            recon_loss = recon_loss.mean()
-            recon_loss_topk = recon_loss_topk.mean()
-            param_match_loss = param_match_loss.mean()
+#             recon_loss = recon_loss.mean()
+#             recon_loss_topk = recon_loss_topk.mean()
+#             param_match_loss = param_match_loss.mean()
 
-            if pretrained_model_path:
-                loss = param_match_loss + config.topk_coeff * recon_loss_topk
-            else:
-                loss = recon_loss + config.topk_coeff * recon_loss_topk
+#             if pretrained_model_path:
+#                 loss = param_match_loss + config.topk_coeff * recon_loss_topk
+#             else:
+#                 loss = recon_loss + config.topk_coeff * recon_loss_topk
 
-        loss.backward()
-        assert model.A.grad is not None
-        # Don't update the gradient of the 0th instance (which we fixed to be the identity)
-        model.A.grad[0] = torch.zeros_like(model.A.grad[0])
-        opt.step()
+#         loss.backward()
+#         assert model.A.grad is not None
+#         # Don't update the gradient of the 0th instance (which we fixed to be the identity)
+#         model.A.grad[0] = torch.zeros_like(model.A.grad[0])
+#         opt.step()
 
-    torch.save(model.state_dict(), out_dir / "model.pth")
-    if config.wandb_project:
-        wandb.save(str(out_dir / "model.pth"))
+#     torch.save(model.state_dict(), out_dir / "model.pth")
+#     if config.wandb_project:
+#         wandb.save(str(out_dir / "model.pth"))
 
 
 def get_run_name(config: Config) -> str:
@@ -361,10 +356,10 @@ def get_run_name(config: Config) -> str:
         run_suffix = (
             f"lr{config.lr}_"
             f"topk{config.topk}_"
-            f"topk_coeff{config.topk_coeff}_"
+            f"sp{config.max_sparsity_coeff}_"
             f"bs{config.batch_size}_"
-            f"ft{config.n_features}_"
-            f"hid{config.n_hidden}"
+            f"ft{config.task_config.n_features}_"
+            f"hid{config.task_config.n_hidden}"
         )
     return config.wandb_run_name_prefix + run_suffix
 
@@ -398,14 +393,35 @@ def main(
     out_dir.mkdir(parents=True, exist_ok=True)
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    model = Model(config=config, device=device)
+    model = TMSSPDModel(config=config.task_config, device=device)
 
+    pretrained_model = None
+    if config.task_config.pretrained_model_path:
+        pretrained_model = TMSModel(config=config.task_config, device=device)
+        pretrained_model.load_state_dict(
+            torch.load(config.task_config.pretrained_model_path, map_location=device)
+        )
+        pretrained_model.eval()
+
+    # TODO: Make dataloader independent of the model
+    class TMSDataLoader:
+        def __init__(self, model: TMSModel, batch_size: int):
+            self.model = model
+            self.batch_size = batch_size
+
+        def __iter__(self):
+            while True:
+                batch = self.model.generate_batch(self.batch_size)
+                yield batch, batch
+
+    dataloader = TMSDataLoader(model, config.batch_size)
     optimize(
         model=model,
         config=config,
         out_dir=out_dir,
         device=device,
-        pretrained_model_path=config.pretrained_model_path,
+        dataloader=dataloader,
+        pretrained_model=pretrained_model,
     )
 
     if config.wandb_project:

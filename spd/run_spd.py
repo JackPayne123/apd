@@ -23,6 +23,19 @@ from spd.types import RootPath
 from spd.utils import permute_to_identity
 
 
+class TMSConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    task_name: Literal["tms"] = "tms"
+    n_features: int | None = None
+    n_hidden: int | None = None
+    n_instances: int | None = None
+    k: int | None = None
+    feature_probability: float
+    train_bias: bool
+    bias_val: float
+    pretrained_model_path: RootPath
+
+
 class BoolCircuitConfig(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
     task_name: Literal["bool_circuit"] = "bool_circuit"
@@ -72,7 +85,7 @@ class Config(BaseModel):
     sparsity_loss_type: Literal["jacobian"] = "jacobian"
     loss_type: Literal["param_match", "behavioral"] = "param_match"
     sparsity_warmup_pct: float = 0.0
-    task_config: DeepLinearConfig | BoolCircuitConfig | PiecewiseConfig = Field(
+    task_config: DeepLinearConfig | BoolCircuitConfig | PiecewiseConfig | TMSConfig = Field(
         ..., discriminator="task_name"
     )
 

@@ -7,9 +7,10 @@ import einops
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
+from jaxtyping import Float
 from matplotlib import collections as mc
 from matplotlib import colors as mcolors
-from torch import nn
+from torch import Tensor, nn
 from torch.nn import functional as F
 from tqdm import trange
 
@@ -26,9 +27,10 @@ class Config:
 
     # We could potentially use torch.vmap instead.
     n_instances: int
+    feature_probability: float
 
 
-class Model(nn.Module):
+class TMSModel(nn.Module):
     def __init__(
         self,
         config: Config,
@@ -76,6 +78,10 @@ class Model(nn.Module):
         )
         return batch
 
+    def all_decomposable_params(self) -> list[Float[Tensor, "..."]]:
+        """List of all parameters which will be decomposed with SPD."""
+        return [self.W]
+
 
 def linear_lr(step: int, steps: int) -> float:
     return 1 - (step / steps)
@@ -90,7 +96,7 @@ def cosine_decay_lr(step: int, steps: int) -> float:
 
 
 def optimize(
-    model: Model,
+    model: TMSModel,
     n_batch: int = 1024,
     steps: int = 10_000,
     print_freq: int = 100,
@@ -128,7 +134,7 @@ def optimize(
                 )
 
 
-def plot_intro_diagram(model: Model, filepath: Path) -> None:
+def plot_intro_diagram(model: TMSModel, filepath: Path) -> None:
     cfg = model.config
     WA = model.W.detach()
     N = len(WA[:, 0])
@@ -166,9 +172,10 @@ if __name__ == "__main__":
         n_features=5,
         n_hidden=2,
         n_instances=12,
+        feature_probability=0.05,
     )
 
-    model = Model(
+    model = TMSModel(
         config=config,
         device=device,
         # Exponential feature importance curve from 1 to 1/100
@@ -177,7 +184,8 @@ if __name__ == "__main__":
         # Sweep feature frequency across the instances from 1 (fully dense) to 1/20
         # feature_probability=(20 ** -torch.linspace(0, 1, config.n_instances))[:, None],
         # Make all features appear with probability 1/20
-        feature_probability=torch.ones((config.n_instances, config.n_features), device=device) / 20,
+        feature_probability=torch.ones((config.n_instances, config.n_features), device=device)
+        * config.feature_probability,
     )
     optimize(model)
 
