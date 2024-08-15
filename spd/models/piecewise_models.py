@@ -704,7 +704,7 @@ class PiecewiseFunctionSPDTransformer(SPDModel):
         # Input layer
         self.mlps[0].linear1.A.data[:k, :] = torch.eye(k)
         self.mlps[0].linear1.A.data[-1, :] = torch.zeros(k)
-        self.mlps[0].linear1.B.data = target_transformer.mlps[0].input_layer.weight.T[:k, :]
+        self.mlps[0].linear1.B.data[:, :] = target_transformer.mlps[0].input_layer.weight.T[:k, :]
         # Output layer
         original_Wout_last_col = target_transformer.mlps[0].output_layer.weight.T[:, -1]
         norm = torch.norm(original_Wout_last_col, dim=0)
