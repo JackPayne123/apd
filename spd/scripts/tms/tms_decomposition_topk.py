@@ -137,18 +137,48 @@ class Model(nn.Module):
         return out, h_0, h_1, hidden, pre_relu, normed_A
 
     def generate_batch(self, n_batch: int) -> torch.Tensor:
-        feat = torch.rand(
-            (n_batch, self.config.n_instances, self.config.n_features), device=self.A.device
+        device = self.A.device
+
+        # Generate random features
+        feat = torch.rand((n_batch, self.config.n_instances, self.config.n_features), device=device)
+
+        # Generate mask for which features to keep
+        mask = (
+            torch.rand((n_batch, self.config.n_instances, self.config.n_features), device=device)
+            <= self.feature_probability
         )
 
-        batch = torch.where(
-            torch.rand(
-                (n_batch, self.config.n_instances, self.config.n_features), device=self.A.device
+        # Ensure at least one feature is nonzero for each instance
+        zero_instances = torch.all(~mask, dim=2)
+        if zero_instances.any():
+            # Generate random feature indices for zero instances
+            random_feature = torch.randint(
+                0, self.config.n_features, (n_batch, self.config.n_instances), device=device
             )
-            <= self.feature_probability,
-            feat,
-            torch.zeros((), device=self.A.device),
-        )
+
+            # Create indexing tensors
+            batch_indices = (
+                torch.arange(n_batch, device=device)
+                .unsqueeze(1)
+                .expand(-1, self.config.n_instances)
+            )
+            instance_indices = (
+                torch.arange(self.config.n_instances, device=device)
+                .unsqueeze(0)
+                .expand(n_batch, -1)
+            )
+
+            # Filter indices for zero instances
+            zero_batch_indices = batch_indices[zero_instances]
+            zero_instance_indices = instance_indices[zero_instances]
+            zero_feature_indices = random_feature[zero_instances]
+
+            # Set mask to True for selected features of zero instances
+            mask[zero_batch_indices, zero_instance_indices, zero_feature_indices] = True
+
+        # Apply the mask to the features
+        batch = torch.where(mask, feat, torch.zeros(1, device=device))
+
         return batch
 
 
