@@ -22,7 +22,7 @@ from spd.models.linear_models import DeepLinearComponentModel
 from spd.models.tms_models import TMSSPDModel
 from spd.scripts.tms.tms_utils import plot_A_matrix
 from spd.types import RootPath
-from spd.utils import calculate_closeness_to_identity, permute_to_identity
+from spd.utils import permute_to_identity
 
 
 class TMSConfig(BaseModel):
@@ -357,12 +357,14 @@ def optimize(
             attribution_scores: Float[Tensor, "... k"] = torch.zeros_like(inner_acts[0])
             for feature_idx in range(out.shape[-1]):
                 feature_attributions: Float[Tensor, "... k"] = torch.zeros_like(inner_acts[0])
-                grads: tuple[Float[Tensor, "... k"], ...] = torch.autograd.grad(
+                feature_grads: tuple[Float[Tensor, "... k"], ...] = torch.autograd.grad(
                     out[..., feature_idx].sum(), inner_acts, retain_graph=True
                 )
-                assert len(grads) == len(inner_acts) == model.n_param_matrices
+                assert len(feature_grads) == len(inner_acts) == model.n_param_matrices
                 for param_matrix_idx in range(model.n_param_matrices):
-                    feature_attributions += grads[param_matrix_idx] + inner_acts[param_matrix_idx]
+                    feature_attributions += (
+                        feature_grads[param_matrix_idx] * inner_acts[param_matrix_idx]
+                    )
 
                 attribution_scores += feature_attributions**2
 
@@ -443,18 +445,14 @@ def optimize(
                 plt.close(fig)
                 tqdm.write(f"Saved inner_acts to {out_dir / f'inner_acts_{step}.png'}")
             elif isinstance(model, TMSSPDModel):
-                closeness_vals: list[float] = []
                 permuted_A_T_list: list[torch.Tensor] = []
                 for i in range(model.n_instances):
                     normed_A = model.A / model.A.norm(p=2, dim=-2, keepdim=True)
                     permuted_matrix = permute_to_identity(normed_A[i].T.abs())
-                    closeness = calculate_closeness_to_identity(permuted_matrix)
-                    closeness_vals.append(closeness)
                     permuted_A_T_list.append(permuted_matrix)
                 permuted_A_T = torch.stack(permuted_A_T_list, dim=0)
 
                 fig = plot_A_matrix(permuted_A_T, pos_only=True)
-
                 fig.savefig(out_dir / f"A_{step}.png")
                 plt.close(fig)
                 tqdm.write(f"Saved A matrix to {out_dir / f'A_{step}.png'}")
