@@ -369,7 +369,7 @@ def optimize(
                 attribution_scores += feature_attributions**2
 
             # Get the topk indices of the attribution scores
-            topk_indices = attribution_scores.abs().topk(config.topk, dim=-1).indices
+            topk_indices = attribution_scores.topk(config.topk, dim=-1).indices
 
             out_topk, layer_acts, inner_acts_topk = model.forward_topk(
                 batch, topk_indices=topk_indices
