@@ -354,18 +354,18 @@ def optimize(
             # First do a full forward pass and get the gradients w.r.t. inner_acts
             # Stage 1: Do a full forward pass and get the gradients w.r.t inner_acts
             out, _, inner_acts = model(batch)
-            all_grads = [torch.zeros_like(inner_acts[i]) for i in range(model.n_param_matrices)]
+            attribution_scores: Float[Tensor, "... k"] = torch.zeros_like(inner_acts[0])
             for feature_idx in range(out.shape[-1]):
-                grads = torch.autograd.grad(
+                feature_attributions: Float[Tensor, "... k"] = torch.zeros_like(inner_acts[0])
+                grads: tuple[Float[Tensor, "... k"], ...] = torch.autograd.grad(
                     out[..., feature_idx].sum(), inner_acts, retain_graph=True
                 )
+                assert len(grads) == len(inner_acts) == model.n_param_matrices
                 for param_matrix_idx in range(model.n_param_matrices):
-                    all_grads[param_matrix_idx] += grads[param_matrix_idx]
+                    feature_attributions += grads[param_matrix_idx] + inner_acts[param_matrix_idx]
 
-            assert len(inner_acts) == len(all_grads) == model.n_param_matrices
-            all_grads_stacked = torch.stack(all_grads, dim=0)
-            inner_acts_stacked = torch.stack(inner_acts, dim=0)
-            attribution_scores = (inner_acts_stacked * all_grads_stacked).sum(dim=0)
+                attribution_scores += feature_attributions**2
+
             # Get the topk indices of the attribution scores
             topk_indices = attribution_scores.abs().topk(config.topk, dim=-1).indices
 
