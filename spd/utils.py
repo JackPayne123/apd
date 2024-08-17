@@ -182,6 +182,8 @@ def init_param_(param: torch.Tensor) -> None:
 
 
 class BatchedDataLoader(DataLoader[tuple[torch.Tensor, torch.Tensor]]):
+    """DataLoader that generates batches by calling the dataset's `generate_batch` method."""
+
     def __init__(
         self,
         dataset: Dataset[tuple[torch.Tensor, torch.Tensor]],
