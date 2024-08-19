@@ -87,6 +87,7 @@ class Config(BaseModel):
     sparsity_loss_type: Literal["jacobian"] = "jacobian"
     loss_type: Literal["param_match", "behavioral"] = "param_match"
     sparsity_warmup_pct: float = 0.0
+    batch_topk: bool = False
     task_config: DeepLinearConfig | BoolCircuitConfig | PiecewiseConfig | TMSConfig = Field(
         ..., discriminator="task_name"
     )
@@ -295,7 +296,6 @@ def optimize(
     ), "Exactly one of pnorm and pnorm_end must be set"
 
     has_instance_dim = hasattr(model, "n_instances")
-
     if config.loss_type == "param_match":
         assert pretrained_model is not None, "Need a pretrained model for param_match loss"
         pretrained_model.requires_grad_(False)
@@ -367,7 +367,21 @@ def optimize(
             inner_acts_stacked = torch.stack(inner_acts, dim=0)
             attribution_scores = (inner_acts_stacked * all_grads_stacked).sum(dim=0)
             # Get the topk indices of the attribution scores
-            topk_indices = attribution_scores.abs().topk(config.topk, dim=-1).indices
+            if config.batch_topk:
+                assert (
+                    config.task_config.task_name == "piecewise"
+                ), "Batch topk only supported for piecewise"
+                assert attribution_scores.ndim == 2, "multiple instances not yet supported"
+                batchsize, k = attribution_scores.shape
+                flattened_attribution_scores = attribution_scores.flatten()
+                topk_indices = (
+                    flattened_attribution_scores.abs().topk(config.topk * batchsize).indices
+                )
+                boolean_attributions = torch.zeros_like(flattened_attribution_scores).bool()
+                boolean_attributions[topk_indices] = True
+                topk_indices = boolean_attributions.view(batchsize, -1)
+            else:
+                topk_indices = attribution_scores.abs().topk(config.topk, dim=-1).indices
 
             out_topk, layer_acts, inner_acts_topk = model.forward_topk(
                 batch, topk_indices=topk_indices

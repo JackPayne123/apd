@@ -1,5 +1,5 @@
 import torch
-from jaxtyping import Float, Int
+from jaxtyping import Bool, Float, Int
 from torch import Tensor, nn
 
 from spd.utils import init_param_
@@ -55,7 +55,7 @@ class ParamComponents(nn.Module):
     def forward_topk(
         self,
         x: Float[Tensor, "... dim1"],
-        topk_indices: Int[Tensor, "... topk"],
+        topk_indices: Int[Tensor, "... topk"] | Bool[Tensor, "... k"],
     ) -> tuple[Float[Tensor, "... dim2"], Float[Tensor, "... k"]]:
         """
         Performs a forward pass using only the top-k components.
@@ -68,12 +68,22 @@ class ParamComponents(nn.Module):
             out: Output tensor
             inner_acts: Component activations
         """
+
         normed_A = self.A / self.A.norm(p=2, dim=-2, keepdim=True)
         inner_acts = torch.einsum("bf,fk->bk", x, normed_A)
 
-        topk_values = inner_acts.gather(dim=-1, index=topk_indices)
-        inner_acts_topk = torch.zeros_like(inner_acts)
-        inner_acts_topk.scatter_(dim=-1, index=topk_indices, src=topk_values)
+        # check if topk_indices is a tensor of integers
+        if topk_indices.dtype == torch.int64:
+            # doing normal topk
+            topk_values = inner_acts.gather(dim=-1, index=topk_indices)
+            inner_acts_topk = torch.zeros_like(inner_acts)
+            inner_acts_topk.scatter_(dim=-1, index=topk_indices, src=topk_values)
+        elif topk_indices.dtype == torch.bool:
+            # doing batch_topk
+            inner_acts_topk = torch.zeros_like(inner_acts)
+            inner_acts_topk[topk_indices] = inner_acts[topk_indices]
+        else:
+            raise ValueError("topk_indices should be either of type int or bool")
 
         out = torch.einsum("bk,kg->bg", inner_acts_topk, self.B)
 
