@@ -462,16 +462,12 @@ def optimize(
                         "recon_loss": out_recon_loss.mean().item(),
                         "param_match_loss": param_match_loss.mean().item(),
                         "inner_acts": wandb.Image(fig) if fig else None,
+                        "l2_topk_penalty": l2_topk_penalty.item()
+                        if l2_topk_penalty is not None
+                        else None,
                     },
                     step=step,
                 )
-                if l2_topk_penalty is not None:
-                    wandb.log(
-                        {
-                            "l2_topk_penalty": l2_topk_penalty.item(),
-                        },
-                        step=step,
-                    )
 
         if config.save_freq is not None and step % config.save_freq == config.save_freq - 1:
             torch.save(model.state_dict(), out_dir / f"model_{step}.pth")
