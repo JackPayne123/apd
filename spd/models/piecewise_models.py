@@ -641,7 +641,6 @@ class PiecewiseFunctionSPDTransformer(SPDModel):
         super().__init__()
         self.n_inputs = n_inputs
         self.n_layers = n_layers
-        self.d_mlp = d_mlp
         self.k = k
         self.d_embed = self.n_inputs + 1 if d_embed is None else d_embed
         self.d_control = self.d_embed - 2
@@ -697,7 +696,6 @@ class PiecewiseFunctionSPDTransformer(SPDModel):
         assert self.n_layers == target_transformer.n_layers
         assert self.d_embed == target_transformer.d_embed
         assert self.d_control == target_transformer.d_control
-        # assert self.d_mlp == target_transformer.d_mlp
         assert self.n_layers == 1, "Only implemented for n_layers = 1"
         k = self.k
         d_mlp = target_transformer.d_mlp
