@@ -6,9 +6,10 @@ topk: 4
 max_sparsity_coeff: 1
 l2_topk_penalty_scale: 0.01
 lr: 5e-2
+weight_decay: 0.0
 batch_size: 2048
 steps: 20_000
-print_freq: 50
+print_freq: 200
 save_freq: 5_000
 lr_warmup_pct: 0.01
 loss_type: param_match
