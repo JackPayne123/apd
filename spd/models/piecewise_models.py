@@ -641,6 +641,7 @@ class PiecewiseFunctionSPDTransformer(SPDModel):
         super().__init__()
         self.n_inputs = n_inputs
         self.n_layers = n_layers
+        self.d_mlp = d_mlp
         self.k = k
         self.d_embed = self.n_inputs + 1 if d_embed is None else d_embed
         self.d_control = self.d_embed - 2

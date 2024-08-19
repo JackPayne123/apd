@@ -36,12 +36,15 @@ def get_run_name(config: Config) -> str:
         assert isinstance(config.task_config, PiecewiseConfig)
         run_suffix = (
             f"sp{config.max_sparsity_coeff}_"
+            f"l2{config.l2_topk_penalty_scale}_"
             f"lay{config.task_config.n_layers}_"
             f"lr{config.lr}_"
             f"p{config.pnorm}_"
             f"topk{config.topk}_"
-            f"bs{config.batch_size}_"
+            f"bs{config.batch_size}"
         )
+        if config.handcoded_AB:
+            run_suffix += "_hAB"
     return config.wandb_run_name_prefix + run_suffix
 
 

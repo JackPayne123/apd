@@ -10,7 +10,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import torch
 import wandb
-from jaxtyping import Float
+from jaxtyping import Float, Int
 from pydantic import BaseModel, ConfigDict, Field
 from torch import Tensor
 from torch.utils.data import DataLoader
@@ -73,6 +73,7 @@ class Config(BaseModel):
     loss_type: Literal["param_match", "behavioral"] = "param_match"
     sparsity_warmup_pct: float = 0.0
     handcoded_AB: bool = False
+    l2_topk_penalty_scale: float = 0.0
     task_config: DeepLinearConfig | BoolCircuitConfig | PiecewiseConfig = Field(
         ..., discriminator="task_name"
     )
@@ -266,6 +267,21 @@ def calc_recon_mse(
     return recon_loss
 
 
+def calc_l2_topk_penalty(
+    model: SPDModel, topk_indices: Int[Tensor, "... topk"], device: str
+) -> Float[Tensor, ""]:
+    batch_size = topk_indices.shape[0]
+    l2_topk_penalty = torch.zeros(batch_size, device=device)
+    for A, B in zip(model.all_As(), model.all_Bs(), strict=True):
+        normed_A = A / A.norm(p=2, dim=-2, keepdim=True)
+        A_topk = normed_A.T[topk_indices]
+        A_topk = A_topk.permute(0, 2, 1)
+        B_topk = B[topk_indices]
+        AB_topk = torch.einsum("...fk,...kg->...fg", A_topk, B_topk)
+        l2_topk_penalty = l2_topk_penalty + ((AB_topk) ** 2).mean(dim=(-2, -1))
+    return l2_topk_penalty.mean()
+
+
 def optimize(
     model: SPDModel,
     config: Config,
@@ -336,6 +352,7 @@ def optimize(
         )
 
         out_topk = None
+        l2_topk_penalty = None
         if config.topk is not None:
             # First do a full forward pass and get the gradients w.r.t. inner_acts
             # Stage 1: Do a full forward pass and get the gradients w.r.t inner_acts
@@ -359,6 +376,9 @@ def optimize(
                 batch, topk_indices=topk_indices
             )
             assert len(inner_acts_topk) == model.n_param_matrices
+            if config.l2_topk_penalty_scale > 0:
+                l2_topk_penalty = calc_l2_topk_penalty(model, topk_indices, device)
+
         else:
             out, layer_acts, inner_acts = model(batch)
 
@@ -370,6 +390,7 @@ def optimize(
             for i, (A, B) in enumerate(zip(model.all_As(), model.all_Bs(), strict=True)):
                 normed_A = A / A.norm(p=2, dim=-2, keepdim=True)
                 AB = torch.einsum("...fk,...kg->...fg", normed_A, B)
+
                 param_match_loss = param_match_loss + ((AB - pretrained_weights[i]) ** 2).mean(
                     dim=(-2, -1)
                 )
@@ -414,6 +435,8 @@ def optimize(
             tqdm.write(f"Current pnorm: {current_pnorm}")
             tqdm.write(f"Sparsity loss: \n{sparsity_loss}")
             tqdm.write(f"Reconstruction loss: \n{out_recon_loss}")
+            if l2_topk_penalty is not None:
+                tqdm.write(f"L2 topk penalty: \n{l2_topk_penalty}")
             if config.loss_type == "param_match":
                 param_match_loss_repr = (
                     param_match_loss.item() if len(param_match_loss) == 1 else param_match_loss
@@ -439,6 +462,9 @@ def optimize(
                         "recon_loss": out_recon_loss.mean().item(),
                         "param_match_loss": param_match_loss.mean().item(),
                         "inner_acts": wandb.Image(fig) if fig else None,
+                        "l2_topk_penalty": l2_topk_penalty.item()
+                        if l2_topk_penalty is not None
+                        else None,
                     },
                     step=step,
                 )
@@ -458,6 +484,9 @@ def optimize(
             loss = param_match_loss + sparsity_coeff * sparsity_loss
         else:
             loss = out_recon_loss + sparsity_coeff * sparsity_loss
+
+        if l2_topk_penalty is not None:
+            loss = loss + config.l2_topk_penalty_scale * l2_topk_penalty
 
         loss.backward()
         opt.step()

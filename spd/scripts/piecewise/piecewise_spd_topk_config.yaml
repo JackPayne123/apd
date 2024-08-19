@@ -1,15 +1,15 @@
-# wandb_project: spd-piecewise
+wandb_project: spd-piecewise
 wandb_run_name: null
-wandb_run_name_prefix: "jake_"
+wandb_run_name_prefix: "reproduce_good_"
 seed: 0
 topk: 4
-max_sparsity_coeff: 1e0
-batch_size: 2048
-steps: 2_000
-print_freq: 500
-save_freq: 10_000
+max_sparsity_coeff: 1
+l2_topk_penalty_scale: 0.01
 lr: 5e-2
-# lr_scale: linear_to_const
+batch_size: 2048
+steps: 20_000
+print_freq: 50
+save_freq: 5_000
 lr_warmup_pct: 0.01
 loss_type: param_match
 handcoded_AB: false
