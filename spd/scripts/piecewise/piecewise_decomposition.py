@@ -128,16 +128,16 @@ def main(
     )
     dataloader = DataLoader(dataset, batch_size=config.batch_size, shuffle=False)
 
-    # Evaluate the pretrained model on 5 batches to get the labels
+    # Evaluate the hardcoded model on 5 batches to get the labels
     n_batches = 5
     loss = 0
     for i, (batch, labels) in enumerate(dataloader):
         if i >= n_batches:
             break
-        pretrained_out = piecewise_model(batch.to(device))
-        loss += calc_recon_mse(pretrained_out, labels.to(device))
+        hardcoded_out = piecewise_model(batch.to(device))
+        loss += calc_recon_mse(hardcoded_out, labels.to(device))
     loss /= n_batches
-    logger.info(f"Loss of pretrained model on 5 batches: {loss}")
+    logger.info(f"Loss of hardcoded model on 5 batches: {loss}")
 
     optimize(
         model=piecewise_model_spd,
