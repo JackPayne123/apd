@@ -91,6 +91,7 @@ def main(
         range_min=config.task_config.range_min,
         range_max=config.task_config.range_max,
         seed=config.seed,
+        simple_bias=config.task_config.simple_bias,
     ).to(device)
     piecewise_model.eval()
 

@@ -135,11 +135,11 @@ class ControlledPiecewiseLinear(nn.Module):
         end: float,
         num_neurons: int,
         d_control: int,
+        simple_bias: bool,
         control_W_E: torch.Tensor | None = None,
         suppression_size: int = 100,
         rng: np.random.Generator | None = None,
         torch_gen: torch.Generator | None = None,
-        simple_bias: bool = False,
     ):
         super().__init__()
         self.functions = functions
@@ -301,10 +301,10 @@ class ControlledResNet(nn.Module):
         neurons_per_function: int,
         n_layers: int,
         d_control: int,
+        simple_bias: bool,
         suppression_size: int = 100,
         rng: np.random.Generator | None = None,
         torch_gen: torch.Generator | None = None,
-        simple_bias: bool = True,
     ):
         super().__init__()
         self.functions = functions
@@ -348,11 +348,11 @@ class ControlledResNet(nn.Module):
             self.end,
             self.num_neurons,
             self.d_control,
+            self.simple_bias,
             self.control_W_E,
             self.suppression_size,
             rng,
             torch_gen,
-            self.simple_bias,
         )
 
         # create a random permutation of the neurons
@@ -521,7 +521,7 @@ class PiecewiseFunctionTransformer(Model):
         range_min: float = 0,
         range_max: float = 5,
         seed: int | None = None,
-        simple_bias: bool = True,
+        simple_bias: bool = False,
     ) -> "PiecewiseFunctionTransformer":
         if seed is not None:
             # Create local random number generators
@@ -548,10 +548,10 @@ class PiecewiseFunctionTransformer(Model):
             neurons_per_function=neurons_per_function,
             n_layers=n_layers,
             d_control=d_embed - 2,  # no superpos
+            simple_bias=simple_bias,
             suppression_size=int(range_max + 1),
             rng=rng,
             torch_gen=torch_gen,
-            simple_bias=simple_bias,
         )
         # Copy the weights from the hand-coded model to the model
 
@@ -755,7 +755,7 @@ class PiecewiseFunctionSPDTransformer(SPDModel):
         inner_acts = []
         residual = self.W_E(x)
 
-        for i, layer in enumerate(self.mlps):
+        for layer in self.mlps:
             layer_out, layer_acts_i, inner_acts_i = layer.forward_topk(residual, topk_indices)
             residual = residual + layer_out
             layer_acts.extend(layer_acts_i)

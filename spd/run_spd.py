@@ -65,6 +65,7 @@ class PiecewiseConfig(BaseModel):
     range_min: float
     range_max: float
     k: int
+    simple_bias: bool = False
 
 
 class Config(BaseModel):
