@@ -43,7 +43,7 @@ def get_run_name(config: Config) -> str:
             f"topk{config.topk}_"
             f"bs{config.batch_size}"
         )
-        if config.handcoded_AB:
+        if config.task_config.handcoded_AB:
             run_suffix += "_hAB"
     return config.wandb_run_name_prefix + run_suffix
 
@@ -109,7 +109,7 @@ def main(
         input_biases=input_biases,
     ).to(device)
 
-    if config.handcoded_AB:
+    if config.task_config.handcoded_AB:
         logger.info("Setting handcoded A and B matrices (!)")
         piecewise_model_spd.set_handcoded_AB(piecewise_model)
 
@@ -137,7 +137,7 @@ def main(
         pretrained_out = piecewise_model(batch.to(device))
         loss += calc_recon_mse(pretrained_out, labels.to(device))
     loss /= n_batches
-    logger.info(f"Loss of pretrained model on 2 batches: {loss}")
+    logger.info(f"Loss of pretrained model on 5 batches: {loss}")
 
     optimize(
         model=piecewise_model_spd,

@@ -12,7 +12,6 @@ print_freq: 50
 save_freq: 5_000
 lr_warmup_pct: 0.01
 loss_type: param_match
-handcoded_AB: false
 task_config:
   task_name: piecewise
   n_functions: 10
@@ -22,3 +21,4 @@ task_config:
   range_min: 0
   range_max: 5
   k: 11
+  handcoded_AB: false
