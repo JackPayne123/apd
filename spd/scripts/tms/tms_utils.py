@@ -58,7 +58,27 @@ class TMSDataset(
     def generate_batch(
         self, batch_size: int
     ) -> tuple[Float[Tensor, "n_instances n_features"], Float[Tensor, "n_instances n_features"]]:
-        batch = torch.rand(batch_size, self.n_instances, self.n_features, device=self.device)
-        mask = torch.rand_like(batch) < self.feature_probability
-        batch = batch * mask
+        """Generate a batch of samples from the TMS distribution.
+
+        We only keep samples that have at least one non-zero feature.
+        """
+        # Combine batch_size and n_instances into a single dimension and then reshape at the end.
+        # This avoids multidim indexing.
+        n_elements = batch_size * self.n_instances
+        batch_elements: list[Float[Tensor, " n_elements n_features"]] = []
+        while len(batch_elements) < n_elements:
+            # Generate more than n_elements to avoid many calls to rand.
+            samples = torch.rand(n_elements * 5, self.n_features, device=self.device)
+            mask = torch.rand_like(samples) < self.feature_probability
+            # Only keep the samples that have at least one non-zero feature
+            mask = mask.any(dim=1)
+            batch_elements.extend(samples[mask])
+        batch_elements = batch_elements[:n_elements]
+        batch = torch.stack(batch_elements).reshape(batch_size, self.n_instances, self.n_features)
+        return batch, batch.clone().detach()
+
+        samples = torch.rand(batch_size, self.n_instances, self.n_features, device=self.device)
+        mask = torch.rand_like(samples) < self.feature_probability
+        batch = samples * mask
+        # Only keep the samples that have at least one non-zero feature
         return batch, batch.clone().detach()
