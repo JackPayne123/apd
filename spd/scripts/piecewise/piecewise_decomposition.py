@@ -36,7 +36,7 @@ def get_run_name(config: Config) -> str:
         assert isinstance(config.task_config, PiecewiseConfig)
         run_suffix = (
             f"sp{config.max_sparsity_coeff}_"
-            f"l2{config.l2_topk_penalty_scale}_"
+            f"l2{config.topk_l2_coeff}_"
             f"lay{config.task_config.n_layers}_"
             f"lr{config.lr}_"
             f"p{config.pnorm}_"
@@ -107,11 +107,11 @@ def main(
         n_layers=piecewise_model.n_layers,
         k=config.task_config.k,
         input_biases=input_biases,
-    ).to(device)
-
+    )
     if config.task_config.handcoded_AB:
         logger.info("Setting handcoded A and B matrices (!)")
         piecewise_model_spd.set_handcoded_AB(piecewise_model)
+    piecewise_model_spd.to(device)
 
     # Set requires_grad to False for all embeddings and all input biases
     for i in range(piecewise_model_spd.n_layers):
