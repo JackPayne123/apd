@@ -9,9 +9,11 @@ import numpy as np
 import torch
 from matplotlib import collections as mc
 from matplotlib import colors as mcolors
-from torch import nn
-from torch.nn import functional as F
 from tqdm import trange
+
+from spd.models.tms_models import TMSModel
+from spd.scripts.tms.tms_utils import TMSDataset
+from spd.utils import BatchedDataLoader
 
 
 # %%
@@ -26,55 +28,8 @@ class Config:
 
     # We could potentially use torch.vmap instead.
     n_instances: int
-
-
-class Model(nn.Module):
-    def __init__(
-        self,
-        config: Config,
-        feature_probability: torch.Tensor | None = None,
-        importance: torch.Tensor | None = None,
-        device: str = "cuda",
-    ):
-        super().__init__()
-        self.config = config
-        self.W = nn.Parameter(
-            torch.empty((config.n_instances, config.n_features, config.n_hidden), device=device)
-        )
-        nn.init.xavier_normal_(self.W)
-        self.b_final = nn.Parameter(
-            torch.zeros((config.n_instances, config.n_features), device=device)
-        )
-
-        if feature_probability is None:
-            feature_probability = torch.ones(())
-        self.feature_probability = feature_probability.to(device)
-        if importance is None:
-            importance = torch.ones(())
-        self.importance = importance.to(device)
-
-    def forward(self, features: torch.Tensor) -> torch.Tensor:
-        # features: [..., instance, n_features]
-        # W: [instance, n_features, n_hidden]
-        hidden = torch.einsum("...if,ifh->...ih", features, self.W)
-        out = torch.einsum("...ih,ifh->...if", hidden, self.W)
-        out = out + self.b_final
-        out = F.relu(out)
-        return out
-
-    def generate_batch(self, n_batch: int) -> torch.Tensor:
-        feat = torch.rand(
-            (n_batch, self.config.n_instances, self.config.n_features), device=self.W.device
-        )
-        batch = torch.where(
-            torch.rand(
-                (n_batch, self.config.n_instances, self.config.n_features), device=self.W.device
-            )
-            <= self.feature_probability,
-            feat,
-            torch.zeros((), device=self.W.device),
-        )
-        return batch
+    feature_probability: float
+    batch_size: int
 
 
 def linear_lr(step: int, steps: int) -> float:
@@ -90,27 +45,28 @@ def cosine_decay_lr(step: int, steps: int) -> float:
 
 
 def optimize(
-    model: Model,
-    n_batch: int = 1024,
+    model: TMSModel,
+    dataloader: BatchedDataLoader,
+    importance: float = 1.0,
     steps: int = 10_000,
     print_freq: int = 100,
     lr: float = 5e-3,
     lr_scale: Callable[[int, int], float] = linear_lr,
 ) -> None:
     hooks = []
-    cfg = model.config
 
     opt = torch.optim.AdamW(list(model.parameters()), lr=lr)
 
+    data_iter = iter(dataloader)
     with trange(steps) as t:
         for step in t:
             step_lr = lr * lr_scale(step, steps)
             for group in opt.param_groups:
                 group["lr"] = step_lr
             opt.zero_grad(set_to_none=True)
-            batch = model.generate_batch(n_batch)
+            batch, labels = next(data_iter)
             out = model(batch)
-            error = model.importance * (batch.abs() - out) ** 2
+            error = importance * (labels.abs() - out) ** 2
             loss = einops.reduce(error, "b i f -> i", "mean").sum()
             loss.backward()
             opt.step()
@@ -123,19 +79,19 @@ def optimize(
                     h(hook_data)
             if step % print_freq == 0 or (step + 1 == steps):
                 t.set_postfix(
-                    loss=loss.item() / cfg.n_instances,
+                    loss=loss.item() / model.n_instances,
                     lr=step_lr,
                 )
 
 
-def plot_intro_diagram(model: Model, filepath: Path) -> None:
-    cfg = model.config
+def plot_intro_diagram(model: TMSModel, filepath: Path) -> None:
     WA = model.W.detach()
     N = len(WA[:, 0])
     sel = range(config.n_instances)  # can be used to highlight specific sparsity levels
     plt.rcParams["axes.prop_cycle"] = plt.cycler(
         "color",
-        plt.cm.viridis(model.importance[0].cpu().numpy()),  # type: ignore
+        # plt.cm.viridis(model.importance[0].cpu().numpy()),  # type: ignore
+        plt.cm.viridis(np.array([1.0])),  # type: ignore
     )
     plt.rcParams["figure.dpi"] = 200
     fig, axs = plt.subplots(1, len(sel), figsize=(2 * len(sel), 2))
@@ -166,20 +122,25 @@ if __name__ == "__main__":
         n_features=5,
         n_hidden=2,
         n_instances=12,
+        feature_probability=0.05,
+        batch_size=1024,
     )
 
-    model = Model(
-        config=config,
+    model = TMSModel(
+        n_instances=config.n_instances,
+        n_features=config.n_features,
+        n_hidden=config.n_hidden,
         device=device,
-        # Exponential feature importance curve from 1 to 1/100
-        # importance=(0.9 ** torch.arange(config.n_features))[None, :],
-        importance=(1.0 ** torch.arange(config.n_features))[None, :],
-        # Sweep feature frequency across the instances from 1 (fully dense) to 1/20
-        # feature_probability=(20 ** -torch.linspace(0, 1, config.n_instances))[:, None],
-        # Make all features appear with probability 1/20
-        feature_probability=torch.ones((config.n_instances, config.n_features), device=device) / 20,
     )
-    optimize(model)
+
+    dataset = TMSDataset(
+        n_instances=config.n_instances,
+        n_features=config.n_features,
+        feature_probability=config.feature_probability,
+        device=device,
+    )
+    dataloader = BatchedDataLoader(dataset, batch_size=config.batch_size)
+    optimize(model, dataloader=dataloader)
 
     out_dir = Path(__file__).parent / "out"
     out_dir.mkdir(parents=True, exist_ok=True)
