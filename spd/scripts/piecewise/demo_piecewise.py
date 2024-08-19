@@ -1,3 +1,4 @@
+# %%
 from collections.abc import Callable
 
 import numpy as np
@@ -67,10 +68,11 @@ test = PiecewiseFunctionTransformer.from_handcoded(
     n_layers=2,
     range_min=0,
     range_max=5,
+    simple_bias=False,
 )
 
 # test.plot(-0.1, 5.1, 1000, control_bits=control_bits, functions=functions)
-test.plot_multiple(start=-0, end=5.1, num_points=200, functions=functions, prob=feature_probability)
+test.plot_multiple(start=-0, end=5.0, num_points=200, functions=functions, prob=feature_probability)
 
 # %%
 from torch.utils.data import DataLoader

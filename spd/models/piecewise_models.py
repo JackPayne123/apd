@@ -1,3 +1,4 @@
+# %%
 import json
 from collections.abc import Callable, Iterable, Sequence
 from pathlib import Path
@@ -13,6 +14,7 @@ from spd.models.base import Model, SPDModel
 from spd.models.bool_circuit_models import MLPComponents
 
 
+# %%
 def initialize_embeds(
     W_E: nn.Linear,
     W_U: nn.Linear,
@@ -134,9 +136,10 @@ class ControlledPiecewiseLinear(nn.Module):
         num_neurons: int,
         d_control: int,
         control_W_E: torch.Tensor | None = None,
-        negative_suppression: int = 100,
+        suppression_size: int = 100,
         rng: np.random.Generator | None = None,
         torch_gen: torch.Generator | None = None,
+        simple_bias: bool = False,
     ):
         super().__init__()
         self.functions = functions
@@ -144,7 +147,7 @@ class ControlledPiecewiseLinear(nn.Module):
         self.start = start
         self.end = end
         self.num_neurons = num_neurons
-        self.negative_suppression = negative_suppression
+        self.suppression_size = suppression_size
         self.d_control = d_control
         self.control_W_E = control_W_E
         self.input_layer = nn.Linear(
@@ -154,10 +157,13 @@ class ControlledPiecewiseLinear(nn.Module):
         self.output_layer = nn.Linear(
             self.num_functions * self.num_neurons, self.num_functions, bias=True
         )
-        self.initialise_params(rng, torch_gen)
+        self.initialise_params(rng, torch_gen, simple_bias)
 
     def initialise_params(
-        self, rng: np.random.Generator | None = None, torch_gen: torch.Generator | None = None
+        self,
+        rng: np.random.Generator | None = None,
+        torch_gen: torch.Generator | None = None,
+        simple_bias: bool = True,
     ):
         if rng is None:
             rng = np.random.default_rng()
@@ -174,29 +180,36 @@ class ControlledPiecewiseLinear(nn.Module):
         self.piecewise_linears = [
             PiecewiseLinear(f, self.start, self.end, self.num_neurons) for f in self.functions
         ]
-        # initialise all weights and biases to 0
+        # initialise all weights to 0
         self.input_layer.weight.data = torch.zeros(
             self.num_functions * self.num_neurons, self.d_control + 1
         )
-        for i in range(self.num_functions):
-            piecewise_linear = self.piecewise_linears[i]
-            self.input_layer.bias.data[
-                i * self.num_neurons : (i + 1) * self.num_neurons
-            ] = -self.negative_suppression
-
-            self.input_layer.weight.data[i * self.num_neurons : (i + 1) * self.num_neurons, 0] = (
-                piecewise_linear.input_layer.weight.data.squeeze()
-            )
-            self.input_layer.weight.data[i * self.num_neurons : (i + 1) * self.num_neurons, 1:] += (
-                self.control_W_E[i]
-                * (self.negative_suppression + piecewise_linear.input_layer.bias.data.unsqueeze(1))
-            )
-
         self.output_layer.weight.data = torch.zeros(
             self.num_functions, self.num_functions * self.num_neurons
         )
         for i in range(self.num_functions):
             piecewise_linear = self.piecewise_linears[i]
+
+            self.input_layer.weight.data[i * self.num_neurons : (i + 1) * self.num_neurons, 0] = (
+                piecewise_linear.input_layer.weight.data.squeeze()
+            )
+            if simple_bias:
+                self.input_layer.bias.data[
+                    i * self.num_neurons : (i + 1) * self.num_neurons
+                ] = -self.suppression_size
+                self.input_layer.weight.data[
+                    i * self.num_neurons : (i + 1) * self.num_neurons, 1:
+                ] += self.control_W_E[i] * (
+                    self.suppression_size + piecewise_linear.input_layer.bias.data.unsqueeze(1)
+                )
+            else:
+                self.input_layer.bias.data[i * self.num_neurons : (i + 1) * self.num_neurons] = (
+                    piecewise_linear.input_layer.bias.data - self.suppression_size
+                )
+                self.input_layer.weight.data[
+                    i * self.num_neurons : (i + 1) * self.num_neurons, 1:
+                ] = self.control_W_E[i] * self.suppression_size
+
             self.output_layer.bias.data[i] = piecewise_linear.output_layer.bias.data
             self.output_layer.weight.data[i, i * self.num_neurons : (i + 1) * self.num_neurons] = (
                 piecewise_linear.output_layer.weight.data.squeeze()
@@ -288,9 +301,10 @@ class ControlledResNet(nn.Module):
         neurons_per_function: int,
         n_layers: int,
         d_control: int,
-        negative_suppression: int = 100,
+        suppression_size: int = 100,
         rng: np.random.Generator | None = None,
         torch_gen: torch.Generator | None = None,
+        simple_bias: bool = True,
     ):
         super().__init__()
         self.functions = functions
@@ -302,7 +316,8 @@ class ControlledResNet(nn.Module):
         self.n_layers = n_layers
         self.total_neurons = neurons_per_function * self.num_functions
         assert self.total_neurons % n_layers == 0, "num_neurons must be divisible by num layers"
-        self.negative_suppression = negative_suppression
+        self.suppression_size = suppression_size
+        self.simple_bias = simple_bias
 
         self.d_mlp = self.total_neurons // n_layers
         # d_model: one for x, one for each control bit, and one for y (the output of the controlled
@@ -334,9 +349,10 @@ class ControlledResNet(nn.Module):
             self.num_neurons,
             self.d_control,
             self.control_W_E,
-            self.negative_suppression,
+            self.suppression_size,
             rng,
             torch_gen,
+            self.simple_bias,
         )
 
         # create a random permutation of the neurons
@@ -505,6 +521,7 @@ class PiecewiseFunctionTransformer(Model):
         range_min: float = 0,
         range_max: float = 5,
         seed: int | None = None,
+        simple_bias: bool = True,
     ) -> "PiecewiseFunctionTransformer":
         if seed is not None:
             # Create local random number generators
@@ -531,9 +548,10 @@ class PiecewiseFunctionTransformer(Model):
             neurons_per_function=neurons_per_function,
             n_layers=n_layers,
             d_control=d_embed - 2,  # no superpos
-            negative_suppression=int(range_max + 1),
+            suppression_size=int(range_max + 1),
             rng=rng,
             torch_gen=torch_gen,
+            simple_bias=simple_bias,
         )
         # Copy the weights from the hand-coded model to the model
 
