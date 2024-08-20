@@ -11,7 +11,7 @@ import numpy as np
 import torch
 import wandb
 from einops import rearrange
-from jaxtyping import Float
+from jaxtyping import Float, Int
 from pydantic import BaseModel, ConfigDict, Field
 from torch import Tensor
 from torch.utils.data import DataLoader
@@ -19,11 +19,8 @@ from tqdm import tqdm
 
 from spd.log import logger
 from spd.models.base import Model, SPDModel
-from spd.models.linear_models import DeepLinearComponentModel
-from spd.models.tms_models import TMSSPDModel
-from spd.scripts.tms.tms_utils import plot_A_matrix
 from spd.types import RootPath
-from spd.utils import permute_to_identity
+from spd.utils import calc_attributions
 
 
 class TMSConfig(BaseModel):
@@ -66,6 +63,7 @@ class PiecewiseConfig(BaseModel):
     range_min: float
     range_max: float
     k: int
+    handcoded_AB: bool = False
 
 
 class Config(BaseModel):
@@ -89,6 +87,7 @@ class Config(BaseModel):
     loss_type: Literal["param_match", "behavioral"] = "param_match"
     sparsity_warmup_pct: float = 0.0
     batch_topk: bool = True
+    topk_l2_coeff: float = 0.0
     task_config: DeepLinearConfig | BoolCircuitConfig | PiecewiseConfig | TMSConfig = Field(
         ..., discriminator="task_name"
     )
@@ -144,157 +143,11 @@ def get_lr_with_warmup(
     return lr * lr_scale_fn(step - warmup_steps, steps - warmup_steps)
 
 
-def plot_inner_acts(
-    batch: Float[Tensor, "batch n_instances n_features"],
-    inner_acts: list[Float[Tensor, "batch n_instances k"]],
-) -> plt.Figure:
-    """Plot the inner acts for the first batch_elements in the batch.
-
-    The first row is the raw batch information, the following rows are the inner acts per layer.
-    """
-    n_layers = len(inner_acts)
-    n_instances = batch.shape[1]
-
-    fig, axs = plt.subplots(
-        n_layers + 1,
-        n_instances,
-        figsize=(2.5 * n_instances, 2.5 * (n_layers + 1)),
-        squeeze=False,
-        sharey=True,
-    )
-
-    cmap = "Blues"
-    # Add the batch data
-    for i in range(n_instances):
-        ax = axs[0, i]
-        data = batch[:, i, :].detach().cpu().float().numpy()
-        ax.matshow(data, vmin=0, vmax=np.max(data), cmap=cmap)
-
-        ax.set_title(f"Instance {i}")
-        if i == 0:
-            ax.set_ylabel("Inputs")
-        elif i == n_instances - 1:
-            ax.set_ylabel("batch_idx", rotation=-90, va="bottom", labelpad=15)
-            ax.yaxis.set_label_position("right")
-
-        # Set an xlabel for each plot
-        ax.set_xlabel("n_features")
-
-        ax.set_xticks([])
-        ax.set_yticks([])
-
-    # Add the inner acts
-    for layer in range(n_layers):
-        for i in range(n_instances):
-            ax = axs[layer + 1, i]
-            instance_data = inner_acts[layer][:, i, :].abs().detach().cpu().float().numpy()
-            ax.matshow(instance_data, vmin=0, vmax=np.max(instance_data), cmap=cmap)
-
-            if i == 0:
-                ax.set_ylabel(f"h_{layer}")
-            elif i == n_instances - 1:
-                ax.set_ylabel("batch_idx", rotation=-90, va="bottom", labelpad=15)
-                ax.yaxis.set_label_position("right")
-
-            if layer == n_layers - 1:
-                ax.set_xlabel("k")
-
-            ax.set_xticks([])
-            ax.set_yticks([])
-
-    plt.tight_layout()
-    return fig
-
-
-def collect_inner_act_data(
-    model: DeepLinearComponentModel,
-    device: str,
-    topk: int | None = None,
-    batch_topk: bool = False,
-) -> tuple[
-    Float[Tensor, "batch n_instances n_features"], list[Float[Tensor, "batch n_instances k"]]
-]:
-    """
-    Collect inner activation data for visualization.
-
-    This function creates a test batch using an identity matrix, passes it through the model,
-    and collects the inner activations. It then permutes the activations to align with the identity.
-
-    Args:
-        model (DeepLinearComponentModel): The model to collect data from.
-        device (str): The device to run computations on.
-        topk (int): The number of topk indices to use for the forward pass.
-        batch_topk (bool): Whether to use batch_topk or not.
-
-    Returns:
-        - The input test batch (identity matrix expanded over instance dimension).
-        - A list of permuted inner activations for each layer.
-
-    """
-    test_batch = einops.repeat(
-        torch.eye(model.n_features, device=device),
-        "b f -> b i f",
-        i=model.n_instances,
-    )
-
-    out, _, test_inner_acts = model(test_batch)
-    if topk is not None:
-        attribution_scores: Float[Tensor, "... k"] = torch.zeros_like(test_inner_acts[0])
-        for feature_idx in range(out.shape[-1]):
-            feature_attributions: Float[Tensor, "... k"] = torch.zeros_like(test_inner_acts[0])
-            feature_grads: tuple[Float[Tensor, "... k"], ...] = torch.autograd.grad(
-                out[..., feature_idx].sum(), test_inner_acts, retain_graph=True
-            )
-            assert len(feature_grads) == len(test_inner_acts) == model.n_param_matrices
-            for param_matrix_idx in range(model.n_param_matrices):
-                feature_attributions += (
-                    feature_grads[param_matrix_idx] * test_inner_acts[param_matrix_idx]
-                )
-
-            attribution_scores += feature_attributions**2
-
-        # Get the topk indices of the attribution scores
-        if batch_topk:
-            batchsize, n_instances, k = attribution_scores.shape
-            flattened_attribution_scores = rearrange(attribution_scores, "b i k -> i (b k)")
-            topk_integer_indices = (
-                flattened_attribution_scores.abs().topk(topk * batchsize, dim=-1).indices
-            )
-            boolean_attributions = torch.zeros_like(flattened_attribution_scores).bool()
-            all_instance_indices = torch.arange(
-                n_instances, device=topk_integer_indices.device, dtype=torch.int64
-            )
-            all_instance_indices = all_instance_indices.unsqueeze(1).broadcast_to(
-                topk_integer_indices.shape
-            )
-            all_instance_indices = all_instance_indices.flatten()
-            topk_integer_indices = topk_integer_indices.flatten()
-            boolean_attributions[all_instance_indices, topk_integer_indices] = True
-            topk_indices = boolean_attributions.reshape((n_instances, batchsize, -1))
-            topk_indices = rearrange(topk_indices, "i b k -> b i k")
-        else:
-            topk_indices = attribution_scores.topk(topk, dim=-1).indices
-
-        test_inner_acts = model.forward_topk(test_batch, topk_indices=topk_indices)[-1]
-        assert len(test_inner_acts) == model.n_param_matrices
-
-    test_inner_acts_permuted = []
-    for layer in range(model.n_layers):
-        test_inner_acts_layer_permuted = []
-        for i in range(model.n_instances):
-            test_inner_acts_layer_permuted.append(
-                permute_to_identity(test_inner_acts[layer][:, i, :].abs())
-            )
-        test_inner_acts_permuted.append(torch.stack(test_inner_acts_layer_permuted, dim=1))
-
-    return test_batch, test_inner_acts_permuted
-
-
 def calc_recon_mse(
     output: Float[Tensor, "... n_features"],
     labels: Float[Tensor, "... n_features"],
     has_instance_dim: bool = False,
-) -> Float[Tensor, ""]:
+) -> Float[Tensor, ""] | Float[Tensor, " n_instances"]:
     recon_loss = (output - labels) ** 2
     if recon_loss.ndim == 3:
         assert has_instance_dim
@@ -306,6 +159,52 @@ def calc_recon_mse(
     return recon_loss
 
 
+def calc_topk_l2(
+    model: SPDModel,
+    topk_indices: Int[Tensor, "... topk"],
+    device: str,
+) -> Float[Tensor, ""] | Float[Tensor, " n_instances"]:
+    """Calculate the L2 of the sum of the topk subnetworks.
+
+    Args:
+        model (SPDModel): The model to calculate the L2 penalty for.
+        topk_indices (Int[Tensor, "batch ... topk"]): The topk indices to use for the L2 penalty.
+            Will contain an n_instances dimension if the model has an n_instances dimension.
+        device (str): The device to run computations on.
+
+    Returns:
+        The L2 penalty for the topk subnetworks. One value for each n_instance (used in tms and
+            deep linear toy models).
+    """
+    batch_size = topk_indices.shape[0]
+    n_instances = topk_indices.shape[1] if topk_indices.ndim == 3 else None
+    accumulate_shape = (batch_size,) if n_instances is None else (batch_size, n_instances)
+
+    topk_l2_penalty = torch.zeros(accumulate_shape, device=device)
+    for A, B in zip(model.all_As(), model.all_Bs(), strict=True):
+        n_features = A.shape[-2]
+        n_hidden = B.shape[-1]
+        # normed_A: [n_features, k] or [n_instances, n_features, k]
+        # B: [k, n_hidden] or [n_instances, k, n_hidden]
+        # topk_indices: [batch, topk] or [batch, n_instances, topk]
+        expanded_topk_indices_A = einops.repeat(topk_indices, "b ... t -> b ... f t", f=n_features)
+        expanded_A = einops.repeat(A, "... f k -> b ... f k", b=batch_size)
+        A_topk: Float[Tensor, "batch ... n_features topk"] = expanded_A.gather(
+            dim=-1, index=expanded_topk_indices_A
+        )
+
+        expanded_topk_indices_B = einops.repeat(topk_indices, "b ... t -> b ... h t", h=n_hidden)
+        expanded_B = einops.repeat(B, "... k h -> b ... h k", b=batch_size)
+        B_topk: Float[Tensor, "batch ... n_hidden topk"] = expanded_B.gather(
+            dim=-1, index=expanded_topk_indices_B
+        )
+
+        AB_topk = torch.einsum("...ft,...ht->...fh", A_topk, B_topk)
+        topk_l2_penalty = topk_l2_penalty + ((AB_topk) ** 2).mean(dim=(-2, -1))
+
+    return topk_l2_penalty.mean(dim=0)  # Mean over batch dim
+
+
 def optimize(
     model: SPDModel,
     config: Config,
@@ -313,6 +212,7 @@ def optimize(
     device: str,
     dataloader: DataLoader[tuple[Float[Tensor, "... n_features"], Float[Tensor, "... n_features"]]],
     pretrained_model: Model | None,
+    plot_results_fn: Callable[..., plt.Figure | None] | None = None,
 ) -> None:
     assert (
         (config.pnorm is None and config.pnorm_end is not None)
@@ -328,7 +228,8 @@ def optimize(
     else:
         pretrained_weights = None
 
-    opt = torch.optim.AdamW(model.parameters(), lr=config.lr)
+    # Note that we expect weight decay to be problematic for spd
+    opt = torch.optim.AdamW(model.parameters(), lr=config.lr, weight_decay=0.0)
 
     lr_scale_fn = get_lr_scale_fn(config.lr_scale)
 
@@ -359,8 +260,8 @@ def optimize(
             data_iter = iter(dataloader)
             batch, labels = next(data_iter)
 
-        batch = batch.to(dtype=torch.float32, device=device)
-        labels = labels.to(dtype=torch.float32, device=device)
+        batch = batch.to(device=device)
+        labels = labels.to(device=device)
 
         if pretrained_model is not None:
             labels = pretrained_model(batch)
@@ -375,23 +276,11 @@ def optimize(
         )
 
         out_topk = None
+        topk_l2_loss = None
         if config.topk is not None:
             # First do a full forward pass and get the gradients w.r.t. inner_acts
-            # Stage 1: Do a full forward pass and get the gradients w.r.t inner_acts
             out, _, inner_acts = model(batch)
-            attribution_scores: Float[Tensor, "... k"] = torch.zeros_like(inner_acts[0])
-            for feature_idx in range(out.shape[-1]):
-                feature_attributions: Float[Tensor, "... k"] = torch.zeros_like(inner_acts[0])
-                feature_grads: tuple[Float[Tensor, "... k"], ...] = torch.autograd.grad(
-                    out[..., feature_idx].sum(), inner_acts, retain_graph=True
-                )
-                assert len(feature_grads) == len(inner_acts) == model.n_param_matrices
-                for param_matrix_idx in range(model.n_param_matrices):
-                    feature_attributions += (
-                        feature_grads[param_matrix_idx] * inner_acts[param_matrix_idx]
-                    )
-
-                attribution_scores += feature_attributions**2
+            attribution_scores = calc_attributions(out, inner_acts)
 
             # Get the topk indices of the attribution scores
             if config.batch_topk:
@@ -428,10 +317,14 @@ def optimize(
             else:
                 topk_indices = attribution_scores.abs().topk(config.topk, dim=-1).indices
 
+            # Do a forward pass with only the topk subnetworks
             out_topk, layer_acts, inner_acts_topk = model.forward_topk(
                 batch, topk_indices=topk_indices
             )
             assert len(inner_acts_topk) == model.n_param_matrices
+            if config.topk_l2_coeff > 0:
+                topk_l2_loss = calc_topk_l2(model, topk_indices, device)
+
         else:
             out, layer_acts, inner_acts = model(batch)
 
@@ -477,7 +370,6 @@ def optimize(
             sparsity_loss = ((sparsity_loss.abs() + 1e-16) ** (current_pnorm * 0.5)).sum(dim=-1)
             sparsity_loss = sparsity_loss.mean(dim=0)  # Mean over batch dim
         else:
-            # Assert that out_topk is not unbound
             assert out_topk is not None
             sparsity_loss = calc_recon_mse(out_topk, labels, has_instance_dim)
 
@@ -486,6 +378,8 @@ def optimize(
             tqdm.write(f"Current pnorm: {current_pnorm}")
             tqdm.write(f"Sparsity loss: \n{sparsity_loss}")
             tqdm.write(f"Reconstruction loss: \n{out_recon_loss}")
+            if topk_l2_loss is not None:
+                tqdm.write(f"topk l2 loss: \n{topk_l2_loss}")
             if config.loss_type == "param_match":
                 param_match_loss_repr = (
                     param_match_loss.item() if len(param_match_loss) == 1 else param_match_loss
@@ -493,28 +387,10 @@ def optimize(
                 tqdm.write(f"Param match loss: \n{param_match_loss_repr}\n")
 
             fig = None
-            # TODO: Instead of isinstance, pass a function that produces the plots
-            if isinstance(model, DeepLinearComponentModel):
-                test_batch, test_inner_acts = collect_inner_act_data(
-                    model, device, config.topk, config.batch_topk
+            if plot_results_fn is not None:
+                fig = plot_results_fn(
+                    model=model, device=device, topk=config.topk, step=step, out_dir=out_dir
                 )
-
-                fig = plot_inner_acts(batch=test_batch, inner_acts=test_inner_acts)
-                fig.savefig(out_dir / f"inner_acts_{step}.png")
-                plt.close(fig)
-                tqdm.write(f"Saved inner_acts to {out_dir / f'inner_acts_{step}.png'}")
-            elif isinstance(model, TMSSPDModel):
-                permuted_A_T_list: list[torch.Tensor] = []
-                for i in range(model.n_instances):
-                    normed_A = model.A / model.A.norm(p=2, dim=-2, keepdim=True)
-                    permuted_matrix = permute_to_identity(normed_A[i].T.abs())
-                    permuted_A_T_list.append(permuted_matrix)
-                permuted_A_T = torch.stack(permuted_A_T_list, dim=0)
-
-                fig = plot_A_matrix(permuted_A_T, pos_only=True)
-                fig.savefig(out_dir / f"A_{step}.png")
-                plt.close(fig)
-                tqdm.write(f"Saved A matrix to {out_dir / f'A_{step}.png'}")
 
             if config.wandb_project:
                 wandb.log(
@@ -525,6 +401,9 @@ def optimize(
                         "sparsity_loss": sparsity_loss.mean().item(),
                         "recon_loss": out_recon_loss.mean().item(),
                         "param_match_loss": param_match_loss.mean().item(),
+                        "topk_l2_loss": topk_l2_loss.mean().item()
+                        if topk_l2_loss is not None
+                        else None,
                         "inner_acts": wandb.Image(fig) if fig else None,
                     },
                     step=step,
@@ -540,11 +419,15 @@ def optimize(
         out_recon_loss = out_recon_loss.mean()
         sparsity_loss = sparsity_loss.mean()
         param_match_loss = param_match_loss.mean()
+        topk_l2_loss = topk_l2_loss.mean() if topk_l2_loss is not None else None
 
         if config.loss_type == "param_match":
             loss = param_match_loss + sparsity_coeff * sparsity_loss
         else:
             loss = out_recon_loss + sparsity_coeff * sparsity_loss
+
+        if topk_l2_loss is not None:
+            loss = loss + config.topk_l2_coeff * topk_l2_loss
 
         loss.backward()
         opt.step()
