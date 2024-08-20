@@ -761,6 +761,7 @@ class PiecewiseFunctionSPDTransformer(SPDModel):
         residual = self.W_E(x)
 
         for i, layer in enumerate(self.mlps):
+            assert isinstance(layer, MLPComponents)
             layer_out, layer_acts_i, inner_acts_i = layer.forward_topk(residual, topk_indices)
             residual = residual + layer_out
             layer_acts.extend(layer_acts_i)

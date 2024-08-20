@@ -292,7 +292,8 @@ def calc_topk_l2(
 
     Args:
         model (SPDModel): The model to calculate the L2 penalty for.
-        topk_indices (Int[Tensor, "... topk"]): The topk indices to use for the L2 penalty.
+        topk_indices (Int[Tensor, "batch ... topk"]): The topk indices to use for the L2 penalty.
+            Will contain an n_instances dimension if the model has an n_instances dimension.
         device (str): The device to run computations on.
 
     Returns:
@@ -303,20 +304,15 @@ def calc_topk_l2(
     n_instances = topk_indices.shape[1] if topk_indices.ndim == 3 else None
     accumulate_shape = (batch_size,) if n_instances is None else (batch_size, n_instances)
 
-    l2_topk_penalty = torch.zeros(accumulate_shape, device=device)
-    l2_topk_penalty_2 = torch.zeros(accumulate_shape, device=device)
+    topk_l2_penalty = torch.zeros(accumulate_shape, device=device)
     for A, B in zip(model.all_As(), model.all_Bs(), strict=True):
-        # TODO: Remove normed_A when model.all_As() return the normed versions
-        normed_A = A / A.norm(p=2, dim=-2, keepdim=True)
-
-        ######### Method 1 #########
         n_features = A.shape[-2]
         n_hidden = B.shape[-1]
         # normed_A: [n_features, k] or [n_instances, n_features, k]
         # B: [k, n_hidden] or [n_instances, k, n_hidden]
         # topk_indices: [batch, topk] or [batch, n_instances, topk]
         expanded_topk_indices_A = einops.repeat(topk_indices, "b ... t -> b ... f t", f=n_features)
-        expanded_A = einops.repeat(normed_A, "... f k -> b ... f k", b=batch_size)
+        expanded_A = einops.repeat(A, "... f k -> b ... f k", b=batch_size)
         A_topk: Float[Tensor, "batch ... n_features topk"] = expanded_A.gather(
             dim=-1, index=expanded_topk_indices_A
         )
@@ -328,36 +324,9 @@ def calc_topk_l2(
         )
 
         AB_topk = torch.einsum("...ft,...ht->...fh", A_topk, B_topk)
-        new = (AB_topk) ** 2
-        l2_topk_penalty = l2_topk_penalty + ((AB_topk) ** 2).mean(dim=(-2, -1))
+        topk_l2_penalty = topk_l2_penalty + ((AB_topk) ** 2).mean(dim=(-2, -1))
 
-        ######### Method 2 #########
-        A_topk_2 = normed_A.T[topk_indices]
-        B_topk_2 = B[topk_indices]
-        AB_topk_2 = torch.einsum("...tf,...th->...fh", A_topk_2, B_topk_2)
-
-        new_2 = (AB_topk_2) ** 2
-        l2_topk_penalty_2 = l2_topk_penalty_2 + ((AB_topk_2) ** 2).mean(dim=(-2, -1))
-        assert torch.allclose(new, new_2)
-    # assert torch.allclose(l2_topk_penalty, l2_topk_penalty_2, atol=0, rtol=0)
-    assert torch.allclose(l2_topk_penalty, l2_topk_penalty_2)
-    return l2_topk_penalty.mean(dim=0)  # Mean over batch dim
-    # return l2_topk_penalty_2.mean(dim=0)  # Mean over batch dim
-
-
-# def calc_topk_l2(
-#     model: SPDModel, topk_indices: Int[Tensor, "... topk"], device: str
-# ) -> Float[Tensor, ""]:
-#     batch_size = topk_indices.shape[0]
-#     l2_topk_penalty = torch.zeros(batch_size, device=device)
-#     for A, B in zip(model.all_As(), model.all_Bs(), strict=True):
-#         normed_A = A / A.norm(p=2, dim=-2, keepdim=True)
-#         A_topk = normed_A.T[topk_indices]
-#         A_topk = A_topk.permute(0, 2, 1)
-#         B_topk = B[topk_indices]
-#         AB_topk = torch.einsum("...fk,...kg->...fg", A_topk, B_topk)
-#         l2_topk_penalty = l2_topk_penalty + ((AB_topk) ** 2).mean(dim=(-2, -1))
-#     return l2_topk_penalty.mean()
+    return topk_l2_penalty.mean(dim=0)  # Mean over batch dim
 
 
 def optimize(
@@ -414,8 +383,8 @@ def optimize(
             data_iter = iter(dataloader)
             batch, labels = next(data_iter)
 
-        batch = batch.to(dtype=torch.float32, device=device)
-        labels = labels.to(dtype=torch.float32, device=device)
+        batch = batch.to(device=device)
+        labels = labels.to(device=device)
 
         if pretrained_model is not None:
             labels = pretrained_model(batch)
@@ -430,7 +399,7 @@ def optimize(
         )
 
         out_topk = None
-        l2_topk_penalty = None
+        topk_l2_loss = None
         if config.topk is not None:
             # First do a full forward pass and get the gradients w.r.t. inner_acts
             # Stage 1: Do a full forward pass and get the gradients w.r.t inner_acts
@@ -455,7 +424,7 @@ def optimize(
             )
             assert len(inner_acts_topk) == model.n_param_matrices
             if config.topk_l2_coeff > 0:
-                l2_topk_penalty = calc_topk_l2(model, topk_indices, device)
+                topk_l2_loss = calc_topk_l2(model, topk_indices, device)
 
         else:
             out, layer_acts, inner_acts = model(batch)
@@ -511,8 +480,8 @@ def optimize(
             tqdm.write(f"Current pnorm: {current_pnorm}")
             tqdm.write(f"Sparsity loss: \n{sparsity_loss}")
             tqdm.write(f"Reconstruction loss: \n{out_recon_loss}")
-            if l2_topk_penalty is not None:
-                tqdm.write(f"L2 topk penalty: \n{l2_topk_penalty}")
+            if topk_l2_loss is not None:
+                tqdm.write(f"topk l2 loss: \n{topk_l2_loss}")
             if config.loss_type == "param_match":
                 param_match_loss_repr = (
                     param_match_loss.item() if len(param_match_loss) == 1 else param_match_loss
@@ -554,10 +523,10 @@ def optimize(
                         "sparsity_loss": sparsity_loss.mean().item(),
                         "recon_loss": out_recon_loss.mean().item(),
                         "param_match_loss": param_match_loss.mean().item(),
-                        "inner_acts": wandb.Image(fig) if fig else None,
-                        "l2_topk_penalty": l2_topk_penalty.mean().item()
-                        if l2_topk_penalty is not None
+                        "topk_l2_loss": topk_l2_loss.mean().item()
+                        if topk_l2_loss is not None
                         else None,
+                        "inner_acts": wandb.Image(fig) if fig else None,
                     },
                     step=step,
                 )
@@ -572,15 +541,15 @@ def optimize(
         out_recon_loss = out_recon_loss.mean()
         sparsity_loss = sparsity_loss.mean()
         param_match_loss = param_match_loss.mean()
-        l2_topk_penalty = l2_topk_penalty.mean() if l2_topk_penalty is not None else None
+        topk_l2_loss = topk_l2_loss.mean() if topk_l2_loss is not None else None
 
         if config.loss_type == "param_match":
             loss = param_match_loss + sparsity_coeff * sparsity_loss
         else:
             loss = out_recon_loss + sparsity_coeff * sparsity_loss
 
-        if l2_topk_penalty is not None:
-            loss = loss + config.topk_l2_coeff * l2_topk_penalty
+        if topk_l2_loss is not None:
+            loss = loss + config.topk_l2_coeff * topk_l2_loss
 
         loss.backward()
         opt.step()
