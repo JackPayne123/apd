@@ -6,7 +6,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import torch
 import torch.nn as nn
-from jaxtyping import Float, Int
+from jaxtyping import Bool, Float, Int
 from torch import Tensor
 
 from spd.models.base import Model, SPDModel
@@ -715,7 +715,9 @@ class PiecewiseFunctionSPDTransformer(SPDModel):
         return self.W_U(residual), layer_acts, inner_acts
 
     def forward_topk(
-        self, x: Float[Tensor, "... inputs"], topk_indices: Int[Tensor, "... topk"]
+        self,
+        x: Float[Tensor, "... inputs"],
+        topk_indices: Int[Tensor, "... topk"] | Bool[Tensor, "... k"],
     ) -> tuple[
         Float[Tensor, "... outputs"],
         list[Float[Tensor, "... d_embed"] | Float[Tensor, "... d_mlp"]],
@@ -726,7 +728,9 @@ class PiecewiseFunctionSPDTransformer(SPDModel):
 
         Args:
             x: Input tensor
-            topk_indices: Indices of the top-k components to keep
+            topk_indices: Indices of the top-k components to keep, if normal topk. If batch_topk,
+            then a boolean mask tensor of the same shape as the component activations, of the
+            components to keep.
 
         Returns:
             output: The output of the transformer
@@ -737,7 +741,7 @@ class PiecewiseFunctionSPDTransformer(SPDModel):
         inner_acts = []
         residual = self.W_E(x)
 
-        for i, layer in enumerate(self.mlps):
+        for _, layer in enumerate(self.mlps):
             layer_out, layer_acts_i, inner_acts_i = layer.forward_topk(residual, topk_indices)
             residual = residual + layer_out
             layer_acts.extend(layer_acts_i)

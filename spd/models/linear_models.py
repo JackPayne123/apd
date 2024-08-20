@@ -1,7 +1,7 @@
 from pathlib import Path
 
 import torch
-from jaxtyping import Float, Int
+from jaxtyping import Bool, Float, Int
 from torch import Tensor, nn
 
 from spd.models.base import Model, SPDModel
@@ -62,16 +62,27 @@ class ParamComponent(nn.Module):
     def forward_topk(
         self,
         x: Float[Tensor, "... n_instances n_features"],
-        topk_indices: Int[Tensor, "... topk"],
+        topk_indices: Int[Tensor, "... topk"] | Bool[Tensor, "... n_instances k"],
     ) -> tuple[Float[Tensor, "... n_instances n_features"], Float[Tensor, "... n_instances k"]]:
         normed_A = self.A / self.A.norm(p=2, dim=-2, keepdim=True)
         inner_acts = torch.einsum("bif,ifk->bik", x, normed_A)
 
         # Get values in inner_acts corresponding to topk_indices
-        topk_values = inner_acts.gather(dim=-1, index=topk_indices)
-        inner_acts_topk = torch.zeros_like(inner_acts)
-        inner_acts_topk.scatter_(dim=-1, index=topk_indices, src=topk_values)
+        if topk_indices.dtype == torch.int64:
+            # doing normal topk
+            topk_values = inner_acts.gather(dim=-1, index=topk_indices)
+            inner_acts_topk = torch.zeros_like(inner_acts)
+            inner_acts_topk.scatter_(dim=-1, index=topk_indices, src=topk_values)
+        elif topk_indices.dtype == torch.bool:
+            # doing batch_topk
+            assert topk_indices.shape == inner_acts.shape
+            inner_acts_topk = torch.zeros_like(inner_acts)
+            inner_acts_topk[topk_indices] = inner_acts[topk_indices]
+        else:
+            raise ValueError("topk_indices should be either of type int or bool")
+
         out = torch.einsum("bik,ikg->big", inner_acts_topk, self.B)
+
         return out, inner_acts_topk
 
 
@@ -120,7 +131,7 @@ class DeepLinearComponentModel(SPDModel):
     def forward_topk(
         self,
         x: Float[Tensor, "... n_instances n_features"],
-        topk_indices: Int[Tensor, "... topk"],
+        topk_indices: Int[Tensor, "... topk"] | Bool[Tensor, "... n_instances k"],
     ) -> tuple[
         Float[Tensor, "... n_instances n_features"],
         list[Float[Tensor, "... n_instances n_features"]],

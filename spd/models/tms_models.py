@@ -1,6 +1,6 @@
 import einops
 import torch
-from jaxtyping import Float, Int
+from jaxtyping import Bool, Float, Int
 from torch import Tensor, nn
 from torch.nn import functional as F
 
@@ -105,7 +105,7 @@ class TMSSPDModel(SPDModel):
     def forward_topk(
         self,
         x: Float[Tensor, "... i f"],
-        topk_indices: Int[Tensor, "... topk"],
+        topk_indices: Int[Tensor, "... topk"] | Bool[Tensor, "... n_instances k"],
     ) -> tuple[
         Float[Tensor, "... i f"],
         list[Float[Tensor, "... i f"]],
@@ -114,16 +114,29 @@ class TMSSPDModel(SPDModel):
         normed_A = self.A / self.A.norm(p=2, dim=-2, keepdim=True)
         h_0 = torch.einsum("...if,ifk->...ik", x, normed_A)
 
-        topk_values_0 = h_0.gather(dim=-1, index=topk_indices)
-        h_0_topk = torch.zeros_like(h_0)
-        h_0_topk.scatter_(dim=-1, index=topk_indices, src=topk_values_0)
+        if topk_indices.dtype == torch.int64:
+            topk_values_0 = h_0.gather(dim=-1, index=topk_indices)
+            h_0_topk = torch.zeros_like(h_0)
+            h_0_topk.scatter_(dim=-1, index=topk_indices, src=topk_values_0)
+        elif topk_indices.dtype == torch.bool:
+            assert topk_indices.shape == h_0.shape
+            h_0_topk = torch.zeros_like(h_0)
+            h_0_topk[topk_indices] = h_0[topk_indices]
+        else:
+            raise ValueError("topk_indices should be either of type int or bool")
 
         hidden_0 = torch.einsum("...ik,ikh->...ih", h_0_topk, self.B)
+
         h_1 = torch.einsum("...ih,ikh->...ik", hidden_0, self.B)
 
-        topk_values_1 = h_1.gather(dim=-1, index=topk_indices)
-        h_1_topk = torch.zeros_like(h_1)
-        h_1_topk.scatter_(dim=-1, index=topk_indices, src=topk_values_1)
+        if topk_indices.dtype == torch.int64:
+            topk_values_1 = h_1.gather(dim=-1, index=topk_indices)
+            h_1_topk = torch.zeros_like(h_1)
+            h_1_topk.scatter_(dim=-1, index=topk_indices, src=topk_values_1)
+        else:
+            assert topk_indices.shape == h_1.shape
+            h_1_topk = torch.zeros_like(h_1)
+            h_1_topk[topk_indices] = h_1[topk_indices]
 
         hidden_1 = torch.einsum("...ik,ifk->...if", h_1_topk, normed_A)
 

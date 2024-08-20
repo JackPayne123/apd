@@ -62,7 +62,9 @@ class ParamComponents(nn.Module):
 
         Args:
             x: Input tensor
-            topk_indices: Indices of the top-k components to keep
+            topk_indices: Indices of the top-k components to keep, if normal topk. If batch_topk,
+            then a boolean mask tensor of the same shape as the component activations, of the
+            components to keep.
 
         Returns:
             out: Output tensor
@@ -144,7 +146,9 @@ class MLPComponents(nn.Module):
         return x, layer_acts, inner_acts
 
     def forward_topk(
-        self, x: Float[Tensor, "... d_embed"], topk_indices: Int[Tensor, "... topk"]
+        self,
+        x: Float[Tensor, "... d_embed"],
+        topk_indices: Int[Tensor, "... topk"] | Bool[Tensor, "... k"],
     ) -> tuple[
         Float[Tensor, "... d_embed"],
         list[Float[Tensor, "... d_embed"] | Float[Tensor, "... d_mlp"]],
@@ -155,8 +159,9 @@ class MLPComponents(nn.Module):
 
         Args:
             x: Input tensor
-            topk_indices: Indices of the top-k components to keep
-
+            topk_indices: Indices of the top-k components to keep, if normal topk. If batch_topk,
+            then a boolean mask tensor of the same shape as the component activations, of the
+            components to keep.
         Returns:
             x: The output of the MLP
             layer_acts: The activations of each linear layer

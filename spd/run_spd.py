@@ -10,6 +10,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import torch
 import wandb
+from einops import rearrange
 from jaxtyping import Float
 from pydantic import BaseModel, ConfigDict, Field
 from torch import Tensor
@@ -87,7 +88,7 @@ class Config(BaseModel):
     sparsity_loss_type: Literal["jacobian"] = "jacobian"
     loss_type: Literal["param_match", "behavioral"] = "param_match"
     sparsity_warmup_pct: float = 0.0
-    batch_topk: bool = False
+    batch_topk: bool = True
     task_config: DeepLinearConfig | BoolCircuitConfig | PiecewiseConfig | TMSConfig = Field(
         ..., discriminator="task_name"
     )
@@ -209,6 +210,7 @@ def collect_inner_act_data(
     model: DeepLinearComponentModel,
     device: str,
     topk: int | None = None,
+    batch_topk: bool = False,
 ) -> tuple[
     Float[Tensor, "batch n_instances n_features"], list[Float[Tensor, "batch n_instances k"]]
 ]:
@@ -222,6 +224,7 @@ def collect_inner_act_data(
         model (DeepLinearComponentModel): The model to collect data from.
         device (str): The device to run computations on.
         topk (int): The number of topk indices to use for the forward pass.
+        batch_topk (bool): Whether to use batch_topk or not.
 
     Returns:
         - The input test batch (identity matrix expanded over instance dimension).
@@ -251,7 +254,26 @@ def collect_inner_act_data(
             attribution_scores += feature_attributions**2
 
         # Get the topk indices of the attribution scores
-        topk_indices = attribution_scores.topk(topk, dim=-1).indices
+        if batch_topk:
+            batchsize, n_instances, k = attribution_scores.shape
+            flattened_attribution_scores = rearrange(attribution_scores, "b i k -> i (b k)")
+            topk_integer_indices = (
+                flattened_attribution_scores.abs().topk(topk * batchsize, dim=-1).indices
+            )
+            boolean_attributions = torch.zeros_like(flattened_attribution_scores).bool()
+            all_instance_indices = torch.arange(
+                n_instances, device=topk_integer_indices.device, dtype=torch.int64
+            )
+            all_instance_indices = all_instance_indices.unsqueeze(1).broadcast_to(
+                topk_integer_indices.shape
+            )
+            all_instance_indices = all_instance_indices.flatten()
+            topk_integer_indices = topk_integer_indices.flatten()
+            boolean_attributions[all_instance_indices, topk_integer_indices] = True
+            topk_indices = boolean_attributions.reshape((n_instances, batchsize, -1))
+            topk_indices = rearrange(topk_indices, "i b k -> b i k")
+        else:
+            topk_indices = attribution_scores.topk(topk, dim=-1).indices
 
         test_inner_acts = model.forward_topk(test_batch, topk_indices=topk_indices)[-1]
         assert len(test_inner_acts) == model.n_param_matrices
@@ -373,18 +395,36 @@ def optimize(
 
             # Get the topk indices of the attribution scores
             if config.batch_topk:
-                assert (
-                    config.task_config.task_name == "piecewise"
-                ), "Batch topk only supported for piecewise"
-                assert attribution_scores.ndim == 2, "multiple instances not yet supported"
-                batchsize, k = attribution_scores.shape
-                flattened_attribution_scores = attribution_scores.flatten()
-                topk_indices = (
-                    flattened_attribution_scores.abs().topk(config.topk * batchsize).indices
-                )
-                boolean_attributions = torch.zeros_like(flattened_attribution_scores).bool()
-                boolean_attributions[topk_indices] = True
-                topk_indices = boolean_attributions.view(batchsize, -1)
+                if config.task_config.task_name == "piecewise":
+                    batchsize, k = attribution_scores.shape
+                    flattened_attribution_scores = attribution_scores.flatten()
+                    topk_integer_indices = (
+                        flattened_attribution_scores.abs().topk(config.topk * batchsize).indices
+                    )
+                    boolean_attributions = torch.zeros_like(flattened_attribution_scores).bool()
+                    boolean_attributions[topk_integer_indices] = True
+                    topk_indices = boolean_attributions.view(batchsize, -1)
+                else:
+                    batchsize, n_instances, k = attribution_scores.shape
+                    flattened_attribution_scores = rearrange(attribution_scores, "b i k -> i (b k)")
+                    topk_integer_indices = (
+                        flattened_attribution_scores.abs()
+                        .topk(config.topk * batchsize, dim=-1)
+                        .indices
+                    )
+                    boolean_attributions = torch.zeros_like(flattened_attribution_scores).bool()
+                    all_instance_indices = torch.arange(
+                        n_instances, device=topk_integer_indices.device, dtype=torch.int64
+                    )
+                    all_instance_indices = all_instance_indices.unsqueeze(1).broadcast_to(
+                        topk_integer_indices.shape
+                    )
+                    all_instance_indices = all_instance_indices.flatten()
+                    topk_integer_indices = topk_integer_indices.flatten()
+                    boolean_attributions[all_instance_indices, topk_integer_indices] = True
+                    topk_indices = boolean_attributions.reshape((n_instances, batchsize, -1))
+                    topk_indices = rearrange(topk_indices, "i b k -> b i k")
+
             else:
                 topk_indices = attribution_scores.abs().topk(config.topk, dim=-1).indices
 
@@ -455,7 +495,9 @@ def optimize(
             fig = None
             # TODO: Instead of isinstance, pass a function that produces the plots
             if isinstance(model, DeepLinearComponentModel):
-                test_batch, test_inner_acts = collect_inner_act_data(model, device, config.topk)
+                test_batch, test_inner_acts = collect_inner_act_data(
+                    model, device, config.topk, config.batch_topk
+                )
 
                 fig = plot_inner_acts(batch=test_batch, inner_acts=test_inner_acts)
                 fig.savefig(out_dir / f"inner_acts_{step}.png")
