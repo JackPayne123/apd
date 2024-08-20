@@ -22,6 +22,7 @@ from spd.scripts.linear.linear_dataset import DeepLinearDataset
 from spd.utils import (
     BatchedDataLoader,
     calc_attributions,
+    calc_topk_mask,
     init_wandb,
     load_config,
     permute_to_identity,
@@ -113,6 +114,7 @@ def collect_inner_act_data(
     model: DeepLinearComponentModel,
     device: str,
     topk: int | None = None,
+    batch_topk: bool = True,
 ) -> tuple[
     Float[Tensor, "batch n_instances n_features"], list[Float[Tensor, "batch n_instances k"]]
 ]:
@@ -141,11 +143,9 @@ def collect_inner_act_data(
     out, _, test_inner_acts = model(test_batch)
     if topk is not None:
         attribution_scores = calc_attributions(out, test_inner_acts)
+        topk_mask = calc_topk_mask(attribution_scores, topk, batch_topk=batch_topk)
 
-        # Get the topk indices of the attribution scores
-        topk_indices = attribution_scores.topk(topk, dim=-1).indices
-
-        test_inner_acts = model.forward_topk(test_batch, topk_indices=topk_indices)[-1]
+        test_inner_acts = model.forward_topk(test_batch, topk_mask=topk_mask)[-1]
         assert len(test_inner_acts) == model.n_param_matrices
 
     test_inner_acts_permuted = []
@@ -161,9 +161,15 @@ def collect_inner_act_data(
 
 
 def plot_subnetwork_activations(
-    model: DeepLinearComponentModel, device: str, topk: int | None, step: int, out_dir: Path, **_
+    model: DeepLinearComponentModel,
+    device: str,
+    topk: int | None,
+    step: int,
+    out_dir: Path,
+    batch_topk: bool,
+    **_,
 ) -> plt.Figure:
-    test_batch, test_inner_acts = collect_inner_act_data(model, device, topk)
+    test_batch, test_inner_acts = collect_inner_act_data(model, device, topk, batch_topk=batch_topk)
 
     fig = plot_inner_acts(batch=test_batch, inner_acts=test_inner_acts)
     fig.savefig(out_dir / f"inner_acts_{step}.png")
