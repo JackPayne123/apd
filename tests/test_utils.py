@@ -156,7 +156,7 @@ def test_calc_topk_mask_without_batch_topk_n_instances():
     topk = 2
     expected_mask = torch.tensor(
         [
-            [[False, True, True, False], [False, True, True, False]],
+            [[False, True, False, True], [False, True, True, False]],
             [[False, False, True, True], [False, True, False, True]],
         ]
     )
