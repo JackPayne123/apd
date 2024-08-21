@@ -127,7 +127,7 @@ def test_calc_attributions_two_inner_acts():
 
 def test_calc_topk_mask_without_batch_topk():
     attribution_scores = torch.tensor([[1.0, 5.0, 3.0, 2.0, 4.0], [2.0, 1.0, 5.0, 3.0, 4.0]])
-    topk = 2
+    topk = 2  # multiplied by batch size to get 4 over the full batch
     expected_mask = torch.tensor(
         [[False, True, False, False, True], [False, False, True, False, True]]
     )
