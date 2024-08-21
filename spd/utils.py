@@ -241,7 +241,8 @@ def calc_topk_mask(
 
     Args:
         attribution_scores: The attribution scores to calculate the top-k mask for.
-        topk: The number of top-k elements to select.
+        topk: The number of top-k elements to select. If `batch_topk` is True, this is multiplied
+            by the batch size to get the number of top-k elements over the whole batch.
         batch_topk: If True, the top-k mask is calculated over the concatenated batch and k
             dimensions.
 
@@ -252,7 +253,7 @@ def calc_topk_mask(
     if batch_topk:
         attribution_scores = einops.rearrange(attribution_scores, "b ... k -> ... (b k)")
 
-    topk_indices = attribution_scores.topk(topk, dim=-1).indices
+    topk_indices = attribution_scores.topk(int(topk * batch_size), dim=-1).indices
     topk_mask = torch.zeros_like(attribution_scores, dtype=torch.bool)
     topk_mask.scatter_(dim=-1, index=topk_indices, value=True)
 
