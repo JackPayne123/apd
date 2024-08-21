@@ -235,7 +235,7 @@ def calc_attributions(
 
 
 def calc_topk_mask(
-    attribution_scores: Float[Tensor, "batch ... k"], topk: int, batch_topk: bool
+    attribution_scores: Float[Tensor, "batch ... k"], topk: float, batch_topk: bool
 ) -> Float[Tensor, "batch ... k"]:
     """Calculate the top-k mask.
 
@@ -250,9 +250,10 @@ def calc_topk_mask(
         The top-k mask.
     """
     batch_size = attribution_scores.shape[0]
+    topk = int(topk * batch_size) if batch_topk else int(topk)
+
     if batch_topk:
         attribution_scores = einops.rearrange(attribution_scores, "b ... k -> ... (b k)")
-        topk = int(topk * batch_size)
 
     topk_indices = attribution_scores.topk(topk, dim=-1).indices
     topk_mask = torch.zeros_like(attribution_scores, dtype=torch.bool)

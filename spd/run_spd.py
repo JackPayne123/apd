@@ -3,7 +3,7 @@
 import json
 from collections.abc import Callable
 from pathlib import Path
-from typing import Literal
+from typing import Literal, Self
 
 import einops
 import matplotlib.pyplot as plt
@@ -11,7 +11,7 @@ import numpy as np
 import torch
 import wandb
 from jaxtyping import Bool, Float
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 from torch import Tensor
 from torch.utils.data import DataLoader
 from tqdm import tqdm
@@ -71,7 +71,7 @@ class Config(BaseModel):
     wandb_run_name: str | None = None
     wandb_run_name_prefix: str = ""
     seed: int = 0
-    topk: int | None = None
+    topk: float | None = None
     batch_topk: bool = True
     batch_size: int
     steps: int
@@ -90,6 +90,17 @@ class Config(BaseModel):
     task_config: DeepLinearConfig | BoolCircuitConfig | PiecewiseConfig | TMSConfig = Field(
         ..., discriminator="task_name"
     )
+
+    @model_validator(mode="after")
+    def validate_topk_batch_size(self) -> Self:
+        if self.topk is not None:
+            if self.batch_topk:
+                if not (self.batch_size * self.topk).is_integer():
+                    raise ValueError("batch_size * topk must be an integer when using batch_topk")
+            else:
+                if not self.topk.is_integer():
+                    raise ValueError("topk must be an integer when not using batch_topk")
+        return self
 
 
 def get_lr_scale_fn(
