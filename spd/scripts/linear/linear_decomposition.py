@@ -1,8 +1,6 @@
 """Linear decomposition script."""
 
-import time
 from pathlib import Path
-from tempfile import TemporaryDirectory
 
 import einops
 import fire
@@ -10,15 +8,14 @@ import matplotlib.pyplot as plt
 import numpy as np
 import torch
 import wandb
-import yaml
 from jaxtyping import Float
 from torch import Tensor
 from tqdm import tqdm
 
 from spd.log import logger
-from spd.models.linear_models import DeepLinearComponentModel, DeepLinearModel
 from spd.run_spd import Config, DeepLinearConfig, optimize
 from spd.scripts.linear.linear_dataset import DeepLinearDataset
+from spd.scripts.linear.models import DeepLinearComponentModel, DeepLinearModel
 from spd.utils import (
     BatchedDataLoader,
     calc_attributions,
@@ -26,6 +23,7 @@ from spd.utils import (
     init_wandb,
     load_config,
     permute_to_identity,
+    save_config_to_wandb,
     set_seed,
 )
 
@@ -185,16 +183,7 @@ def main(
 
     if config.wandb_project:
         config = init_wandb(config, config.wandb_project, sweep_config_path)
-        # Save the config to wandb
-        with TemporaryDirectory() as tmp_dir:
-            config_path = Path(tmp_dir) / "final_config.yaml"
-            with open(config_path, "w") as f:
-                yaml.dump(config.model_dump(mode="json"), f, indent=2)
-            wandb.save(str(config_path), policy="now", base_path=tmp_dir)
-            # Unfortunately wandb.save is async, so we need to wait for it to finish before
-            # continuing, and wandb python api provides no way to do this.
-            # TODO: Find a better way to do this.
-            time.sleep(1)
+        save_config_to_wandb(config)
 
     set_seed(config.seed)
     logger.info(config)

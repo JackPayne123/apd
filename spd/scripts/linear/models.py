@@ -44,7 +44,7 @@ class DeepLinearModel(Model):
         return [layer for layer in self.layers]
 
 
-class ParamComponent(nn.Module):
+class DeepLinearParamComponents(nn.Module):
     def __init__(self, n_instances: int, n_features: int, k: int):
         super().__init__()
         self.A = nn.Parameter(torch.empty(n_instances, n_features, k))
@@ -88,7 +88,7 @@ class DeepLinearComponentModel(SPDModel):
         self.k = k if k is not None else n_features
         self.layers = nn.ModuleList(
             [
-                ParamComponent(n_instances=n_instances, n_features=n_features, k=self.k)
+                DeepLinearParamComponents(n_instances=n_instances, n_features=n_features, k=self.k)
                 for _ in range(n_layers)
             ]
         )
@@ -127,7 +127,7 @@ class DeepLinearComponentModel(SPDModel):
         layer_acts = []
         inner_acts_topk = []
         for layer in self.layers:
-            assert isinstance(layer, ParamComponent)
+            assert isinstance(layer, DeepLinearParamComponents)
             x, inner_act_topk = layer.forward_topk(x, topk_mask)
             layer_acts.append(x)
             inner_acts_topk.append(inner_act_topk)
