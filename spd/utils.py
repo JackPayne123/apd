@@ -252,8 +252,9 @@ def calc_topk_mask(
     batch_size = attribution_scores.shape[0]
     if batch_topk:
         attribution_scores = einops.rearrange(attribution_scores, "b ... k -> ... (b k)")
+        topk = int(topk * batch_size)
 
-    topk_indices = attribution_scores.topk(int(topk * batch_size), dim=-1).indices
+    topk_indices = attribution_scores.topk(topk, dim=-1).indices
     topk_mask = torch.zeros_like(attribution_scores, dtype=torch.bool)
     topk_mask.scatter_(dim=-1, index=topk_indices, value=True)
 
