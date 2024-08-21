@@ -113,7 +113,7 @@ def plot_inner_acts(
 def collect_inner_act_data(
     model: DeepLinearComponentModel,
     device: str,
-    topk: int | None = None,
+    topk: float | None = None,
     batch_topk: bool = True,
 ) -> tuple[
     Float[Tensor, "batch n_instances n_features"], list[Float[Tensor, "batch n_instances k"]]
@@ -163,7 +163,7 @@ def collect_inner_act_data(
 def plot_subnetwork_activations(
     model: DeepLinearComponentModel,
     device: str,
-    topk: int | None,
+    topk: float | None,
     step: int,
     out_dir: Path,
     batch_topk: bool,
