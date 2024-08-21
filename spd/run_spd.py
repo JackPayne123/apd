@@ -180,13 +180,13 @@ def calc_topk_l2(
 
     topk_l2_penalty = torch.zeros(accumulate_shape, device=device)
     for A, B in zip(model.all_As(), model.all_Bs(), strict=True):
-        # A: [n_features, k] or [n_instances, n_features, k]
-        # B: [k, n_hidden] or [n_instances, k, n_hidden]
+        # A: [d_in, k] or [n_instances, d_in, k]
+        # B: [k, d_in] or [n_instances, k, d_in]
         # topk_mask: [batch, k] or [batch, n_instances, k]
 
         # We need to match the dimensions of A, B and topk_mask so broadcasting works
-        # The dimensions we need are [batch, n_instances, n_features/n_hidden, k] where
-        # n_instances is optional.
+        # The dimensions we need are [batch, n_instances, d_in or d_in, k] where
+        # n_instances is an optional dimension.
         rearranged_B = einops.rearrange(B, "... k h -> ... h k")
         rearranged_topk_mask = einops.rearrange(topk_mask, "b ... k -> b ... 1 k")
 
