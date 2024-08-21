@@ -137,10 +137,10 @@ def test_calc_topk_mask_without_batch_topk():
 
 
 def test_calc_topk_mask_with_batch_topk():
-    attribution_scores = torch.tensor([[1.0, 5.0, 3.0, 2.0, 4.0], [2.0, 1.0, 5.0, 3.0, 2.0]])
-    topk = 3
+    attribution_scores = torch.tensor([[1.0, 5.0, 3.0, 2.0, 4.0], [2.0, 1.0, 5.0, 2.0, 2.0]])
+    topk = 2  # mutliplied by batch size to get 4
     expected_mask = torch.tensor(
-        [[False, True, False, False, True], [False, False, True, False, False]]
+        [[False, True, True, False, True], [False, False, True, False, False]]
     )
 
     result = calc_topk_mask(attribution_scores, topk, batch_topk=True)
@@ -171,7 +171,7 @@ def test_calc_topk_mask_with_batch_topk_n_instances():
     attribution_scores = torch.tensor(
         [[[1.0, 5.0, 3.0], [2.0, 4.0, 6.0]], [[2.0, 1.0, 5.0], [3.0, 4.0, 1.0]]]
     )
-    topk = 4
+    topk = 2  # multiplied by batch size to get 4
     expected_mask = torch.tensor(
         [[[False, True, True], [False, True, True]], [[True, False, True], [True, True, False]]]
     )
