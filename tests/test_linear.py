@@ -5,7 +5,7 @@ from spd.scripts.linear.linear_dataset import DeepLinearDataset
 from spd.scripts.linear.models import DeepLinearComponentModel, DeepLinearModel
 from spd.scripts.linear.train_linear import Config as TrainConfig
 from spd.scripts.linear.train_linear import train
-from spd.utils import BatchedDataLoader
+from spd.utils import BatchedDataLoader, set_seed
 
 # Create a simple DeepLinear config that we can use in multiple tests
 DEEP_LINEAR_TASK_CONFIG = DeepLinearConfig(
@@ -18,6 +18,7 @@ DEEP_LINEAR_TASK_CONFIG = DeepLinearConfig(
 
 
 def deep_linear_decomposition_optimize_test(config: Config) -> None:
+    set_seed(0)
     device = "cpu"
     assert isinstance(config.task_config, DeepLinearConfig)
 
@@ -126,6 +127,7 @@ def test_deep_linear_lp() -> None:
 
 
 def test_train_linear_happy_path() -> None:
+    set_seed(0)
     device = "cpu"
     config = TrainConfig(
         n_features=2,

@@ -4,7 +4,7 @@ from spd.run_spd import Config, TMSConfig, optimize
 from spd.scripts.tms.models import TMSModel, TMSSPDModel
 from spd.scripts.tms.train_tms import TMSTrainConfig, train
 from spd.scripts.tms.utils import TMSDataset
-from spd.utils import BatchedDataLoader
+from spd.utils import BatchedDataLoader, set_seed
 
 # Create a simple TMS config that we can use in multiple tests
 TMS_TASK_CONFIG = TMSConfig(
@@ -20,6 +20,7 @@ TMS_TASK_CONFIG = TMSConfig(
 
 
 def tms_decomposition_optimize_test(config: Config):
+    set_seed(0)
     device = "cpu"
     assert isinstance(config.task_config, TMSConfig)
     model = TMSSPDModel(
@@ -132,6 +133,7 @@ def test_tms_lp():
 
 
 def test_train_tms_happy_path():
+    set_seed(0)
     # Set up a small configuration
     config = TMSTrainConfig(
         n_features=3, n_hidden=2, n_instances=2, feature_probability=0.1, batch_size=32
