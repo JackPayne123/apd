@@ -1,10 +1,13 @@
 import math
 import os
 import random
+import time
 from collections.abc import Iterator
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from typing import Any, TypeVar
 
+import einops
 import numpy as np
 import torch
 import wandb
@@ -177,6 +180,19 @@ def init_wandb(config: T, project: str, sweep_config_path: Path | str | None) ->
     return config
 
 
+def save_config_to_wandb(config: BaseModel, filename: str = "final_config.yaml") -> None:
+    # Save the config to wandb
+    with TemporaryDirectory() as tmp_dir:
+        config_path = Path(tmp_dir) / filename
+        with open(config_path, "w") as f:
+            yaml.dump(config.model_dump(mode="json"), f, indent=2)
+        wandb.save(str(config_path), policy="now", base_path=tmp_dir)
+        # Unfortunately wandb.save is async, so we need to wait for it to finish before
+        # continuing, and wandb python api provides no way to do this.
+        # TODO: Find a better way to do this.
+        time.sleep(1)
+
+
 def init_param_(param: torch.Tensor) -> None:
     torch.nn.init.kaiming_uniform_(param, a=math.sqrt(5))
 
@@ -200,3 +216,64 @@ class BatchedDataLoader(DataLoader[tuple[torch.Tensor, torch.Tensor]]):
     ) -> Iterator[tuple[torch.Tensor, torch.Tensor]]:
         for _ in range(len(self)):
             yield self.dataset.generate_batch(self.batch_size)  # type: ignore
+
+
+def calc_attributions(
+    out: Float[Tensor, "... out_dim"], inner_acts: list[Float[Tensor, "... k"]]
+) -> Float[Tensor, "... k"]:
+    """Calculate the sum of the (squared) attributions from each output dimension.
+
+    An attribution is the element-wise product of the gradient of the output dimension w.r.t. the
+    inner acts and the inner acts themselves.
+
+    Args:
+        out: The output of the model.
+        inner_acts: The inner acts of the model (i.e. the set of subnetwork activations for each
+            parameter matrix).
+
+    Returns:
+        The sum of the (squared) attributions from each output dimension.
+    """
+    attribution_scores: Float[Tensor, "... k"] = torch.zeros_like(inner_acts[0])
+    for feature_idx in range(out.shape[-1]):
+        feature_attributions: Float[Tensor, "... k"] = torch.zeros_like(inner_acts[0])
+        feature_grads: tuple[Float[Tensor, "... k"], ...] = torch.autograd.grad(
+            out[..., feature_idx].sum(), inner_acts, retain_graph=True
+        )
+        assert len(feature_grads) == len(inner_acts)
+        for param_matrix_idx in range(len(inner_acts)):
+            feature_attributions += feature_grads[param_matrix_idx] * inner_acts[param_matrix_idx]
+
+        attribution_scores += feature_attributions**2
+
+    return attribution_scores
+
+
+def calc_topk_mask(
+    attribution_scores: Float[Tensor, "batch ... k"], topk: float, batch_topk: bool
+) -> Float[Tensor, "batch ... k"]:
+    """Calculate the top-k mask.
+
+    Args:
+        attribution_scores: The attribution scores to calculate the top-k mask for.
+        topk: The number of top-k elements to select. If `batch_topk` is True, this is multiplied
+            by the batch size to get the number of top-k elements over the whole batch.
+        batch_topk: If True, the top-k mask is calculated over the concatenated batch and k
+            dimensions.
+
+    Returns:
+        The top-k mask.
+    """
+    batch_size = attribution_scores.shape[0]
+    topk = int(topk * batch_size) if batch_topk else int(topk)
+
+    if batch_topk:
+        attribution_scores = einops.rearrange(attribution_scores, "b ... k -> ... (b k)")
+
+    topk_indices = attribution_scores.topk(topk, dim=-1).indices
+    topk_mask = torch.zeros_like(attribution_scores, dtype=torch.bool)
+    topk_mask.scatter_(dim=-1, index=topk_indices, value=True)
+
+    if batch_topk:
+        topk_mask = einops.rearrange(topk_mask, "... (b k) -> b ... k", b=batch_size)
+    return topk_mask

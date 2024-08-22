@@ -1,24 +1,22 @@
 """Linear decomposition script."""
 
 import json
-import time
 from pathlib import Path
-from tempfile import TemporaryDirectory
 
 import fire
 import torch
 import wandb
-import yaml
 from torch.utils.data import DataLoader
 
 from spd.log import logger
-from spd.models.bool_circuit_models import BoolCircuitSPDTransformer, BoolCircuitTransformer
 from spd.run_spd import BoolCircuitConfig, Config, optimize
 from spd.scripts.bool_circuits.bool_circuit_dataset import BooleanCircuitDataset
 from spd.scripts.bool_circuits.bool_circuit_utils import form_circuit
+from spd.scripts.bool_circuits.models import BoolCircuitSPDTransformer, BoolCircuitTransformer
 from spd.utils import (
     init_wandb,
     load_config,
+    save_config_to_wandb,
     set_seed,
 )
 
@@ -35,6 +33,7 @@ def get_run_name(config: Config) -> str:
             f"lr{config.lr}_"
             f"p{config.pnorm}_"
             f"topk{config.topk}_"
+            f"topkl2{config.topk_l2_coeff}_"
             f"bs{config.batch_size}_"
         )
     return config.wandb_run_name_prefix + run_suffix
@@ -47,16 +46,7 @@ def main(
 
     if config.wandb_project:
         config = init_wandb(config, config.wandb_project, sweep_config_path)
-        # Save the config to wandb
-        with TemporaryDirectory() as tmp_dir:
-            config_path = Path(tmp_dir) / "final_config.yaml"
-            with open(config_path, "w") as f:
-                yaml.dump(config.model_dump(mode="json"), f, indent=2)
-            wandb.save(str(config_path), policy="now", base_path=tmp_dir)
-            # Unfortunately wandb.save is async, so we need to wait for it to finish before
-            # continuing, and wandb python api provides no way to do this.
-            # TODO: Find a better way to do this.
-            time.sleep(1)
+        save_config_to_wandb(config)
 
     set_seed(config.seed)
     logger.info(config)

@@ -3,26 +3,23 @@
 import json
 from collections.abc import Callable
 from pathlib import Path
-from typing import Literal
+from typing import Literal, Self
 
 import einops
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
 import wandb
-from jaxtyping import Float
-from pydantic import BaseModel, ConfigDict, Field
+from jaxtyping import Bool, Float
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 from torch import Tensor
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 from spd.log import logger
 from spd.models.base import Model, SPDModel
-from spd.models.linear_models import DeepLinearComponentModel
-from spd.models.tms_models import TMSSPDModel
-from spd.scripts.tms.tms_utils import plot_A_matrix
 from spd.types import RootPath
-from spd.utils import calculate_closeness_to_identity, permute_to_identity
+from spd.utils import calc_attributions, calc_topk_mask
 
 
 class TMSConfig(BaseModel):
@@ -66,6 +63,7 @@ class PiecewiseConfig(BaseModel):
     range_max: float
     k: int
     simple_bias: bool = False
+    handcoded_AB: bool = False
 
 
 class Config(BaseModel):
@@ -74,7 +72,8 @@ class Config(BaseModel):
     wandb_run_name: str | None = None
     wandb_run_name_prefix: str = ""
     seed: int = 0
-    topk: int | None = None
+    topk: float | None = None
+    batch_topk: bool = True
     batch_size: int
     steps: int
     print_freq: int
@@ -88,32 +87,32 @@ class Config(BaseModel):
     sparsity_loss_type: Literal["jacobian"] = "jacobian"
     loss_type: Literal["param_match", "behavioral"] = "param_match"
     sparsity_warmup_pct: float = 0.0
+    topk_l2_coeff: float = 0.0
     task_config: DeepLinearConfig | BoolCircuitConfig | PiecewiseConfig | TMSConfig = Field(
         ..., discriminator="task_name"
     )
 
-
-def linear_lr(step: int, steps: int) -> float:
-    return 1 - (step / steps)
-
-
-def constant_lr(*_: int) -> float:
-    return 1.0
-
-
-def cosine_decay_lr(step: int, steps: int) -> float:
-    return np.cos(0.5 * np.pi * step / (steps - 1))
+    @model_validator(mode="after")
+    def validate_topk_batch_size(self) -> Self:
+        if self.topk is not None:
+            if self.batch_topk:
+                if not (self.batch_size * self.topk).is_integer():
+                    raise ValueError("batch_size * topk must be an integer when using batch_topk")
+            else:
+                if not self.topk.is_integer():
+                    raise ValueError("topk must be an integer when not using batch_topk")
+        return self
 
 
 def get_lr_scale_fn(
     lr_scale: Literal["linear", "constant", "cosine"],
 ) -> Callable[[int, int], float]:
     if lr_scale == "linear":
-        return linear_lr
+        return lambda step, steps: 1 - (step / steps)
     elif lr_scale == "constant":
-        return constant_lr
+        return lambda *_: 1.0
     elif lr_scale == "cosine":
-        return cosine_decay_lr
+        return lambda step, steps: np.cos(0.5 * np.pi * step / (steps - 1))
     else:
         raise ValueError(f"Unknown lr_scale: {lr_scale}")
 
@@ -143,133 +142,11 @@ def get_lr_with_warmup(
     return lr * lr_scale_fn(step - warmup_steps, steps - warmup_steps)
 
 
-def plot_inner_acts(
-    batch: Float[Tensor, "batch n_instances n_features"],
-    inner_acts: list[Float[Tensor, "batch n_instances k"]],
-) -> plt.Figure:
-    """Plot the inner acts for the first batch_elements in the batch.
-
-    The first row is the raw batch information, the following rows are the inner acts per layer.
-    """
-    n_layers = len(inner_acts)
-    n_instances = batch.shape[1]
-
-    fig, axs = plt.subplots(
-        n_layers + 1,
-        n_instances,
-        figsize=(2.5 * n_instances, 2.5 * (n_layers + 1)),
-        squeeze=False,
-        sharey=True,
-    )
-
-    cmap = "Blues"
-    # Add the batch data
-    for i in range(n_instances):
-        ax = axs[0, i]
-        data = batch[:, i, :].detach().cpu().float().numpy()
-        ax.matshow(data, vmin=0, vmax=np.max(data), cmap=cmap)
-
-        ax.set_title(f"Instance {i}")
-        if i == 0:
-            ax.set_ylabel("Inputs")
-        elif i == n_instances - 1:
-            ax.set_ylabel("batch_idx", rotation=-90, va="bottom", labelpad=15)
-            ax.yaxis.set_label_position("right")
-
-        # Set an xlabel for each plot
-        ax.set_xlabel("n_features")
-
-        ax.set_xticks([])
-        ax.set_yticks([])
-
-    # Add the inner acts
-    for layer in range(n_layers):
-        for i in range(n_instances):
-            ax = axs[layer + 1, i]
-            instance_data = inner_acts[layer][:, i, :].abs().detach().cpu().float().numpy()
-            ax.matshow(instance_data, vmin=0, vmax=np.max(instance_data), cmap=cmap)
-
-            if i == 0:
-                ax.set_ylabel(f"h_{layer}")
-            elif i == n_instances - 1:
-                ax.set_ylabel("batch_idx", rotation=-90, va="bottom", labelpad=15)
-                ax.yaxis.set_label_position("right")
-
-            if layer == n_layers - 1:
-                ax.set_xlabel("k")
-
-            ax.set_xticks([])
-            ax.set_yticks([])
-
-    plt.tight_layout()
-    return fig
-
-
-def collect_inner_act_data(
-    model: DeepLinearComponentModel,
-    device: str,
-    topk: int | None = None,
-) -> tuple[
-    Float[Tensor, "batch n_instances n_features"], list[Float[Tensor, "batch n_instances k"]]
-]:
-    """
-    Collect inner activation data for visualization.
-
-    This function creates a test batch using an identity matrix, passes it through the model,
-    and collects the inner activations. It then permutes the activations to align with the identity.
-
-    Args:
-        model (DeepLinearComponentModel): The model to collect data from.
-        device (str): The device to run computations on.
-        topk (int): The number of topk indices to use for the forward pass.
-
-    Returns:
-        - The input test batch (identity matrix expanded over instance dimension).
-        - A list of permuted inner activations for each layer.
-
-    """
-    test_batch = einops.repeat(
-        torch.eye(model.n_features, device=device),
-        "b f -> b i f",
-        i=model.n_instances,
-    )
-
-    # Do forward and backward pass to get the attribution scores
-    out, _, test_inner_acts = model(test_batch)
-    if topk is not None:
-        all_grads = [torch.zeros_like(test_inner_acts[i]) for i in range(model.n_param_matrices)]
-        for feature_idx in range(out.shape[-1]):
-            grads = torch.autograd.grad(
-                out[..., feature_idx].sum(), test_inner_acts, retain_graph=True
-            )
-            for param_matrix_idx in range(model.n_param_matrices):
-                all_grads[param_matrix_idx] += grads[param_matrix_idx]
-
-        assert len(test_inner_acts) == len(all_grads) == model.n_param_matrices
-        all_grads_stacked = torch.stack(all_grads, dim=0)
-        inner_acts_stacked = torch.stack(test_inner_acts, dim=0)
-        attribution_scores = (inner_acts_stacked * all_grads_stacked).sum(dim=0)
-        # Get the topk indices of the attribution scores
-        topk_indices = attribution_scores.abs().topk(topk, dim=-1).indices
-        test_inner_acts = model.forward_topk(test_batch, topk_indices=topk_indices)[-1]
-
-    test_inner_acts_permuted = []
-    for layer in range(model.n_layers):
-        test_inner_acts_layer_permuted = []
-        for i in range(model.n_instances):
-            test_inner_acts_layer_permuted.append(
-                permute_to_identity(test_inner_acts[layer][:, i, :].abs())
-            )
-        test_inner_acts_permuted.append(torch.stack(test_inner_acts_layer_permuted, dim=1))
-
-    return test_batch, test_inner_acts_permuted
-
-
 def calc_recon_mse(
     output: Float[Tensor, "... n_features"],
     labels: Float[Tensor, "... n_features"],
     has_instance_dim: bool = False,
-) -> Float[Tensor, ""]:
+) -> Float[Tensor, ""] | Float[Tensor, " n_instances"]:
     recon_loss = (output - labels) ** 2
     if recon_loss.ndim == 3:
         assert has_instance_dim
@@ -281,6 +158,49 @@ def calc_recon_mse(
     return recon_loss
 
 
+def calc_topk_l2(
+    model: SPDModel,
+    topk_mask: Bool[Tensor, "... k"],
+    device: str,
+) -> Float[Tensor, ""] | Float[Tensor, " n_instances"]:
+    """Calculate the L2 of the sum of the topk subnetworks.
+
+    Args:
+        model (SPDModel): The model to calculate the L2 penalty for.
+        topk_mask (Bool[Tensor, "batch ... k"]): The topk mask to use for the L2 penalty.
+            Will contain an n_instances dimension if the model has an n_instances dimension.
+        device (str): The device to run computations on.
+
+    Returns:
+        The L2 penalty for the topk subnetworks. One value for each n_instance (used in tms and
+            deep linear toy models).
+    """
+    batch_size = topk_mask.shape[0]
+    n_instances = topk_mask.shape[1] if topk_mask.ndim == 3 else None
+    accumulate_shape = (batch_size,) if n_instances is None else (batch_size, n_instances)
+
+    topk_l2_penalty = torch.zeros(accumulate_shape, device=device)
+    for A, B in zip(model.all_As(), model.all_Bs(), strict=True):
+        # A: [d_in, k] or [n_instances, d_in, k]
+        # B: [k, d_in] or [n_instances, k, d_in]
+        # topk_mask: [batch, k] or [batch, n_instances, k]
+
+        # We need to match the dimensions of A, B and topk_mask so broadcasting works
+        # The dimensions we need are [batch, n_instances, d_in or d_in, k] where
+        # n_instances is an optional dimension.
+        rearranged_B = einops.rearrange(B, "... k h -> ... h k")
+        rearranged_topk_mask = einops.rearrange(topk_mask, "b ... k -> b ... 1 k")
+
+        A_topk = A * rearranged_topk_mask
+        B_topk = rearranged_B * rearranged_topk_mask
+        AB_topk = torch.einsum("...fk,...hk->...fh", A_topk, B_topk)
+
+        topk_l2_penalty = topk_l2_penalty + ((AB_topk) ** 2).mean(dim=(-2, -1))
+
+    # Mean over batch_dim and divide by number of parameter matrices we iterated over
+    return topk_l2_penalty.mean(dim=0) / model.n_param_matrices
+
+
 def optimize(
     model: SPDModel,
     config: Config,
@@ -288,6 +208,7 @@ def optimize(
     device: str,
     dataloader: DataLoader[tuple[Float[Tensor, "... n_features"], Float[Tensor, "... n_features"]]],
     pretrained_model: Model | None,
+    plot_results_fn: Callable[..., plt.Figure | None] | None = None,
 ) -> None:
     assert (
         (config.pnorm is None and config.pnorm_end is not None)
@@ -296,7 +217,6 @@ def optimize(
     ), "Exactly one of pnorm and pnorm_end must be set"
 
     has_instance_dim = hasattr(model, "n_instances")
-
     if config.loss_type == "param_match":
         assert pretrained_model is not None, "Need a pretrained model for param_match loss"
         pretrained_model.requires_grad_(False)
@@ -304,7 +224,8 @@ def optimize(
     else:
         pretrained_weights = None
 
-    opt = torch.optim.AdamW(model.parameters(), lr=config.lr)
+    # Note that we expect weight decay to be problematic for spd
+    opt = torch.optim.AdamW(model.parameters(), lr=config.lr, weight_decay=0.0)
 
     lr_scale_fn = get_lr_scale_fn(config.lr_scale)
 
@@ -319,12 +240,7 @@ def optimize(
             lr_scale_fn=lr_scale_fn,
             lr_warmup_pct=config.lr_warmup_pct,
         )
-
-        current_pnorm = (
-            get_current_pnorm(step, config.steps, config.pnorm_end)
-            if config.pnorm is None
-            else config.pnorm
-        )
+        step_pnorm = None
 
         for group in opt.param_groups:
             group["lr"] = step_lr
@@ -335,8 +251,8 @@ def optimize(
             data_iter = iter(dataloader)
             batch, labels = next(data_iter)
 
-        batch = batch.to(dtype=torch.float32, device=device)
-        labels = labels.to(dtype=torch.float32, device=device)
+        batch = batch.to(device=device)
+        labels = labels.to(device=device)
 
         if pretrained_model is not None:
             labels = pretrained_model(batch)
@@ -351,29 +267,22 @@ def optimize(
         )
 
         out_topk = None
+        topk_l2_loss = None
         if config.topk is not None:
             # First do a full forward pass and get the gradients w.r.t. inner_acts
-            # Stage 1: Do a full forward pass and get the gradients w.r.t inner_acts
             out, _, inner_acts = model(batch)
-            all_grads = [torch.zeros_like(inner_acts[i]) for i in range(model.n_param_matrices)]
-            for feature_idx in range(out.shape[-1]):
-                grads = torch.autograd.grad(
-                    out[..., feature_idx].sum(), inner_acts, retain_graph=True
-                )
-                for param_matrix_idx in range(model.n_param_matrices):
-                    all_grads[param_matrix_idx] += grads[param_matrix_idx]
+            attribution_scores = calc_attributions(out, inner_acts)
 
-            assert len(inner_acts) == len(all_grads) == model.n_param_matrices
-            all_grads_stacked = torch.stack(all_grads, dim=0)
-            inner_acts_stacked = torch.stack(inner_acts, dim=0)
-            attribution_scores = (inner_acts_stacked * all_grads_stacked).sum(dim=0)
-            # Get the topk indices of the attribution scores
-            topk_indices = attribution_scores.abs().topk(config.topk, dim=-1).indices
-
-            out_topk, layer_acts, inner_acts_topk = model.forward_topk(
-                batch, topk_indices=topk_indices
+            topk_mask = calc_topk_mask(
+                attribution_scores, config.topk, batch_topk=config.batch_topk
             )
+
+            # Do a forward pass with only the topk subnetworks
+            out_topk, layer_acts, inner_acts_topk = model.forward_topk(batch, topk_mask=topk_mask)
             assert len(inner_acts_topk) == model.n_param_matrices
+            if config.topk_l2_coeff > 0:
+                topk_l2_loss = calc_topk_l2(model, topk_mask, device)
+
         else:
             out, layer_acts, inner_acts = model(batch)
 
@@ -414,20 +323,28 @@ def optimize(
                 sparsity_loss = sparsity_loss + sparsity_inner**2
             sparsity_loss = sparsity_loss / out.shape[-1] + 1e-16
 
+            step_pnorm = (
+                get_current_pnorm(step, config.steps, config.pnorm_end)
+                if config.pnorm is None
+                else config.pnorm
+            )
+
             # Note the current_pnorm * 0.5 is because we have the squares of the sparsity inner
             # above
-            sparsity_loss = ((sparsity_loss.abs() + 1e-16) ** (current_pnorm * 0.5)).sum(dim=-1)
+            sparsity_loss = ((sparsity_loss.abs() + 1e-16) ** (step_pnorm * 0.5)).sum(dim=-1)
             sparsity_loss = sparsity_loss.mean(dim=0)  # Mean over batch dim
         else:
-            # Assert that out_topk is not unbound
             assert out_topk is not None
             sparsity_loss = calc_recon_mse(out_topk, labels, has_instance_dim)
 
         if step % config.print_freq == config.print_freq - 1 or step == 0:
             tqdm.write(f"Step {step}")
-            tqdm.write(f"Current pnorm: {current_pnorm}")
+            if step_pnorm is not None:
+                tqdm.write(f"Current pnorm: {step_pnorm}")
             tqdm.write(f"Sparsity loss: \n{sparsity_loss}")
             tqdm.write(f"Reconstruction loss: \n{out_recon_loss}")
+            if topk_l2_loss is not None:
+                tqdm.write(f"topk l2 loss: \n{topk_l2_loss}")
             if config.loss_type == "param_match":
                 param_match_loss_repr = (
                     param_match_loss.item() if len(param_match_loss) == 1 else param_match_loss
@@ -435,40 +352,28 @@ def optimize(
                 tqdm.write(f"Param match loss: \n{param_match_loss_repr}\n")
 
             fig = None
-            # TODO: Instead of isinstance, pass a function that produces the plots
-            if isinstance(model, DeepLinearComponentModel):
-                test_batch, test_inner_acts = collect_inner_act_data(model, device, config.topk)
-
-                fig = plot_inner_acts(batch=test_batch, inner_acts=test_inner_acts)
-                fig.savefig(out_dir / f"inner_acts_{step}.png")
-                plt.close(fig)
-                tqdm.write(f"Saved inner_acts to {out_dir / f'inner_acts_{step}.png'}")
-            elif isinstance(model, TMSSPDModel):
-                closeness_vals: list[float] = []
-                permuted_A_T_list: list[torch.Tensor] = []
-                for i in range(model.n_instances):
-                    normed_A = model.A / model.A.norm(p=2, dim=-2, keepdim=True)
-                    permuted_matrix = permute_to_identity(normed_A[i].T.abs())
-                    closeness = calculate_closeness_to_identity(permuted_matrix)
-                    closeness_vals.append(closeness)
-                    permuted_A_T_list.append(permuted_matrix)
-                permuted_A_T = torch.stack(permuted_A_T_list, dim=0)
-
-                fig = plot_A_matrix(permuted_A_T, pos_only=True)
-
-                fig.savefig(out_dir / f"A_{step}.png")
-                plt.close(fig)
-                tqdm.write(f"Saved A matrix to {out_dir / f'A_{step}.png'}")
+            if plot_results_fn is not None:
+                fig = plot_results_fn(
+                    model=model,
+                    device=device,
+                    topk=config.topk,
+                    step=step,
+                    out_dir=out_dir,
+                    batch_topk=config.batch_topk,
+                )
 
             if config.wandb_project:
                 wandb.log(
                     {
                         "step": step,
-                        "current_pnorm": current_pnorm,
-                        "current_lr": step_lr,
+                        "pnorm": step_pnorm,
+                        "lr": step_lr,
                         "sparsity_loss": sparsity_loss.mean().item(),
                         "recon_loss": out_recon_loss.mean().item(),
                         "param_match_loss": param_match_loss.mean().item(),
+                        "topk_l2_loss": topk_l2_loss.mean().item()
+                        if topk_l2_loss is not None
+                        else None,
                         "inner_acts": wandb.Image(fig) if fig else None,
                     },
                     step=step,
@@ -484,11 +389,15 @@ def optimize(
         out_recon_loss = out_recon_loss.mean()
         sparsity_loss = sparsity_loss.mean()
         param_match_loss = param_match_loss.mean()
+        topk_l2_loss = topk_l2_loss.mean() if topk_l2_loss is not None else None
 
         if config.loss_type == "param_match":
             loss = param_match_loss + sparsity_coeff * sparsity_loss
         else:
             loss = out_recon_loss + sparsity_coeff * sparsity_loss
+
+        if topk_l2_loss is not None:
+            loss = loss + config.topk_l2_coeff * topk_l2_loss
 
         loss.backward()
         opt.step()

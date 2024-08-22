@@ -7,11 +7,11 @@ import matplotlib.pyplot as plt
 import numpy as np
 import torch
 import torch.nn as nn
-from jaxtyping import Float, Int
+from jaxtyping import Bool, Float
 from torch import Tensor
 
 from spd.models.base import Model, SPDModel
-from spd.models.bool_circuit_models import MLPComponents
+from spd.models.components import MLPComponents
 
 
 # %%
@@ -709,6 +709,29 @@ class PiecewiseFunctionSPDTransformer(SPDModel):
         assert len(As) == self.n_param_matrices
         return As
 
+    def set_handcoded_AB(self, target_transformer: PiecewiseFunctionTransformer):
+        assert self.n_inputs == target_transformer.n_inputs
+        assert self.n_layers == target_transformer.n_layers
+        assert self.d_embed == target_transformer.d_embed
+        assert self.d_control == target_transformer.d_control
+        assert self.n_layers == 1, "Only implemented for n_layers = 1"
+        k = self.k
+        d_mlp = target_transformer.d_mlp
+        # Input layer
+        self.mlps[0].linear1.A.data[:k, :] = torch.eye(k)
+        self.mlps[0].linear1.A.data[-1, :] = torch.zeros(k)
+        self.mlps[0].linear1.B.data[:, :] = target_transformer.mlps[0].input_layer.weight.T[:k, :]
+        # Output layer
+        original_Wout_last_col = target_transformer.mlps[0].output_layer.weight.T[:, -1]
+        norm = torch.norm(original_Wout_last_col, dim=0)
+        self.mlps[0].linear2.A.data[:, 0] = original_Wout_last_col / norm
+        self.mlps[0].linear2.A.data[:, 1:] = torch.ones(d_mlp, k - 1)
+        self.mlps[0].linear2.B.data[:, :] = torch.zeros(k, self.d_embed)
+        self.mlps[0].linear2.B.data[0, -1] = 1.0 * norm
+        # Assert biases
+        assert torch.allclose(self.mlps[0].bias1, target_transformer.mlps[0].input_layer.bias)
+        assert torch.allclose(torch.tensor(0.0), target_transformer.mlps[0].output_layer.bias)
+
     def forward(
         self, x: Float[Tensor, "... inputs"]
     ) -> tuple[
@@ -733,18 +756,20 @@ class PiecewiseFunctionSPDTransformer(SPDModel):
         return self.W_U(residual), layer_acts, inner_acts
 
     def forward_topk(
-        self, x: Float[Tensor, "... inputs"], topk_indices: Int[Tensor, "... topk"]
+        self,
+        x: Float[Tensor, "... inputs"],
+        topk_mask: Bool[Tensor, "... k"],
     ) -> tuple[
         Float[Tensor, "... outputs"],
         list[Float[Tensor, "... d_embed"] | Float[Tensor, "... d_mlp"]],
         list[Float[Tensor, "... k"]],
     ]:
         """
-        Performs a forward pass using only the top-k components for each component activation.
+        Performs a forward pass using only the top-k subnetwork activations.
 
         Args:
             x: Input tensor
-            topk_indices: Indices of the top-k components to keep
+            topk_mask: A boolean mask indicating which subnetwork activations to keep.
 
         Returns:
             output: The output of the transformer
@@ -756,7 +781,8 @@ class PiecewiseFunctionSPDTransformer(SPDModel):
         residual = self.W_E(x)
 
         for layer in self.mlps:
-            layer_out, layer_acts_i, inner_acts_i = layer.forward_topk(residual, topk_indices)
+            assert isinstance(layer, MLPComponents)
+            layer_out, layer_acts_i, inner_acts_i = layer.forward_topk(residual, topk_mask)
             residual = residual + layer_out
             layer_acts.extend(layer_acts_i)
             inner_acts.extend(inner_acts_i)
