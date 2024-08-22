@@ -66,6 +66,22 @@ def tms_decomposition_optimize_test(config: Config):
     ), "Model A matrix should have changed after optimization"
 
 
+def test_tms_batch_topk_no_l2():
+    config = Config(
+        topk=2,
+        batch_topk=True,
+        batch_size=4,
+        steps=4,
+        print_freq=2,
+        save_freq=None,
+        lr=1e-3,
+        max_sparsity_coeff=1,
+        topk_l2_coeff=None,
+        task_config=TMS_TASK_CONFIG,
+    )
+    tms_decomposition_optimize_test(config)
+
+
 def test_tms_batch_topk_and_l2():
     config = Config(
         topk=2,
@@ -75,7 +91,7 @@ def test_tms_batch_topk_and_l2():
         print_freq=2,
         save_freq=None,
         lr=1e-3,
-        max_sparsity_coeff=0.01,
+        max_sparsity_coeff=1,
         topk_l2_coeff=0.1,
         task_config=TMS_TASK_CONFIG,
     )
@@ -91,7 +107,7 @@ def test_tms_topk_and_l2():
         print_freq=2,
         save_freq=None,
         lr=1e-3,
-        max_sparsity_coeff=0.01,
+        max_sparsity_coeff=1,
         topk_l2_coeff=0.1,
         task_config=TMS_TASK_CONFIG,
     )
