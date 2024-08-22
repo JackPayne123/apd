@@ -360,6 +360,21 @@ class ControlledResNet(nn.Module):
         # split the neurons into n_layers parts
         self.neuron_permutations = torch.split(self.neuron_permutation, self.d_mlp)
         # create n_layers residual layers
+        # create a list of length n_layers, where each element is a list of length num_functions.
+        # The ith element of this list is a list of the indices of the neurons in the corresponding
+        # layer of the controlled piecewise linear that connect to the ith function.
+        self.neuron_indices = [
+            torch.cat(
+                [
+                    torch.tensor(
+                        list(range(i * self.num_neurons, (i + 1) * self.num_neurons)),
+                        dtype=torch.long,
+                    )
+                    for i in self.neuron_permutations[j]
+                ]
+            )
+            for j in range(self.n_layers)
+        ]
 
         output_weights_summed = self.controlled_piecewise_linear.output_layer.weight.data.sum(dim=0)
 
