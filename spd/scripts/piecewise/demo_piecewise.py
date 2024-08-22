@@ -4,7 +4,7 @@ from collections.abc import Callable
 import numpy as np
 import torch
 
-from spd.models.piecewise_models import PiecewiseFunctionTransformer
+from spd.scripts.piecewise.models import PiecewiseFunctionTransformer
 from spd.scripts.piecewise.piecewise_decomposition import (
     generate_trig_functions,
 )
