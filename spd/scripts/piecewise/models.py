@@ -381,7 +381,8 @@ class ControlledResNet(nn.Module):
             ]
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        # concatenate x and control bits
+        # concatenate x and control bits. The first residual stream dimension is x, and the last
+        # residual stream dimension is y. The other residual dimensions are the control bits
         control_bits = x[:, 1:]
         input_value = x[:, 0].unsqueeze(1)
 
@@ -483,6 +484,7 @@ class PiecewiseFunctionTransformer(Model):
         self.n_layers = n_layers
         self.d_embed = self.n_inputs + 1 if d_embed is None else d_embed
         self.d_control = self.d_embed - 2
+        self.controlled_resnet: ControlledResNet | None = None
 
         self.num_functions = n_inputs - 1
         self.n_outputs = 1  # this is hardcoded. This class isn't defined for multiple outputs
@@ -553,6 +555,7 @@ class PiecewiseFunctionTransformer(Model):
             rng=rng,
             torch_gen=torch_gen,
         )
+        model.controlled_resnet = handcoded_model
         # Copy the weights from the hand-coded model to the model
 
         # the control_W_E of the ControlledResNet class is just a part of the W_E of this class. In
@@ -714,23 +717,53 @@ class PiecewiseFunctionSPDTransformer(SPDModel):
         assert self.n_layers == target_transformer.n_layers
         assert self.d_embed == target_transformer.d_embed
         assert self.d_control == target_transformer.d_control
+        assert target_transformer.controlled_resnet is not None
         assert self.n_layers == 1, "Only implemented for n_layers = 1"
         k = self.k
         d_mlp = target_transformer.d_mlp
         # Input layer
-        self.mlps[0].linear1.A.data[:k, :] = torch.eye(k)
-        self.mlps[0].linear1.A.data[-1, :] = torch.zeros(k)
-        self.mlps[0].linear1.B.data[:, :] = target_transformer.mlps[0].input_layer.weight.T[:k, :]
-        # Output layer
-        original_Wout_last_col = target_transformer.mlps[0].output_layer.weight.T[:, -1]
-        norm = torch.norm(original_Wout_last_col, dim=0)
-        self.mlps[0].linear2.A.data[:, 0] = original_Wout_last_col / norm
-        self.mlps[0].linear2.A.data[:, 1:] = torch.ones(d_mlp, k - 1)
-        self.mlps[0].linear2.B.data[:, :] = torch.zeros(k, self.d_embed)
-        self.mlps[0].linear2.B.data[0, -1] = 1.0 * norm
-        # Assert biases
-        assert torch.allclose(self.mlps[0].bias1, target_transformer.mlps[0].input_layer.bias)
-        assert torch.allclose(torch.tensor(0.0), target_transformer.mlps[0].output_layer.bias)
+        simple_bias = target_transformer.controlled_resnet.simple_bias
+        if not simple_bias:
+            assert (
+                k == self.n_inputs - 1
+            ), f"Require k = n_inputs - 1, got k = {k}, n_inputs = {self.n_inputs}"
+            # TODO: implement a similar assertion for simple_bias case
+        for i in range(self.n_layers):
+            # Input layer
+            if simple_bias:
+                self.mlps[i].linear1.A.data[:k, :] = torch.eye(k)
+                self.mlps[i].linear1.A.data[-1, :] = torch.zeros(k)
+                self.mlps[i].linear1.B.data[:, :] = target_transformer.mlps[i].input_layer.weight.T[
+                    :k, :
+                ]
+
+            else:
+                # input_layer
+                self.mlps[i].linear1.A.data[:, :] = 0.0
+                self.mlps[i].linear1.A.data[0, :] = 1.0
+                supression_size = target_transformer.controlled_resnet.suppression_size
+                self.mlps[i].linear1.A.data[1:-1, :] = torch.eye(k) * supression_size
+                A_col_norm = torch.norm(self.mlps[i].linear1.A[:, 0]).item()
+                self.mlps[i].linear1.A.data /= A_col_norm
+                self.mlps[i].linear1.B.data[:, :] = (
+                    target_transformer.mlps[i].input_layer.weight.T[1:-1, :] / supression_size
+                )
+                # assert that every entry in B is 0 or 1
+                assert torch.all(
+                    (self.mlps[i].linear1.B.data == 0) | (self.mlps[i].linear1.B.data == 1)
+                )
+                self.mlps[i].linear1.B.data *= A_col_norm
+
+            # Output layer
+            original_Wout_last_col = target_transformer.mlps[i].output_layer.weight.T[:, -1]
+            norm = torch.norm(original_Wout_last_col, dim=0)
+            self.mlps[i].linear2.A.data[:, 0] = original_Wout_last_col / norm
+            self.mlps[i].linear2.A.data[:, 1:] = torch.ones(d_mlp, k - 1)
+            self.mlps[i].linear2.B.data[:, :] = torch.zeros(k, self.d_embed)
+            self.mlps[i].linear2.B.data[0, -1] = 1.0 * norm
+            # Assert biases
+            assert torch.allclose(self.mlps[i].bias1, target_transformer.mlps[i].input_layer.bias)
+            assert torch.allclose(torch.tensor(0.0), target_transformer.mlps[i].output_layer.bias)
 
     def forward(
         self, x: Float[Tensor, "... inputs"]
