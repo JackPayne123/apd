@@ -112,10 +112,8 @@ class Config(BaseModel):
 
         # Check valid combinations of pnorm, pnorm_end, and topk
         assert (
-            (self.pnorm is None and self.pnorm_end is not None)
-            or (self.pnorm is not None and self.pnorm_end is None)
-            or self.topk is not None
-        ), "Exactly one of pnorm and pnorm_end must be set or topk must be set"
+            sum([self.pnorm is not None, self.pnorm_end is not None, self.topk is not None]) == 1
+        ), "Exactly one of pnorm, pnorm_end, or topk must be set"
 
         # Check that topk_l2_coeff is None if topk is None
         if self.topk is None:
