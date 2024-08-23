@@ -777,13 +777,10 @@ class PiecewiseFunctionSPDTransformer(SPDModel):
                 neuron_indices = target_transformer.controlled_resnet.neuron_indices[i]
                 self.mlps[i].linear2.A.data[:, :] = 0.0
                 for j, idx_list in enumerate(neuron_indices):
-                    indices_unsqueezed = torch.ones_like(idx_list, dtype=torch.int64) * j
                     current_device = self.mlps[i].linear2.A.device
-                    self.mlps[i].linear2.A.data[idx_list, indices_unsqueezed] = (
-                        target_transformer.mlps[
-                            i
-                        ].output_layer.weight.data.T.to(current_device)[indices_unsqueezed, -1]
-                    )
+                    self.mlps[i].linear2.A.data[idx_list, j] = target_transformer.mlps[
+                        i
+                    ].output_layer.weight.data.T.to(current_device)[idx_list, -1]
                 all_norms = torch.norm(self.mlps[i].linear2.A, dim=0, keepdim=True)
                 self.mlps[i].linear2.A.data /= all_norms
                 self.mlps[i].linear2.B.data[:, :] = 0
