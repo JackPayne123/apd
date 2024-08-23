@@ -14,4 +14,4 @@ command:
 - ${env}
 - ${interpreter}
 - ${program}
-- spd/scripts/tms/tms_topk_config.yaml
+- spd/scripts/tms/tms_topk_match_param_config.yaml

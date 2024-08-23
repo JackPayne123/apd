@@ -18,4 +18,4 @@ command:
 - ${env}
 - ${interpreter}
 - ${program}
-- spd/scripts/piecewise/piecewise_topk_config.yaml
+- spd/scripts/piecewise/piecewise_spd_topk_config.yaml

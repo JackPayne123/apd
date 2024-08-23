@@ -16,4 +16,4 @@ command:
 - ${env}
 - ${interpreter}
 - ${program}
-- spd/scripts/linear/linear_topk_config.yaml
+- spd/scripts/linear/linear_match_param_config.yaml
