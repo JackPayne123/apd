@@ -41,9 +41,8 @@ class PiecewiseDataset(Dataset[tuple[Float[Tensor, " n_inputs"], Float[Tensor, "
         data[:, 0] = (
             torch.rand(self.buffer_size) * (self.range_max - self.range_min) + self.range_min
         )
-        original_control_bits = torch.bernoulli(
-            torch.full((self.buffer_size, self.n_inputs - 1), self.feature_probability)
-        )
+        original_control_bits = torch.empty((self.buffer_size, self.n_inputs - 1))
+        original_control_bits.bernoulli_(self.feature_probability)
         # Ensure at least one control bit is on by removing all the rows with all zeros, then
         # generating new control bits for those rows and repeating until all rows have at least one
         # bit on.
@@ -58,7 +57,6 @@ class PiecewiseDataset(Dataset[tuple[Float[Tensor, " n_inputs"], Float[Tensor, "
                 (current_control_bits, new_nonzero_control_bits), dim=0
             )
             i += 1
-        print(f"Removed rows with all zeros {i} times")
         control_bits = current_control_bits[:target_length]
         data[:, 1:] = control_bits
 
