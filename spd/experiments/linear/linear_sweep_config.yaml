@@ -16,5 +16,4 @@ command:
 - ${env}
 - ${interpreter}
 - ${program}
-# - spd/experiments/linear/linear_config.yaml
-- spd/experiments/linear/linear_match_param_config.yaml
+- spd/experiments/linear/linear_topk_config.yaml
