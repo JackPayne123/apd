@@ -50,11 +50,11 @@
             }
         },
         {
-            "name": "linear",
+            "name": "linear_lp_match_param",
             "type": "debugpy",
             "request": "launch",
             "program": "${workspaceFolder}/spd/scripts/linear/linear_decomposition.py",
-            "args": "${workspaceFolder}/spd/scripts/linear/linear_config.yaml",
+            "args": "${workspaceFolder}/spd/scripts/linear/linear_lp_match_param_config.yaml",
             "console": "integratedTerminal",
             "justMyCode": true,
             "env": {
@@ -62,7 +62,7 @@
             }
         },
         {
-            "name": "linear_match_param_topk",
+            "name": "linear_topk_match_param",
             "type": "debugpy",
             "request": "launch",
             "program": "${workspaceFolder}/spd/scripts/linear/linear_decomposition.py",
@@ -86,11 +86,11 @@
             }
         },
         {
-            "name": "piecewise_spd",
+            "name": "piecewise_lp_spd",
             "type": "debugpy",
             "request": "launch",
             "program": "${workspaceFolder}/spd/scripts/piecewise/piecewise_decomposition.py",
-            "args": "${workspaceFolder}/spd/scripts/piecewise/piecewise_spd_config.yaml",
+            "args": "${workspaceFolder}/spd/scripts/piecewise/piecewise_spd_lp_config.yaml",
             "console": "integratedTerminal",
             "justMyCode": true,
             "env": {

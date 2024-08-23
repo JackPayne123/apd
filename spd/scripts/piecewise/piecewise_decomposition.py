@@ -35,12 +35,12 @@ def get_run_name(config: Config) -> str:
     else:
         assert isinstance(config.task_config, PiecewiseConfig)
         run_suffix = (
-            f"sp{config.max_sparsity_coeff}_"
-            f"l2{config.topk_l2_coeff}_"
             f"lay{config.task_config.n_layers}_"
             f"lr{config.lr}_"
             f"p{config.pnorm}_"
             f"topk{config.topk}_"
+            f"lpsp{config.lp_sparsity_coeff}_"
+            f"topksp{config.topk_sparsity_coeff}_"
             f"topkl2{config.topk_l2_coeff}_"
             f"bs{config.batch_size}"
         )

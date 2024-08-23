@@ -4,10 +4,10 @@ wandb_run_name_prefix: ""
 seed: 0
 topk: null
 pnorm: 0.9
-max_sparsity_coeff: 1e-2
+lp_sparsity_coeff: 1e-2
 batch_size: 256
-steps: 10_000
-print_freq: 500
+steps: 20_000
+print_freq: 400
 save_freq: 10_000
 lr: 1e-2
 lr_schedule: constant

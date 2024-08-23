@@ -3,7 +3,7 @@ wandb_run_name: null
 wandb_run_name_prefix: ""
 seed: 0
 topk: null
-max_sparsity_coeff: 5e-3
+lp_sparsity_coeff: 5e-3
 pnorm: 0.9
 pnorm_end: null
 batch_size: 2048

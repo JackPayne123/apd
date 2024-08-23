@@ -3,12 +3,14 @@ wandb_run_name: null
 wandb_run_name_prefix: ""
 seed: 0
 topk: 4
-max_sparsity_coeff: 1
+topk_sparsity_coeff: 1
 topk_l2_coeff: 0.01
+pnorm: 0.9
+lp_sparsity_coeff: 1
 lr: 5e-2
 batch_size: 2048
 steps: 20_000
-print_freq: 200
+print_freq: 400
 save_freq: 5_000
 lr_warmup_pct: 0.01
 loss_type: param_match

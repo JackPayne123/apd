@@ -15,7 +15,6 @@ from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
-    NonNegativeFloat,
     PositiveFloat,
     PositiveInt,
     model_validator,
@@ -86,7 +85,8 @@ class Config(BaseModel):
     print_freq: PositiveInt
     save_freq: PositiveInt | None = None
     lr: PositiveFloat
-    max_sparsity_coeff: NonNegativeFloat
+    topk_sparsity_coeff: PositiveFloat | None = None
+    lp_sparsity_coeff: PositiveFloat | None = None
     pnorm: PositiveFloat | None = None
     pnorm_end: PositiveFloat | None = None
     lr_schedule: Literal["linear", "constant", "cosine"] = "constant"
@@ -110,14 +110,25 @@ class Config(BaseModel):
                 if not self.topk.is_integer():
                     raise ValueError("topk must be an integer when not using batch_topk")
 
-        # Check valid combinations of pnorm, pnorm_end, and topk
+        # Check that either topk_sparsity_coeff or lp_sparsity_coeff is set
         assert (
-            sum([self.pnorm is not None, self.pnorm_end is not None, self.topk is not None]) == 1
-        ), "Exactly one of pnorm, pnorm_end, or topk must be set"
+            self.topk_sparsity_coeff is not None or self.lp_sparsity_coeff is not None
+        ), "Either topk_sparsity_coeff or lp_sparsity_coeff must be set"
 
-        # Check that topk_l2_coeff is None if topk is None
+        # If topk_sparsity_coeff is set, topk must be set
+        if self.topk_sparsity_coeff is not None:
+            assert self.topk is not None, "topk must be set if topk_sparsity_coeff is set"
+
+        # If lp_sparsity_coeff is set, pnorm or pnorm_end must be set
+        if self.lp_sparsity_coeff is not None:
+            assert (
+                self.pnorm is not None or self.pnorm_end is not None
+            ), "pnorm or pnorm_end must be set if lp_sparsity_coeff is set"
+
+        # Check that topk_l2_coeff and topk_sparsity_coeff are None if topk is None
         if self.topk is None:
-            assert self.topk_l2_coeff is None, "topk_l2_coeff must be None if topk is None"
+            assert self.topk_l2_coeff is None, "topk_l2_coeff is not None but topk is"
+            assert self.topk_sparsity_coeff is None, "topk_sparsity_coeff is not None but topk is"
         return self
 
 
@@ -134,7 +145,7 @@ def get_lr_schedule_fn(
         raise ValueError(f"Unknown lr_schedule: {lr_schedule}")
 
 
-def get_current_pnorm(step: int, total_steps: int, pnorm_end: float | None = None) -> float:
+def get_step_pnorm(step: int, total_steps: int, pnorm_end: float | None = None) -> float:
     if pnorm_end is None:
         return 1.0
     progress = step / total_steps
@@ -237,6 +248,8 @@ def optimize(
 
     lr_schedule_fn = get_lr_schedule_fn(config.lr_schedule)
 
+    step_lp_sparsity_coeff = None
+    step_topk_sparsity_coeff = None
     epoch = 0
     total_samples = 0
     data_iter = iter(dataloader)
@@ -270,18 +283,28 @@ def optimize(
 
         total_samples += batch.shape[0]  # don't include the number of instances
 
-        sparsity_coeff = get_sparsity_coeff_linear_warmup(
-            step=step,
-            steps=config.steps,
-            max_sparsity_coeff=config.max_sparsity_coeff,
-            sparsity_warmup_pct=config.sparsity_warmup_pct,
-        )
+        if config.topk_sparsity_coeff is not None:
+            step_topk_sparsity_coeff = get_sparsity_coeff_linear_warmup(
+                step=step,
+                steps=config.steps,
+                max_sparsity_coeff=config.topk_sparsity_coeff,
+                sparsity_warmup_pct=config.sparsity_warmup_pct,
+            )
+        if config.lp_sparsity_coeff is not None:
+            step_lp_sparsity_coeff = get_sparsity_coeff_linear_warmup(
+                step=step,
+                steps=config.steps,
+                max_sparsity_coeff=config.lp_sparsity_coeff,
+                sparsity_warmup_pct=config.sparsity_warmup_pct,
+            )
+
+        # Do a forward pass with all subnetworks
+        out, layer_acts, inner_acts = model(batch)
+        assert len(inner_acts) == model.n_param_matrices
 
         out_topk = None
         topk_l2_loss = None
         if config.topk is not None:
-            # First do a full forward pass and get the gradients w.r.t. inner_acts
-            out, _, inner_acts = model(batch)
             attribution_scores = calc_attributions(out, inner_acts)
 
             topk_mask = calc_topk_mask(
@@ -289,15 +312,10 @@ def optimize(
             )
 
             # Do a forward pass with only the topk subnetworks
-            out_topk, layer_acts, inner_acts_topk = model.forward_topk(batch, topk_mask=topk_mask)
+            out_topk, _, inner_acts_topk = model.forward_topk(batch, topk_mask=topk_mask)
             assert len(inner_acts_topk) == model.n_param_matrices
             if config.topk_l2_coeff is not None:
                 topk_l2_loss = calc_topk_l2(model, topk_mask, device)
-
-        else:
-            out, layer_acts, inner_acts = model(batch)
-
-        assert len(inner_acts) == model.n_param_matrices
 
         param_match_loss = torch.zeros(1, device=device)
         if config.loss_type == "param_match":
@@ -311,15 +329,16 @@ def optimize(
 
         out_recon_loss = calc_recon_mse(out, labels, has_instance_dim)
 
-        if config.topk is None:
-            sparsity_loss = torch.zeros_like(inner_acts[0], requires_grad=True)
+        lp_sparsity_loss = None
+        if config.lp_sparsity_coeff is not None:
+            lp_sparsity_loss = torch.zeros_like(inner_acts[0], requires_grad=True)
             for feature_idx in range(out.shape[-1]):
                 grad_layer_acts = torch.autograd.grad(
                     out[..., feature_idx].sum(),
                     layer_acts,
                     retain_graph=True,
                 )
-                sparsity_inner = torch.zeros_like(sparsity_loss, requires_grad=True)
+                sparsity_inner = torch.zeros_like(lp_sparsity_loss, requires_grad=True)
                 for param_matrix_idx in range(model.n_param_matrices):
                     # h_i * grad_h_i
                     sparsity_inner = sparsity_inner + (
@@ -331,28 +350,32 @@ def optimize(
                         )
                     )
 
-                sparsity_loss = sparsity_loss + sparsity_inner**2
-            sparsity_loss = sparsity_loss / out.shape[-1] + 1e-16
+                lp_sparsity_loss = lp_sparsity_loss + sparsity_inner**2
+            lp_sparsity_loss = lp_sparsity_loss / out.shape[-1] + 1e-16
 
             step_pnorm = (
-                get_current_pnorm(step, config.steps, config.pnorm_end)
+                get_step_pnorm(step, config.steps, config.pnorm_end)
                 if config.pnorm is None
                 else config.pnorm
             )
 
-            # Note the current_pnorm * 0.5 is because we have the squares of the sparsity inner
-            # above
-            sparsity_loss = ((sparsity_loss.abs() + 1e-16) ** (step_pnorm * 0.5)).sum(dim=-1)
-            sparsity_loss = sparsity_loss.mean(dim=0)  # Mean over batch dim
-        else:
+            # step_pnorm * 0.5 is because we have the squares of sparsity_inner terms above
+            lp_sparsity_loss = ((lp_sparsity_loss.abs() + 1e-16) ** (step_pnorm * 0.5)).sum(dim=-1)
+            lp_sparsity_loss = lp_sparsity_loss.mean(dim=0)  # Mean over batch dim
+
+        topk_sparsity_loss = None
+        if config.topk_sparsity_coeff is not None:
             assert out_topk is not None
-            sparsity_loss = calc_recon_mse(out_topk, labels, has_instance_dim)
+            topk_sparsity_loss = calc_recon_mse(out_topk, labels, has_instance_dim)
 
         if step % config.print_freq == config.print_freq - 1 or step == 0:
             tqdm.write(f"Step {step}")
             if step_pnorm is not None:
                 tqdm.write(f"Current pnorm: {step_pnorm}")
-            tqdm.write(f"Sparsity loss: \n{sparsity_loss}")
+            if lp_sparsity_loss is not None:
+                tqdm.write(f"LP sparsity loss: \n{lp_sparsity_loss}")
+            if topk_sparsity_loss is not None:
+                tqdm.write(f"Topk sparsity loss: \n{topk_sparsity_loss}")
             tqdm.write(f"Reconstruction loss: \n{out_recon_loss}")
             if topk_l2_loss is not None:
                 tqdm.write(f"topk l2 loss: \n{topk_l2_loss}")
@@ -379,7 +402,14 @@ def optimize(
                         "step": step,
                         "pnorm": step_pnorm,
                         "lr": step_lr,
-                        "sparsity_loss": sparsity_loss.mean().item(),
+                        "lp_sparsity_coeff": step_lp_sparsity_coeff,
+                        "topk_sparsity_coeff": step_topk_sparsity_coeff,
+                        "lp_sparsity_loss": lp_sparsity_loss.mean().item()
+                        if lp_sparsity_loss is not None
+                        else None,
+                        "topk_sparsity_loss": topk_sparsity_loss.mean().item()
+                        if topk_sparsity_loss is not None
+                        else None,
                         "recon_loss": out_recon_loss.mean().item(),
                         "param_match_loss": param_match_loss.mean().item(),
                         "topk_l2_loss": topk_l2_loss.mean().item()
@@ -402,20 +432,26 @@ def optimize(
             tqdm.write(f"Saved config to {out_dir / 'config.json'}")
 
         out_recon_loss = out_recon_loss.mean()
-        sparsity_loss = sparsity_loss.mean()
+        topk_sparsity_loss = topk_sparsity_loss.mean() if topk_sparsity_loss is not None else None
+        lp_sparsity_loss = lp_sparsity_loss.mean() if lp_sparsity_loss is not None else None
         param_match_loss = param_match_loss.mean()
         topk_l2_loss = topk_l2_loss.mean() if topk_l2_loss is not None else None
 
-        if config.loss_type == "param_match":
-            loss = param_match_loss + sparsity_coeff * sparsity_loss
-        else:
-            loss = out_recon_loss + sparsity_coeff * sparsity_loss
-
+        # Collect loss terms
+        loss = param_match_loss if config.loss_type == "param_match" else out_recon_loss
+        if lp_sparsity_loss is not None:
+            assert step_lp_sparsity_coeff is not None
+            loss = loss + step_lp_sparsity_coeff * lp_sparsity_loss
+        if topk_sparsity_loss is not None:
+            assert step_topk_sparsity_coeff is not None
+            loss = loss + step_topk_sparsity_coeff * topk_sparsity_loss
         if topk_l2_loss is not None:
+            assert config.topk_l2_coeff is not None
             loss = loss + config.topk_l2_coeff * topk_l2_loss
 
         loss.backward()
         opt.step()
+
     if out_dir is not None:
         torch.save(model.state_dict(), out_dir / f"model_{config.steps}.pth")
         logger.info(f"Saved model to {out_dir / f'model_{config.steps}.pth'}")
