@@ -1,7 +1,7 @@
 from pathlib import Path
 
 import torch
-from jaxtyping import Float, Int
+from jaxtyping import Bool, Float
 from torch import Tensor, nn
 
 from spd.models.base import Model, SPDModel
@@ -44,7 +44,7 @@ class DeepLinearModel(Model):
         return [layer for layer in self.layers]
 
 
-class ParamComponent(nn.Module):
+class DeepLinearParamComponents(nn.Module):
     def __init__(self, n_instances: int, n_features: int, k: int):
         super().__init__()
         self.A = nn.Parameter(torch.empty(n_instances, n_features, k))
@@ -62,15 +62,12 @@ class ParamComponent(nn.Module):
     def forward_topk(
         self,
         x: Float[Tensor, "... n_instances n_features"],
-        topk_indices: Int[Tensor, "... topk"],
+        topk_mask: Bool[Tensor, "... n_instances k"],
     ) -> tuple[Float[Tensor, "... n_instances n_features"], Float[Tensor, "... n_instances k"]]:
+        """Performs a forward pass using only the top-k subnetwork activations."""
         normed_A = self.A / self.A.norm(p=2, dim=-2, keepdim=True)
         inner_acts = torch.einsum("bif,ifk->bik", x, normed_A)
-
-        # Get values in inner_acts corresponding to topk_indices
-        topk_values = inner_acts.gather(dim=-1, index=topk_indices)
-        inner_acts_topk = torch.zeros_like(inner_acts)
-        inner_acts_topk.scatter_(dim=-1, index=topk_indices, src=topk_values)
+        inner_acts_topk = inner_acts * topk_mask
         out = torch.einsum("bik,ikg->big", inner_acts_topk, self.B)
         return out, inner_acts_topk
 
@@ -91,7 +88,7 @@ class DeepLinearComponentModel(SPDModel):
         self.k = k if k is not None else n_features
         self.layers = nn.ModuleList(
             [
-                ParamComponent(n_instances=n_instances, n_features=n_features, k=self.k)
+                DeepLinearParamComponents(n_instances=n_instances, n_features=n_features, k=self.k)
                 for _ in range(n_layers)
             ]
         )
@@ -120,17 +117,18 @@ class DeepLinearComponentModel(SPDModel):
     def forward_topk(
         self,
         x: Float[Tensor, "... n_instances n_features"],
-        topk_indices: Int[Tensor, "... topk"],
+        topk_mask: Bool[Tensor, "... n_instances k"],
     ) -> tuple[
         Float[Tensor, "... n_instances n_features"],
         list[Float[Tensor, "... n_instances n_features"]],
         list[Float[Tensor, "... n_instances k"]],
     ]:
+        """Performs a forward pass using only the top-k subnetwork activations."""
         layer_acts = []
         inner_acts_topk = []
         for layer in self.layers:
-            assert isinstance(layer, ParamComponent)
-            x, inner_act_topk = layer.forward_topk(x, topk_indices)
+            assert isinstance(layer, DeepLinearParamComponents)
+            x, inner_act_topk = layer.forward_topk(x, topk_mask)
             layer_acts.append(x)
             inner_acts_topk.append(inner_act_topk)
         return x, layer_acts, inner_acts_topk

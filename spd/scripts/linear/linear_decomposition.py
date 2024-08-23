@@ -1,8 +1,6 @@
 """Linear decomposition script."""
 
-import time
 from pathlib import Path
-from tempfile import TemporaryDirectory
 
 import einops
 import fire
@@ -10,21 +8,22 @@ import matplotlib.pyplot as plt
 import numpy as np
 import torch
 import wandb
-import yaml
 from jaxtyping import Float
 from torch import Tensor
 from tqdm import tqdm
 
 from spd.log import logger
-from spd.models.linear_models import DeepLinearComponentModel, DeepLinearModel
 from spd.run_spd import Config, DeepLinearConfig, optimize
 from spd.scripts.linear.linear_dataset import DeepLinearDataset
+from spd.scripts.linear.models import DeepLinearComponentModel, DeepLinearModel
 from spd.utils import (
     BatchedDataLoader,
     calc_attributions,
+    calc_topk_mask,
     init_wandb,
     load_config,
     permute_to_identity,
+    save_config_to_wandb,
     set_seed,
 )
 
@@ -112,7 +111,8 @@ def plot_inner_acts(
 def collect_inner_act_data(
     model: DeepLinearComponentModel,
     device: str,
-    topk: int | None = None,
+    topk: float | None = None,
+    batch_topk: bool = True,
 ) -> tuple[
     Float[Tensor, "batch n_instances n_features"], list[Float[Tensor, "batch n_instances k"]]
 ]:
@@ -141,11 +141,9 @@ def collect_inner_act_data(
     out, _, test_inner_acts = model(test_batch)
     if topk is not None:
         attribution_scores = calc_attributions(out, test_inner_acts)
+        topk_mask = calc_topk_mask(attribution_scores, topk, batch_topk=batch_topk)
 
-        # Get the topk indices of the attribution scores
-        topk_indices = attribution_scores.topk(topk, dim=-1).indices
-
-        test_inner_acts = model.forward_topk(test_batch, topk_indices=topk_indices)[-1]
+        test_inner_acts = model.forward_topk(test_batch, topk_mask=topk_mask)[-1]
         assert len(test_inner_acts) == model.n_param_matrices
 
     test_inner_acts_permuted = []
@@ -161,14 +159,22 @@ def collect_inner_act_data(
 
 
 def plot_subnetwork_activations(
-    model: DeepLinearComponentModel, device: str, topk: int | None, step: int, out_dir: Path, **_
+    model: DeepLinearComponentModel,
+    device: str,
+    topk: float | None,
+    step: int,
+    batch_topk: bool,
+    out_dir: Path | None = None,
+    **_,
 ) -> plt.Figure:
-    test_batch, test_inner_acts = collect_inner_act_data(model, device, topk)
+    test_batch, test_inner_acts = collect_inner_act_data(model, device, topk, batch_topk=batch_topk)
 
     fig = plot_inner_acts(batch=test_batch, inner_acts=test_inner_acts)
-    fig.savefig(out_dir / f"inner_acts_{step}.png")
+    if out_dir is not None:
+        fig.savefig(out_dir / f"inner_acts_{step}.png")
     plt.close(fig)
-    tqdm.write(f"Saved inner_acts to {out_dir / f'inner_acts_{step}.png'}")
+    if out_dir is not None:
+        tqdm.write(f"Saved inner_acts to {out_dir / f'inner_acts_{step}.png'}")
     return fig
 
 
@@ -179,16 +185,7 @@ def main(
 
     if config.wandb_project:
         config = init_wandb(config, config.wandb_project, sweep_config_path)
-        # Save the config to wandb
-        with TemporaryDirectory() as tmp_dir:
-            config_path = Path(tmp_dir) / "final_config.yaml"
-            with open(config_path, "w") as f:
-                yaml.dump(config.model_dump(mode="json"), f, indent=2)
-            wandb.save(str(config_path), policy="now", base_path=tmp_dir)
-            # Unfortunately wandb.save is async, so we need to wait for it to finish before
-            # continuing, and wandb python api provides no way to do this.
-            # TODO: Find a better way to do this.
-            time.sleep(1)
+        save_config_to_wandb(config)
 
     set_seed(config.seed)
     logger.info(config)

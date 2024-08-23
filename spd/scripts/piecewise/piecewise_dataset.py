@@ -51,17 +51,15 @@ class PiecewiseDataset(Dataset[tuple[Float[Tensor, " n_inputs"], Float[Tensor, "
         target_length = original_control_bits.shape[0]
         current_control_bits = original_control_bits[original_control_bits.any(dim=1)]
         while current_control_bits.shape[0] < target_length:
-            new_control_bits = torch.bernoulli(
-                torch.full((self.buffer_size, self.n_inputs - 1), self.feature_probability)
-            )
+            new_control_bits = torch.empty((self.buffer_size, self.n_inputs - 1))
+            new_control_bits.bernoulli_(self.feature_probability)
             new_nonzero_control_bits = new_control_bits[new_control_bits.any(dim=1)]
             current_control_bits = torch.cat(
                 (current_control_bits, new_nonzero_control_bits), dim=0
             )
             i += 1
-        # print(f"Removed rows with all zeros {i} times")
+        print(f"Removed rows with all zeros {i} times")
         control_bits = current_control_bits[:target_length]
-        print(control_bits.shape)
         data[:, 1:] = control_bits
 
         x = data[:, 0].unsqueeze(1).expand(-1, len(self.functions))

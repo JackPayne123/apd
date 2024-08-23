@@ -1,6 +1,5 @@
 # %%
 from collections.abc import Callable
-from dataclasses import dataclass
 from pathlib import Path
 
 import einops
@@ -9,27 +8,27 @@ import numpy as np
 import torch
 from matplotlib import collections as mc
 from matplotlib import colors as mcolors
+from pydantic import BaseModel, PositiveInt
 from tqdm import trange
 
-from spd.models.tms_models import TMSModel
-from spd.scripts.tms.tms_utils import TMSDataset
+from spd.scripts.tms.models import TMSModel
+from spd.scripts.tms.utils import TMSDataset
 from spd.utils import BatchedDataLoader
 
 
 # %%
-@dataclass
-class Config:
-    n_features: int
-    n_hidden: int
+class TMSTrainConfig(BaseModel):
+    n_features: PositiveInt
+    n_hidden: PositiveInt
 
     # We optimize n_instances models in a single training loop
     # to let us sweep over sparsity or importance curves
     # efficiently.
 
     # We could potentially use torch.vmap instead.
-    n_instances: int
+    n_instances: PositiveInt
     feature_probability: float
-    batch_size: int
+    batch_size: PositiveInt
 
 
 def linear_lr(step: int, steps: int) -> float:
@@ -44,23 +43,23 @@ def cosine_decay_lr(step: int, steps: int) -> float:
     return np.cos(0.5 * np.pi * step / (steps - 1))
 
 
-def optimize(
+def train(
     model: TMSModel,
     dataloader: BatchedDataLoader,
     importance: float = 1.0,
     steps: int = 10_000,
     print_freq: int = 100,
     lr: float = 5e-3,
-    lr_scale: Callable[[int, int], float] = linear_lr,
+    lr_schedule: Callable[[int, int], float] = linear_lr,
 ) -> None:
     hooks = []
 
     opt = torch.optim.AdamW(list(model.parameters()), lr=lr)
 
     data_iter = iter(dataloader)
-    with trange(steps) as t:
+    with trange(steps, ncols=50) as t:
         for step in t:
-            step_lr = lr * lr_scale(step, steps)
+            step_lr = lr * lr_schedule(step, steps)
             for group in opt.param_groups:
                 group["lr"] = step_lr
             opt.zero_grad(set_to_none=True)
@@ -118,7 +117,7 @@ def plot_intro_diagram(model: TMSModel, filepath: Path) -> None:
 if __name__ == "__main__":
     device = "cuda" if torch.cuda.is_available() else "cpu"
     # %%
-    config = Config(
+    config = TMSTrainConfig(
         n_features=5,
         n_hidden=2,
         n_instances=12,
@@ -140,7 +139,7 @@ if __name__ == "__main__":
         device=device,
     )
     dataloader = BatchedDataLoader(dataset, batch_size=config.batch_size)
-    optimize(model, dataloader=dataloader)
+    train(model, dataloader=dataloader)
 
     out_dir = Path(__file__).parent / "out"
     out_dir.mkdir(parents=True, exist_ok=True)

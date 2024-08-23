@@ -3,65 +3,73 @@
 import json
 from collections.abc import Callable
 from pathlib import Path
-from typing import Literal
+from typing import Literal, Self
 
 import einops
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
 import wandb
-from jaxtyping import Float, Int
-from pydantic import BaseModel, ConfigDict, Field
+from jaxtyping import Bool, Float
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    NonNegativeFloat,
+    PositiveFloat,
+    PositiveInt,
+    model_validator,
+)
 from torch import Tensor
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 from spd.log import logger
 from spd.models.base import Model, SPDModel
-from spd.types import RootPath
-from spd.utils import calc_attributions
+from spd.types import Probability, RootPath
+from spd.utils import calc_attributions, calc_topk_mask
 
 
 class TMSConfig(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
     task_name: Literal["tms"] = "tms"
-    n_features: int
-    n_hidden: int
-    n_instances: int
-    k: int
-    feature_probability: float
+    n_features: PositiveInt
+    n_hidden: PositiveInt
+    n_instances: PositiveInt
+    k: PositiveInt
+    feature_probability: Probability
     train_bias: bool
     bias_val: float
-    pretrained_model_path: RootPath
+    pretrained_model_path: RootPath | None = None
 
 
 class BoolCircuitConfig(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
     task_name: Literal["bool_circuit"] = "bool_circuit"
-    k: int
+    k: PositiveInt
     pretrained_model_path: RootPath
 
 
 class DeepLinearConfig(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
     task_name: Literal["deep_linear"] = "deep_linear"
-    n_features: int | None = None
-    n_layers: int | None = None
-    n_instances: int | None = None
-    k: int | None = None
+    n_features: PositiveInt | None = None
+    n_layers: PositiveInt | None = None
+    n_instances: PositiveInt | None = None
+    k: PositiveInt | None = None
     pretrained_model_path: RootPath | None = None
 
 
 class PiecewiseConfig(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
     task_name: Literal["piecewise"] = "piecewise"
-    n_functions: int
-    neurons_per_function: int
-    n_layers: int
-    feature_probability: float
+    n_functions: PositiveInt
+    neurons_per_function: PositiveInt
+    n_layers: PositiveInt
+    feature_probability: Probability
     range_min: float
     range_max: float
-    k: int
+    k: PositiveInt
     handcoded_AB: bool = False
 
 
@@ -71,49 +79,59 @@ class Config(BaseModel):
     wandb_run_name: str | None = None
     wandb_run_name_prefix: str = ""
     seed: int = 0
-    topk: int | None = None
-    batch_size: int
-    steps: int
-    print_freq: int
-    save_freq: int | None = None
-    lr: float
-    max_sparsity_coeff: float
-    pnorm: float | None = None
-    pnorm_end: float | None = None
-    lr_scale: Literal["linear", "constant", "cosine"] = "constant"
-    lr_warmup_pct: float = 0.0
+    topk: PositiveFloat | None = None
+    batch_topk: bool = True
+    batch_size: PositiveInt
+    steps: PositiveInt
+    print_freq: PositiveInt
+    save_freq: PositiveInt | None = None
+    lr: PositiveFloat
+    max_sparsity_coeff: NonNegativeFloat
+    pnorm: PositiveFloat | None = None
+    pnorm_end: PositiveFloat | None = None
+    lr_schedule: Literal["linear", "constant", "cosine"] = "constant"
+    lr_warmup_pct: Probability = 0.0
     sparsity_loss_type: Literal["jacobian"] = "jacobian"
     loss_type: Literal["param_match", "behavioral"] = "param_match"
-    sparsity_warmup_pct: float = 0.0
-    topk_l2_coeff: float = 0.0
+    sparsity_warmup_pct: Probability = 0.0
+    topk_l2_coeff: PositiveFloat | None = None
     task_config: DeepLinearConfig | BoolCircuitConfig | PiecewiseConfig | TMSConfig = Field(
         ..., discriminator="task_name"
     )
 
+    @model_validator(mode="after")
+    def validate_model(self) -> Self:
+        # Check valid combinations of topk and batch_size
+        if self.topk is not None:
+            if self.batch_topk:
+                if not (self.batch_size * self.topk).is_integer():
+                    raise ValueError("batch_size * topk must be an integer when using batch_topk")
+            else:
+                if not self.topk.is_integer():
+                    raise ValueError("topk must be an integer when not using batch_topk")
 
-def linear_lr(step: int, steps: int) -> float:
-    return 1 - (step / steps)
+        # Check valid combinations of pnorm, pnorm_end, and topk
+        assert (
+            sum([self.pnorm is not None, self.pnorm_end is not None, self.topk is not None]) == 1
+        ), "Exactly one of pnorm, pnorm_end, or topk must be set"
+
+        # Check that topk_l2_coeff is None if topk is None
+        if self.topk is None:
+            assert self.topk_l2_coeff is None, "topk_l2_coeff must be None if topk is None"
+        return self
 
 
-def constant_lr(*_: int) -> float:
-    return 1.0
-
-
-def cosine_decay_lr(step: int, steps: int) -> float:
-    return np.cos(0.5 * np.pi * step / (steps - 1))
-
-
-def get_lr_scale_fn(
-    lr_scale: Literal["linear", "constant", "cosine"],
+def get_lr_schedule_fn(
+    lr_schedule: Literal["linear", "constant", "cosine"],
 ) -> Callable[[int, int], float]:
-    if lr_scale == "linear":
-        return linear_lr
-    elif lr_scale == "constant":
-        return constant_lr
-    elif lr_scale == "cosine":
-        return cosine_decay_lr
+    if lr_schedule == "linear":
+        return lambda step, steps: 1 - (step / steps)
+    elif lr_schedule == "constant":
+        return lambda *_: 1.0
+    elif lr_schedule == "cosine":
+        return lambda step, steps: np.cos(0.5 * np.pi * step / (steps - 1))
     else:
-        raise ValueError(f"Unknown lr_scale: {lr_scale}")
+        raise ValueError(f"Unknown lr_schedule: {lr_schedule}")
 
 
 def get_current_pnorm(step: int, total_steps: int, pnorm_end: float | None = None) -> float:
@@ -133,12 +151,16 @@ def get_sparsity_coeff_linear_warmup(
 
 
 def get_lr_with_warmup(
-    step: int, steps: int, lr: float, lr_scale_fn: Callable[[int, int], float], lr_warmup_pct: float
+    step: int,
+    steps: int,
+    lr: float,
+    lr_schedule_fn: Callable[[int, int], float],
+    lr_warmup_pct: float,
 ) -> float:
     warmup_steps = int(steps * lr_warmup_pct)
     if step < warmup_steps:
         return lr * (step / warmup_steps)
-    return lr * lr_scale_fn(step - warmup_steps, steps - warmup_steps)
+    return lr * lr_schedule_fn(step - warmup_steps, steps - warmup_steps)
 
 
 def calc_recon_mse(
@@ -159,14 +181,17 @@ def calc_recon_mse(
 
 def calc_topk_l2(
     model: SPDModel,
-    topk_indices: Int[Tensor, "... topk"],
+    topk_mask: Bool[Tensor, "batch ... k"],
     device: str,
 ) -> Float[Tensor, ""] | Float[Tensor, " n_instances"]:
     """Calculate the L2 of the sum of the topk subnetworks.
 
+    Note that we explicitly write the batch dimension to aid understanding. The einsums
+    produce the same operation without it. The ... indicates an optional n_instances dimension.
+
     Args:
         model (SPDModel): The model to calculate the L2 penalty for.
-        topk_indices (Int[Tensor, "batch ... topk"]): The topk indices to use for the L2 penalty.
+        topk_mask (Bool[Tensor, "batch ... k"]): The topk mask to use for the L2 penalty.
             Will contain an n_instances dimension if the model has an n_instances dimension.
         device (str): The device to run computations on.
 
@@ -174,52 +199,32 @@ def calc_topk_l2(
         The L2 penalty for the topk subnetworks. One value for each n_instance (used in tms and
             deep linear toy models).
     """
-    batch_size = topk_indices.shape[0]
-    n_instances = topk_indices.shape[1] if topk_indices.ndim == 3 else None
+    batch_size = topk_mask.shape[0]
+    n_instances = topk_mask.shape[1] if topk_mask.ndim == 3 else None
     accumulate_shape = (batch_size,) if n_instances is None else (batch_size, n_instances)
 
     topk_l2_penalty = torch.zeros(accumulate_shape, device=device)
     for A, B in zip(model.all_As(), model.all_Bs(), strict=True):
-        n_features = A.shape[-2]
-        n_hidden = B.shape[-1]
-        # normed_A: [n_features, k] or [n_instances, n_features, k]
-        # B: [k, n_hidden] or [n_instances, k, n_hidden]
-        # topk_indices: [batch, topk] or [batch, n_instances, topk]
-        expanded_topk_indices_A = einops.repeat(topk_indices, "b ... t -> b ... f t", f=n_features)
-        expanded_A = einops.repeat(A, "... f k -> b ... f k", b=batch_size)
-        A_topk: Float[Tensor, "batch ... n_features topk"] = expanded_A.gather(
-            dim=-1, index=expanded_topk_indices_A
-        )
-
-        expanded_topk_indices_B = einops.repeat(topk_indices, "b ... t -> b ... h t", h=n_hidden)
-        expanded_B = einops.repeat(B, "... k h -> b ... h k", b=batch_size)
-        B_topk: Float[Tensor, "batch ... n_hidden topk"] = expanded_B.gather(
-            dim=-1, index=expanded_topk_indices_B
-        )
-
-        AB_topk = torch.einsum("...ft,...ht->...fh", A_topk, B_topk)
+        # A: [d_in, k] or [n_instances, d_in, k]
+        # B: [k, d_in] or [n_instances, k, d_in]
+        # topk_mask: [batch, k] or [batch, n_instances, k]
+        A_topk = torch.einsum("...fk,b...k ->b...fk", A, topk_mask)
+        AB_topk = torch.einsum("b...fk,...kh->b...fh", A_topk, B)
         topk_l2_penalty = topk_l2_penalty + ((AB_topk) ** 2).mean(dim=(-2, -1))
-
-    return topk_l2_penalty.mean(dim=0)  # Mean over batch dim
+    # Mean over batch_dim and divide by number of parameter matrices we iterated over
+    return topk_l2_penalty.mean(dim=0) / model.n_param_matrices
 
 
 def optimize(
     model: SPDModel,
     config: Config,
-    out_dir: Path,
     device: str,
     dataloader: DataLoader[tuple[Float[Tensor, "... n_features"], Float[Tensor, "... n_features"]]],
     pretrained_model: Model | None,
     plot_results_fn: Callable[..., plt.Figure | None] | None = None,
+    out_dir: Path | None = None,
 ) -> None:
-    assert (
-        (config.pnorm is None and config.pnorm_end is not None)
-        or (config.pnorm is not None and config.pnorm_end is None)
-        or config.topk is not None
-    ), "Exactly one of pnorm and pnorm_end must be set"
-
     has_instance_dim = hasattr(model, "n_instances")
-
     if config.loss_type == "param_match":
         assert pretrained_model is not None, "Need a pretrained model for param_match loss"
         pretrained_model.requires_grad_(False)
@@ -230,32 +235,30 @@ def optimize(
     # Note that we expect weight decay to be problematic for spd
     opt = torch.optim.AdamW(model.parameters(), lr=config.lr, weight_decay=0.0)
 
-    lr_scale_fn = get_lr_scale_fn(config.lr_scale)
+    lr_schedule_fn = get_lr_schedule_fn(config.lr_schedule)
 
+    epoch = 0
     total_samples = 0
-
     data_iter = iter(dataloader)
-    for step in tqdm(range(config.steps)):
+    for step in tqdm(range(config.steps), ncols=50):
         step_lr = get_lr_with_warmup(
             step=step,
             steps=config.steps,
             lr=config.lr,
-            lr_scale_fn=lr_scale_fn,
+            lr_schedule_fn=lr_schedule_fn,
             lr_warmup_pct=config.lr_warmup_pct,
         )
-
-        current_pnorm = (
-            get_current_pnorm(step, config.steps, config.pnorm_end)
-            if config.pnorm is None
-            else config.pnorm
-        )
-
         for group in opt.param_groups:
             group["lr"] = step_lr
+
+        step_pnorm = None
+
         opt.zero_grad(set_to_none=True)
         try:
             batch, labels = next(data_iter)
         except StopIteration:
+            tqdm.write(f"Epoch {epoch} finished, starting new epoch")
+            epoch += 1
             data_iter = iter(dataloader)
             batch, labels = next(data_iter)
 
@@ -281,16 +284,15 @@ def optimize(
             out, _, inner_acts = model(batch)
             attribution_scores = calc_attributions(out, inner_acts)
 
-            # Get the topk indices of the attribution scores
-            topk_indices = attribution_scores.topk(config.topk, dim=-1).indices
+            topk_mask = calc_topk_mask(
+                attribution_scores, config.topk, batch_topk=config.batch_topk
+            )
 
             # Do a forward pass with only the topk subnetworks
-            out_topk, layer_acts, inner_acts_topk = model.forward_topk(
-                batch, topk_indices=topk_indices
-            )
+            out_topk, layer_acts, inner_acts_topk = model.forward_topk(batch, topk_mask=topk_mask)
             assert len(inner_acts_topk) == model.n_param_matrices
-            if config.topk_l2_coeff > 0:
-                topk_l2_loss = calc_topk_l2(model, topk_indices, device)
+            if config.topk_l2_coeff is not None:
+                topk_l2_loss = calc_topk_l2(model, topk_mask, device)
 
         else:
             out, layer_acts, inner_acts = model(batch)
@@ -332,9 +334,15 @@ def optimize(
                 sparsity_loss = sparsity_loss + sparsity_inner**2
             sparsity_loss = sparsity_loss / out.shape[-1] + 1e-16
 
+            step_pnorm = (
+                get_current_pnorm(step, config.steps, config.pnorm_end)
+                if config.pnorm is None
+                else config.pnorm
+            )
+
             # Note the current_pnorm * 0.5 is because we have the squares of the sparsity inner
             # above
-            sparsity_loss = ((sparsity_loss.abs() + 1e-16) ** (current_pnorm * 0.5)).sum(dim=-1)
+            sparsity_loss = ((sparsity_loss.abs() + 1e-16) ** (step_pnorm * 0.5)).sum(dim=-1)
             sparsity_loss = sparsity_loss.mean(dim=0)  # Mean over batch dim
         else:
             assert out_topk is not None
@@ -342,7 +350,8 @@ def optimize(
 
         if step % config.print_freq == config.print_freq - 1 or step == 0:
             tqdm.write(f"Step {step}")
-            tqdm.write(f"Current pnorm: {current_pnorm}")
+            if step_pnorm is not None:
+                tqdm.write(f"Current pnorm: {step_pnorm}")
             tqdm.write(f"Sparsity loss: \n{sparsity_loss}")
             tqdm.write(f"Reconstruction loss: \n{out_recon_loss}")
             if topk_l2_loss is not None:
@@ -356,15 +365,20 @@ def optimize(
             fig = None
             if plot_results_fn is not None:
                 fig = plot_results_fn(
-                    model=model, device=device, topk=config.topk, step=step, out_dir=out_dir
+                    model=model,
+                    device=device,
+                    topk=config.topk,
+                    step=step,
+                    out_dir=out_dir,
+                    batch_topk=config.batch_topk,
                 )
 
             if config.wandb_project:
                 wandb.log(
                     {
                         "step": step,
-                        "current_pnorm": current_pnorm,
-                        "current_lr": step_lr,
+                        "pnorm": step_pnorm,
+                        "lr": step_lr,
                         "sparsity_loss": sparsity_loss.mean().item(),
                         "recon_loss": out_recon_loss.mean().item(),
                         "param_match_loss": param_match_loss.mean().item(),
@@ -376,7 +390,11 @@ def optimize(
                     step=step,
                 )
 
-        if config.save_freq is not None and step % config.save_freq == config.save_freq - 1:
+        if (
+            config.save_freq is not None
+            and step % config.save_freq == config.save_freq - 1
+            and out_dir is not None
+        ):
             torch.save(model.state_dict(), out_dir / f"model_{step}.pth")
             tqdm.write(f"Saved model to {out_dir / f'model_{step}.pth'}")
             with open(out_dir / "config.json", "w") as f:
@@ -398,8 +416,8 @@ def optimize(
 
         loss.backward()
         opt.step()
-
-    torch.save(model.state_dict(), out_dir / f"model_{config.steps}.pth")
-    logger.info(f"Saved model to {out_dir / f'model_{config.steps}.pth'}")
-    if config.wandb_project:
-        wandb.save(str(out_dir / f"model_{config.steps}.pth"))
+    if out_dir is not None:
+        torch.save(model.state_dict(), out_dir / f"model_{config.steps}.pth")
+        logger.info(f"Saved model to {out_dir / f'model_{config.steps}.pth'}")
+        if config.wandb_project:
+            wandb.save(str(out_dir / f"model_{config.steps}.pth"))

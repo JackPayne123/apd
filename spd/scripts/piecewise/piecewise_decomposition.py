@@ -1,27 +1,27 @@
 """Linear decomposition script."""
 
 import json
-import time
 from pathlib import Path
-from tempfile import TemporaryDirectory
 
 import fire
 import torch
 import wandb
-import yaml
+from jaxtyping import Float
+from torch import Tensor
 from torch.utils.data import DataLoader
 
 from spd.log import logger
-from spd.models.piecewise_models import (
+from spd.run_spd import Config, PiecewiseConfig, calc_recon_mse, optimize
+from spd.scripts.piecewise.models import (
     PiecewiseFunctionSPDTransformer,
     PiecewiseFunctionTransformer,
 )
-from spd.run_spd import Config, PiecewiseConfig, calc_recon_mse, optimize
 from spd.scripts.piecewise.piecewise_dataset import PiecewiseDataset
 from spd.scripts.piecewise.trig_functions import generate_trig_functions
 from spd.utils import (
     init_wandb,
     load_config,
+    save_config_to_wandb,
     set_seed,
 )
 
@@ -49,44 +49,23 @@ def get_run_name(config: Config) -> str:
     return config.wandb_run_name_prefix + run_suffix
 
 
-def main(
-    config_path_or_obj: Path | str | Config, sweep_config_path: Path | str | None = None
-) -> None:
-    config = load_config(config_path_or_obj, config_model=Config)
-
-    if config.wandb_project:
-        config = init_wandb(config, config.wandb_project, sweep_config_path)
-        # Save the config to wandb
-        with TemporaryDirectory() as tmp_dir:
-            config_path = Path(tmp_dir) / "final_config.yaml"
-            with open(config_path, "w") as f:
-                yaml.dump(config.model_dump(mode="json"), f, indent=2)
-            wandb.save(str(config_path), policy="now", base_path=tmp_dir)
-            # Unfortunately wandb.save is async, so we need to wait for it to finish before
-            # continuing, and wandb python api provides no way to do this.
-            # TODO: Find a better way to do this.
-            time.sleep(1)
-
-    set_seed(config.seed)
-    logger.info(config)
-
-    run_name = get_run_name(config)
-    if config.wandb_project:
-        assert wandb.run, "wandb.run must be initialized before training"
-        wandb.run.name = run_name
-
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    logger.info(f"Using device: {device}")
+def get_model_and_dataloader(
+    config: Config,
+    device: str,
+    out_dir: Path | None = None,
+) -> tuple[
+    PiecewiseFunctionTransformer,
+    PiecewiseFunctionSPDTransformer,
+    DataLoader[tuple[Float[Tensor, " n_inputs"], Float[Tensor, ""]]],
+]:
+    """Set up the piecewise models and dataset."""
     assert isinstance(config.task_config, PiecewiseConfig)
-    assert config.task_config.k is not None
-
     functions, function_params = generate_trig_functions(config.task_config.n_functions)
 
-    out_dir = Path(__file__).parent / "out" / run_name
-    out_dir.mkdir(parents=True, exist_ok=True)
-    with open(out_dir / "function_params.json", "w") as f:
-        json.dump(function_params, f, indent=4)
-    logger.info(f"Saved function params to {out_dir / 'function_params.json'}")
+    if out_dir:
+        with open(out_dir / "function_params.json", "w") as f:
+            json.dump(function_params, f, indent=4)
+        logger.info(f"Saved function params to {out_dir / 'function_params.json'}")
 
     piecewise_model = PiecewiseFunctionTransformer.from_handcoded(
         functions=functions,
@@ -128,6 +107,38 @@ def main(
         range_max=config.task_config.range_max,
     )
     dataloader = DataLoader(dataset, batch_size=config.batch_size, shuffle=False)
+
+    return piecewise_model, piecewise_model_spd, dataloader
+
+
+def main(
+    config_path_or_obj: Path | str | Config, sweep_config_path: Path | str | None = None
+) -> None:
+    config = load_config(config_path_or_obj, config_model=Config)
+
+    if config.wandb_project:
+        config = init_wandb(config, config.wandb_project, sweep_config_path)
+        save_config_to_wandb(config)
+
+    set_seed(config.seed)
+    logger.info(config)
+
+    run_name = get_run_name(config)
+    if config.wandb_project:
+        assert wandb.run, "wandb.run must be initialized before training"
+        wandb.run.name = run_name
+
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    logger.info(f"Using device: {device}")
+    assert isinstance(config.task_config, PiecewiseConfig)
+    assert config.task_config.k is not None
+
+    out_dir = Path(__file__).parent / "out" / run_name
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    piecewise_model, piecewise_model_spd, dataloader = get_model_and_dataloader(
+        config, device, out_dir
+    )
 
     # Evaluate the hardcoded model on 5 batches to get the labels
     n_batches = 5
