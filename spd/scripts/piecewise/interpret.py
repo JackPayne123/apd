@@ -50,8 +50,7 @@ def make_plot(pretrained_path: Path, title: str, plot_all: bool = False) -> None
     hardcoded_weights = hardcoded_model.all_decomposable_params()
     param_match_loss = torch.zeros(1, device=device)
     for i, (A, B) in enumerate(zip(model.all_As(), model.all_Bs(), strict=True)):
-        normed_A = A / A.norm(p=2, dim=-2, keepdim=True)
-        AB = torch.einsum("...fk,...kg->...fg", normed_A, B)
+        AB = torch.einsum("...fk,...kg->...fg", A, B)
         param_match_loss = param_match_loss + ((AB - hardcoded_weights[i]) ** 2).mean(dim=(-2, -1))
     param_match_loss = param_match_loss / model.n_param_matrices
 

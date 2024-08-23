@@ -13,6 +13,8 @@ class ParamComponents(nn.Module):
         k: int,
         resid_component: nn.Parameter | None,
         resid_dim: int | None,
+        norm_A: bool = False,
+        norm_B: bool = False,
     ):
         """
         Args:
@@ -22,8 +24,13 @@ class ParamComponents(nn.Module):
             resid_component: Predefined component matrix of shape (d_resid, k) if A or (k, d_resid)
                 if B.
             resid_dim: Dimension in which to use the predefined component.
+            norm_A: Whether to normalize A in the forward pass.
+            norm_B: Whether to normalize B in the forward pass.
         """
         super().__init__()
+
+        self.norm_A = norm_A
+        self.norm_B = norm_B
 
         if resid_component is not None:
             if resid_dim == 0:
@@ -47,9 +54,11 @@ class ParamComponents(nn.Module):
         self,
         x: Float[Tensor, "... dim1"],
     ) -> tuple[Float[Tensor, "... dim2"], Float[Tensor, "... k"]]:
-        normed_A = self.A / self.A.norm(p=2, dim=-2, keepdim=True)
-        inner_acts = torch.einsum("bf,fk->bk", x, normed_A)
-        out = torch.einsum("bk,kg->bg", inner_acts, self.B)
+        A = self.A / self.A.norm(p=2, dim=-2, keepdim=True) if self.norm_A else self.A
+        inner_acts = torch.einsum("bf,fk->bk", x, A)
+
+        B = self.B / self.B.norm(p=2, dim=-1, keepdim=True) if self.norm_B else self.B
+        out = torch.einsum("bk,kg->bg", inner_acts, B)
         return out, inner_acts
 
     def forward_topk(
@@ -95,13 +104,22 @@ class MLPComponents(nn.Module):
     ):
         super().__init__()
         self.linear1 = ParamComponents(
-            d_embed, d_mlp, k, resid_component=input_component, resid_dim=0
+            d_embed, d_mlp, k, resid_component=input_component, resid_dim=0, norm_A=True
         )
         self.bias1 = nn.Parameter(torch.zeros(d_mlp))
         if input_bias is not None:
             self.bias1.data = input_bias.detach().clone()
+
+        norm_A = output_component is None  # Not sharing weights, normalize A
+        norm_B = output_component is not None  # Sharing weights, need to normalize B
         self.linear2 = ParamComponents(
-            d_mlp, d_embed, k, resid_component=output_component, resid_dim=1
+            d_mlp,
+            d_embed,
+            k,
+            resid_component=output_component,
+            resid_dim=1,
+            norm_A=norm_A,
+            norm_B=norm_B,
         )
 
     def forward(

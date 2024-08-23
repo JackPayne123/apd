@@ -675,21 +675,32 @@ class PiecewiseFunctionSPDTransformer(SPDModel):
         )
 
     def all_As(self) -> list[Float[Tensor, "dim k"]]:
-        all_A_pairs = [
-            (self.mlps[i].linear1.A, self.mlps[i].linear2.A) for i in range(self.n_layers)
-        ]
-        As = [A / A.norm(p=2, dim=-2, keepdim=True) for A_pair in all_A_pairs for A in A_pair]
+        As = []
+        for mlp in self.mlps:
+            assert isinstance(mlp, MLPComponents)
+            a1 = mlp.linear1.A
+            if mlp.linear1.norm_A:
+                a1 = a1 / a1.norm(p=2, dim=-2, keepdim=True)
+            a2 = mlp.linear2.A
+            if mlp.linear2.norm_A:
+                a2 = a2 / a2.norm(p=2, dim=-2, keepdim=True)
+            As.append((a1, a2))
         assert len(As) == self.n_param_matrices
         return As
 
     def all_Bs(self) -> list[Float[Tensor, "k dim"]]:
-        # Get all B matrices
-        all_B_pairs = [
-            (self.mlps[i].linear1.B, self.mlps[i].linear2.B) for i in range(self.n_layers)
-        ]
-        As = [B for B_pair in all_B_pairs for B in B_pair]
-        assert len(As) == self.n_param_matrices
-        return As
+        Bs = []
+        for mlp in self.mlps:
+            assert isinstance(mlp, MLPComponents)
+            b1 = mlp.linear1.B
+            if mlp.linear1.norm_B:
+                b1 = b1 / b1.norm(p=2, dim=-2, keepdim=True)
+            b2 = mlp.linear2.B
+            if mlp.linear2.norm_B:
+                b2 = b2 / b2.norm(p=2, dim=-2, keepdim=True)
+            Bs.append((b1, b2))
+        assert len(Bs) == self.n_param_matrices
+        return Bs
 
     def set_handcoded_AB(self, target_transformer: PiecewiseFunctionTransformer):
         assert self.n_inputs == target_transformer.n_inputs
