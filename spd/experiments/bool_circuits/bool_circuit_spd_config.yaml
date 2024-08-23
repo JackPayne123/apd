@@ -20,4 +20,4 @@ task_config:
   # n_layers: 3
   # n_outputs: 2
   k: 3
-  pretrained_model_path: spd/scripts/bool_circuits/out/inp10-op20-hid8-lay1-circseed1-seed0/model.pt
+  pretrained_model_path: spd/experiments/bool_circuits/out/inp10-op20-hid8-lay1-circseed1-seed0/model.pt
