@@ -681,10 +681,12 @@ class PiecewiseFunctionSPDTransformer(SPDModel):
             a1 = mlp.linear1.A
             if mlp.linear1.norm_A:
                 a1 = a1 / a1.norm(p=2, dim=-2, keepdim=True)
+            As.append(a1)
+
             a2 = mlp.linear2.A
             if mlp.linear2.norm_A:
                 a2 = a2 / a2.norm(p=2, dim=-2, keepdim=True)
-            As.append((a1, a2))
+            As.append(a2)
         assert len(As) == self.n_param_matrices
         return As
 
@@ -695,10 +697,12 @@ class PiecewiseFunctionSPDTransformer(SPDModel):
             b1 = mlp.linear1.B
             if mlp.linear1.norm_B:
                 b1 = b1 / b1.norm(p=2, dim=-2, keepdim=True)
+            Bs.append(b1)
+
             b2 = mlp.linear2.B
             if mlp.linear2.norm_B:
                 b2 = b2 / b2.norm(p=2, dim=-2, keepdim=True)
-            Bs.append((b1, b2))
+            Bs.append(b2)
         assert len(Bs) == self.n_param_matrices
         return Bs
 
