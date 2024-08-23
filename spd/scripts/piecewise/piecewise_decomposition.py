@@ -116,13 +116,16 @@ def main(
         feature_probability=config.task_config.feature_probability,
         range_min=config.task_config.range_min,
         range_max=config.task_config.range_max,
+        batch_size=config.batch_size,
     )
-    dataloader = DataLoader(dataset, batch_size=config.batch_size, shuffle=False)
+    dataloader = DataLoader(dataset, batch_size=1, shuffle=False)
 
     # Evaluate the hardcoded model on 5 batches to get the labels
     n_batches = 5
     loss = 0
     for i, (batch, labels) in enumerate(dataloader):
+        batch = batch[0]
+        labels = labels[0]
         if i >= n_batches:
             break
         hardcoded_out = piecewise_model(batch.to(device))

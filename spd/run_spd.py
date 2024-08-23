@@ -18,6 +18,7 @@ from tqdm import tqdm
 
 from spd.log import logger
 from spd.models.base import Model, SPDModel
+from spd.scripts.piecewise.models import PiecewiseFunctionSPDTransformer
 from spd.types import RootPath
 from spd.utils import calc_attributions, calc_topk_mask
 
@@ -253,6 +254,10 @@ def optimize(
 
         batch = batch.to(device=device)
         labels = labels.to(device=device)
+
+        if isinstance(model, PiecewiseFunctionSPDTransformer):
+            batch = batch[0]
+            labels = labels[0]
 
         if pretrained_model is not None:
             labels = pretrained_model(batch)
