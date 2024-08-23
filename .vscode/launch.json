@@ -42,7 +42,7 @@
             "type": "debugpy",
             "request": "launch",
             "program": "${workspaceFolder}/spd/experiments/linear/linear_decomposition.py",
-            "args": "${workspaceFolder}/spd/experiments/linear/linear_config.yaml",
+            "args": "${workspaceFolder}/spd/experiments/linear/linear_lp_config.yaml",
             "console": "integratedTerminal",
             "justMyCode": true,
             "env": {
@@ -78,7 +78,7 @@
             "type": "debugpy",
             "request": "launch",
             "program": "${workspaceFolder}/spd/experiments/piecewise/piecewise_decomposition.py",
-            "args": "${workspaceFolder}/spd/experiments/piecewise/piecewise_config.yaml",
+            "args": "${workspaceFolder}/spd/experiments/piecewise/piecewise_lp_config.yaml",
            "console": "integratedTerminal",
             "justMyCode": true,
             "env": {
