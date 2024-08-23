@@ -2,7 +2,6 @@
 import json
 from collections.abc import Callable, Iterable, Sequence
 from pathlib import Path
-from typing import Any
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -13,6 +12,7 @@ from torch import Tensor
 
 from spd.models.base import Model, SPDModel
 from spd.models.components import MLPComponents
+from spd.utils import calc_neuron_indices
 
 
 # %%
@@ -40,13 +40,6 @@ def initialize_embeds(
 
     W_U.weight.data = torch.zeros(1, d_embed)  # Assuming n_outputs is always 1
     W_U.weight.data[:, -1] = 1.0
-
-
-def find_key_for_value(dictionary: dict[Any, Any], target_value: Any):
-    for key, value_list in dictionary.items():
-        if target_value in value_list:
-            return key
-    return None  # Return None if the value is not found in any list
 
 
 class PiecewiseLinear(nn.Module):
@@ -320,7 +313,7 @@ class ControlledResNet(nn.Module):
         self.num_functions = len(functions)
         self.start = start
         self.end = end
-        self.num_neurons = neurons_per_function
+        self.neurons_per_function = neurons_per_function
         self.n_layers = n_layers
         self.total_neurons = neurons_per_function * self.num_functions
         assert self.total_neurons % n_layers == 0, "num_neurons must be divisible by num layers"
@@ -354,7 +347,7 @@ class ControlledResNet(nn.Module):
             self.functions,
             self.start,
             self.end,
-            self.num_neurons,
+            self.neurons_per_function,
             self.d_control,
             self.simple_bias,
             self.control_W_E,
@@ -368,27 +361,10 @@ class ControlledResNet(nn.Module):
         # split the neurons into n_layers parts
         self.neuron_permutations = torch.split(self.neuron_permutation, self.d_mlp)
         # create n_layers residual layers
-        # create a list of length n_layers, where each element is a list of length num_functions.
-        # The ith element of this list is a list of the indices of the neurons in the corresponding
-        # layer of the controlled piecewise linear that connect to the ith function.
-        ordered_neurons_dict = {
-            i: torch.arange(i * self.num_neurons, (i + 1) * self.num_neurons)
-            for i in range(self.num_functions)
-        }
-        self.neuron_indices = [
-            [
-                torch.tensor(
-                    [
-                        index
-                        for index, neuron in enumerate(self.neuron_permutations[layer].numpy())
-                        if find_key_for_value(ordered_neurons_dict, neuron) == function
-                    ],
-                    dtype=torch.int64,
-                )
-                for function in range(self.num_functions)
-            ]
-            for layer in range(self.n_layers)
-        ]
+
+        self.neuron_indices = calc_neuron_indices(
+            self.neuron_permutations, self.neurons_per_function, self.num_functions
+        )
 
         output_weights_summed = self.controlled_piecewise_linear.output_layer.weight.data.sum(dim=0)
 
@@ -747,7 +723,6 @@ class PiecewiseFunctionSPDTransformer(SPDModel):
         assert self.d_embed == target_transformer.d_embed
         assert self.d_control == target_transformer.d_control
         assert target_transformer.controlled_resnet is not None
-        assert self.n_layers == 1, "Only implemented for n_layers = 1"
         k = self.k
         d_mlp = target_transformer.d_mlp
         # Input layer
@@ -760,6 +735,7 @@ class PiecewiseFunctionSPDTransformer(SPDModel):
         for i in range(self.n_layers):
             # Input layer
             if simple_bias:
+                assert self.n_layers == 1, "Only implemented for n_layers = 1"
                 self.mlps[i].linear1.A.data[:k, :] = torch.eye(k)
                 self.mlps[i].linear1.A.data[-1, :] = torch.zeros(k)
                 self.mlps[i].linear1.B.data[:, :] = target_transformer.mlps[i].input_layer.weight.T[
@@ -799,7 +775,20 @@ class PiecewiseFunctionSPDTransformer(SPDModel):
 
                 # output_layer
                 neuron_indices = target_transformer.controlled_resnet.neuron_indices[i]
-                # assert neuron_indices.dtype == torch.int64
+                self.mlps[i].linear2.A.data[:, :] = 0.0
+                for j, idx_list in enumerate(neuron_indices):
+                    indices_unsqueezed = torch.ones_like(idx_list, dtype=torch.int64) * j
+                    current_device = self.mlps[i].linear2.A.device
+                    self.mlps[i].linear2.A.data[idx_list, indices_unsqueezed] = (
+                        target_transformer.mlps[
+                            i
+                        ].output_layer.weight.data.T.to(current_device)[indices_unsqueezed, -1]
+                    )
+                all_norms = torch.norm(self.mlps[i].linear2.A, dim=0, keepdim=True)
+                self.mlps[i].linear2.A.data /= all_norms
+                self.mlps[i].linear2.B.data[:, :] = 0
+                self.mlps[i].linear2.B.data[:, -1] = 1.0
+                self.mlps[i].linear2.B.data *= all_norms.T
 
     def forward(
         self, x: Float[Tensor, "... inputs"]

@@ -17,7 +17,7 @@ task_config:
   task_name: piecewise
   n_functions: 10
   neurons_per_function: 10
-  n_layers: 1
+  n_layers: 2
   feature_probability: 0.05
   range_min: 0
   range_max: 5

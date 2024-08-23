@@ -3,6 +3,7 @@ import torch
 
 from spd.utils import (
     calc_attributions,
+    calc_neuron_indices,
     calc_topk_mask,
     calculate_closeness_to_identity,
     permute_to_identity,
@@ -178,3 +179,27 @@ def test_calc_topk_mask_with_batch_topk_n_instances():
 
     result = calc_topk_mask(attribution_scores, topk, batch_topk=True)
     torch.testing.assert_close(result, expected_mask)
+
+
+def test_calc_neuron_indices():
+    neuron_permutations = (torch.tensor([8, 6, 2, 11, 0, 5]), torch.tensor([1, 9, 3, 10, 7, 4]))
+    neurons_per_function = 3
+    num_functions = 4
+    indices = calc_neuron_indices(neuron_permutations, neurons_per_function, num_functions)
+    expected_indices = [
+        [
+            torch.tensor([2, 4]),
+            torch.tensor([5]),
+            torch.tensor([0, 1]),
+            torch.tensor([3]),
+        ],
+        [
+            torch.tensor([0]),
+            torch.tensor([2, 5]),
+            torch.tensor([4]),
+            torch.tensor([1, 3]),
+        ],
+    ]
+    for i in range(2):
+        for j in range(4):
+            torch.testing.assert_close(indices[i][j], expected_indices[i][j])
