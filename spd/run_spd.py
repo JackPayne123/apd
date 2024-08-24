@@ -110,10 +110,9 @@ class Config(BaseModel):
                 if not self.topk.is_integer():
                     raise ValueError("topk must be an integer when not using batch_topk")
 
-        # Check that either topk_recon_coeff or lp_sparsity_coeff is set
-        assert (
-            self.topk_recon_coeff is not None or self.lp_sparsity_coeff is not None
-        ), "Either topk_recon_coeff or lp_sparsity_coeff must be set"
+        # Warn if neither topk_recon_coeff nor lp_sparsity_coeff is set
+        if self.topk_recon_coeff is None and self.lp_sparsity_coeff is None:
+            logger.warning("Neither topk_recon_coeff nor lp_sparsity_coeff is set")
 
         # If topk_recon_coeff is set, topk must be set
         if self.topk_recon_coeff is not None:
