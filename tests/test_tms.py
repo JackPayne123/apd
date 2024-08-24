@@ -76,7 +76,7 @@ def test_tms_batch_topk_no_l2():
         print_freq=2,
         save_freq=None,
         lr=1e-3,
-        topk_sparsity_coeff=1,
+        topk_recon_coeff=1,
         topk_l2_coeff=None,
         task_config=TMS_TASK_CONFIG,
     )
@@ -92,7 +92,7 @@ def test_tms_batch_topk_and_l2():
         print_freq=2,
         save_freq=None,
         lr=1e-3,
-        topk_sparsity_coeff=1,
+        topk_recon_coeff=1,
         topk_l2_coeff=0.1,
         task_config=TMS_TASK_CONFIG,
     )
@@ -108,7 +108,7 @@ def test_tms_topk_and_l2():
         print_freq=2,
         save_freq=None,
         lr=1e-3,
-        topk_sparsity_coeff=1,
+        topk_recon_coeff=1,
         topk_l2_coeff=0.1,
         task_config=TMS_TASK_CONFIG,
     )
@@ -142,7 +142,7 @@ def test_tms_topk_and_lp():
         save_freq=None,
         lr=1e-3,
         pnorm=0.9,
-        topk_sparsity_coeff=1,
+        topk_recon_coeff=1,
         lp_sparsity_coeff=1,
         topk_l2_coeff=None,
         task_config=TMS_TASK_CONFIG,

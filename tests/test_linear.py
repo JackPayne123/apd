@@ -70,7 +70,7 @@ def test_deep_linear_batch_topk_no_l2() -> None:
         print_freq=2,
         save_freq=None,
         lr=1e-3,
-        topk_sparsity_coeff=0.01,
+        topk_recon_coeff=0.01,
         topk_l2_coeff=None,
         task_config=DEEP_LINEAR_TASK_CONFIG,
     )
@@ -86,7 +86,7 @@ def test_deep_linear_batch_topk_and_l2() -> None:
         print_freq=2,
         save_freq=None,
         lr=1e-3,
-        topk_sparsity_coeff=0.01,
+        topk_recon_coeff=0.01,
         topk_l2_coeff=0.1,
         task_config=DEEP_LINEAR_TASK_CONFIG,
     )
@@ -104,7 +104,7 @@ def test_deep_linear_batch_topk_and_lp_and_l2() -> None:
         print_freq=2,
         save_freq=None,
         lr=1e-3,
-        topk_sparsity_coeff=0.01,
+        topk_recon_coeff=0.01,
         topk_l2_coeff=0.1,
         task_config=DEEP_LINEAR_TASK_CONFIG,
     )
@@ -120,7 +120,7 @@ def test_deep_linear_topk_and_l2() -> None:
         print_freq=2,
         save_freq=None,
         lr=1e-3,
-        topk_sparsity_coeff=0.01,
+        topk_recon_coeff=0.01,
         topk_l2_coeff=0.1,
         task_config=DEEP_LINEAR_TASK_CONFIG,
     )

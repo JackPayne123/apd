@@ -85,7 +85,7 @@ class Config(BaseModel):
     print_freq: PositiveInt
     save_freq: PositiveInt | None = None
     lr: PositiveFloat
-    topk_sparsity_coeff: PositiveFloat | None = None
+    topk_recon_coeff: PositiveFloat | None = None
     lp_sparsity_coeff: PositiveFloat | None = None
     pnorm: PositiveFloat | None = None
     pnorm_end: PositiveFloat | None = None
@@ -110,14 +110,14 @@ class Config(BaseModel):
                 if not self.topk.is_integer():
                     raise ValueError("topk must be an integer when not using batch_topk")
 
-        # Check that either topk_sparsity_coeff or lp_sparsity_coeff is set
+        # Check that either topk_recon_coeff or lp_sparsity_coeff is set
         assert (
-            self.topk_sparsity_coeff is not None or self.lp_sparsity_coeff is not None
-        ), "Either topk_sparsity_coeff or lp_sparsity_coeff must be set"
+            self.topk_recon_coeff is not None or self.lp_sparsity_coeff is not None
+        ), "Either topk_recon_coeff or lp_sparsity_coeff must be set"
 
-        # If topk_sparsity_coeff is set, topk must be set
-        if self.topk_sparsity_coeff is not None:
-            assert self.topk is not None, "topk must be set if topk_sparsity_coeff is set"
+        # If topk_recon_coeff is set, topk must be set
+        if self.topk_recon_coeff is not None:
+            assert self.topk is not None, "topk must be set if topk_recon_coeff is set"
 
         # If lp_sparsity_coeff is set, pnorm or pnorm_end must be set
         if self.lp_sparsity_coeff is not None:
@@ -125,10 +125,10 @@ class Config(BaseModel):
                 self.pnorm is not None or self.pnorm_end is not None
             ), "pnorm or pnorm_end must be set if lp_sparsity_coeff is set"
 
-        # Check that topk_l2_coeff and topk_sparsity_coeff are None if topk is None
+        # Check that topk_l2_coeff and topk_recon_coeff are None if topk is None
         if self.topk is None:
             assert self.topk_l2_coeff is None, "topk_l2_coeff is not None but topk is"
-            assert self.topk_sparsity_coeff is None, "topk_sparsity_coeff is not None but topk is"
+            assert self.topk_recon_coeff is None, "topk_recon_coeff is not None but topk is"
         return self
 
 
@@ -249,7 +249,7 @@ def optimize(
     lr_schedule_fn = get_lr_schedule_fn(config.lr_schedule)
 
     step_lp_sparsity_coeff = None
-    step_topk_sparsity_coeff = None
+    step_topk_recon_coeff = None
     epoch = 0
     total_samples = 0
     data_iter = iter(dataloader)
@@ -283,11 +283,11 @@ def optimize(
 
         total_samples += batch.shape[0]  # don't include the number of instances
 
-        if config.topk_sparsity_coeff is not None:
-            step_topk_sparsity_coeff = get_sparsity_coeff_linear_warmup(
+        if config.topk_recon_coeff is not None:
+            step_topk_recon_coeff = get_sparsity_coeff_linear_warmup(
                 step=step,
                 steps=config.steps,
-                max_sparsity_coeff=config.topk_sparsity_coeff,
+                max_sparsity_coeff=config.topk_recon_coeff,
                 sparsity_warmup_pct=config.sparsity_warmup_pct,
             )
         if config.lp_sparsity_coeff is not None:
@@ -363,10 +363,10 @@ def optimize(
             lp_sparsity_loss = ((lp_sparsity_loss.abs() + 1e-16) ** (step_pnorm * 0.5)).sum(dim=-1)
             lp_sparsity_loss = lp_sparsity_loss.mean(dim=0)  # Mean over batch dim
 
-        topk_sparsity_loss = None
-        if config.topk_sparsity_coeff is not None:
+        topk_recon_loss = None
+        if config.topk_recon_coeff is not None:
             assert out_topk is not None
-            topk_sparsity_loss = calc_recon_mse(out_topk, labels, has_instance_dim)
+            topk_recon_loss = calc_recon_mse(out_topk, labels, has_instance_dim)
 
         if step % config.print_freq == config.print_freq - 1 or step == 0:
             tqdm.write(f"Step {step}")
@@ -374,8 +374,8 @@ def optimize(
                 tqdm.write(f"Current pnorm: {step_pnorm}")
             if lp_sparsity_loss is not None:
                 tqdm.write(f"LP sparsity loss: \n{lp_sparsity_loss}")
-            if topk_sparsity_loss is not None:
-                tqdm.write(f"Topk sparsity loss: \n{topk_sparsity_loss}")
+            if topk_recon_loss is not None:
+                tqdm.write(f"Topk sparsity loss: \n{topk_recon_loss}")
             tqdm.write(f"Reconstruction loss: \n{out_recon_loss}")
             if topk_l2_loss is not None:
                 tqdm.write(f"topk l2 loss: \n{topk_l2_loss}")
@@ -403,12 +403,12 @@ def optimize(
                         "pnorm": step_pnorm,
                         "lr": step_lr,
                         "lp_sparsity_coeff": step_lp_sparsity_coeff,
-                        "topk_sparsity_coeff": step_topk_sparsity_coeff,
+                        "topk_recon_coeff": step_topk_recon_coeff,
                         "lp_sparsity_loss": lp_sparsity_loss.mean().item()
                         if lp_sparsity_loss is not None
                         else None,
-                        "topk_sparsity_loss": topk_sparsity_loss.mean().item()
-                        if topk_sparsity_loss is not None
+                        "topk_recon_loss": topk_recon_loss.mean().item()
+                        if topk_recon_loss is not None
                         else None,
                         "recon_loss": out_recon_loss.mean().item(),
                         "param_match_loss": param_match_loss.mean().item(),
@@ -432,7 +432,7 @@ def optimize(
             tqdm.write(f"Saved config to {out_dir / 'config.json'}")
 
         out_recon_loss = out_recon_loss.mean()
-        topk_sparsity_loss = topk_sparsity_loss.mean() if topk_sparsity_loss is not None else None
+        topk_recon_loss = topk_recon_loss.mean() if topk_recon_loss is not None else None
         lp_sparsity_loss = lp_sparsity_loss.mean() if lp_sparsity_loss is not None else None
         param_match_loss = param_match_loss.mean()
         topk_l2_loss = topk_l2_loss.mean() if topk_l2_loss is not None else None
@@ -442,9 +442,9 @@ def optimize(
         if lp_sparsity_loss is not None:
             assert step_lp_sparsity_coeff is not None
             loss = loss + step_lp_sparsity_coeff * lp_sparsity_loss
-        if topk_sparsity_loss is not None:
-            assert step_topk_sparsity_coeff is not None
-            loss = loss + step_topk_sparsity_coeff * topk_sparsity_loss
+        if topk_recon_loss is not None:
+            assert step_topk_recon_coeff is not None
+            loss = loss + step_topk_recon_coeff * topk_recon_loss
         if topk_l2_loss is not None:
             assert config.topk_l2_coeff is not None
             loss = loss + config.topk_l2_coeff * topk_l2_loss

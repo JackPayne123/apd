@@ -3,7 +3,7 @@ wandb_run_name: null
 wandb_run_name_prefix: ""
 seed: 0
 topk: 4
-topk_sparsity_coeff: 1e-5
+topk_recon_coeff: 1e-5
 batch_size: 2048
 steps: 20_000
 print_freq: 200

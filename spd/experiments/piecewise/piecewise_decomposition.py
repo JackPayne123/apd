@@ -39,7 +39,7 @@ def get_run_name(config: Config) -> str:
             f"lr{config.lr}_"
             f"p{config.pnorm}_"
             f"topk{config.topk}_"
-            f"topksp{config.topk_sparsity_coeff}_"
+            f"topkrecon{config.topk_recon_coeff}_"
             f"lpsp{config.lp_sparsity_coeff}_"
             f"topkl2_{config.topk_l2_coeff}_"
             f"bs{config.batch_size}"
