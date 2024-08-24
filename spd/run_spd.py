@@ -225,6 +225,100 @@ def calc_topk_l2(
     return topk_l2_penalty.mean(dim=0) / model.n_param_matrices
 
 
+def calc_param_match_loss(
+    model: SPDModel,
+    pretrained_weights: list[Float[Tensor, " ... d_in d_out"]],
+    device: str,
+) -> Float[Tensor, ""] | Float[Tensor, " n_instances"]:
+    """Calculate the parameter match loss.
+
+    This is the L2 difference between the AB matrices of the SPDModel and the pretrained weights.
+
+    Args:
+        model (SPDModel): The model to calculate the parameter match loss for.
+        pretrained_weights (list[Float[Tensor, " ... d_in d_out"]]): The pretrained weights to be
+            matched.
+        device (str): The device to run computations on.
+
+    Returns:
+        The parameter match loss of shape [n_instances] if the model has an n_instances dimension,
+        otherwise of shape [].
+    """
+    param_match_loss = torch.zeros(1, device=device)
+    for i, (A, B) in enumerate(zip(model.all_As(), model.all_Bs(), strict=True)):
+        AB = torch.einsum("...fk,...kg->...fg", A, B)
+        param_match_loss = param_match_loss + ((AB - pretrained_weights[i]) ** 2).mean(dim=(-2, -1))
+    return param_match_loss / model.n_param_matrices
+
+
+def calc_lp_sparsity_loss(
+    model: SPDModel,
+    out: Float[Tensor, "... n_features"],
+    layer_acts: Float[Tensor, "... n_features"],
+    inner_acts: list[Float[Tensor, "... n_features"]],
+    config: Config,
+    step: int,
+) -> Float[Tensor, ""] | Float[Tensor, " n_instances"]:
+    """Calculate the Lp sparsity loss on the attributions.
+
+    Unlike the attributions we calculate for topk in `spd.utils.calc_attributions`, in this function
+    we calculate the derivative w.r.t. the layer activations and multiply by that layer's B matrix.
+    This will give the same gradient as taking the derivative w.r.t. the inner_acts, but importantly
+    it puts the B matrix in the computational graph for this calculation so backprop can pass
+    through it (autograd.grad will not build a computational graph from intermediate tensors
+    https://gist.github.com/danbraunai-apollo/388c3c76be92922cf7b2a2f7da7d0d43). This is a
+    (somewhat arbitrary) decision to include this layer's B matrix but not future layer parameters
+    in the sparsity loss. We don't do this in topk because topk isn't a differentiable operation
+    anyway.
+
+    Args:
+        model (SPDModel): The model to calculate the Lp sparsity loss for.
+        out (Float[Tensor, "... n_features"]): The output of the model.
+        layer_acts (Float[Tensor, "... n_features"]): Activations at the output of each layer (i.e.
+            after both A and B transformations).
+        inner_acts (list[Float[Tensor, "... n_features"]]): The inner acts of the model (i.e.
+            the set of subnetwork activations after the A transformation for each parameter matrix).
+        config (Config): The config to use for the sparsity loss.
+        step (int): The current step of the optimization.
+
+    Returns:
+        The Lp sparsity loss. Will have an n_instances dimension if the model has an n_instances
+            dimension.
+    """
+    lp_sparsity_loss = torch.zeros_like(inner_acts[0], requires_grad=True)
+    for feature_idx in range(out.shape[-1]):
+        grad_layer_acts = torch.autograd.grad(
+            out[..., feature_idx].sum(),
+            layer_acts,
+            retain_graph=True,
+        )
+        sparsity_inner = torch.zeros_like(lp_sparsity_loss, requires_grad=True)
+        for param_matrix_idx in range(model.n_param_matrices):
+            # h_i * grad_h_i
+            sparsity_inner = sparsity_inner + (
+                inner_acts[param_matrix_idx]
+                * torch.einsum(
+                    "...h,...kh->...k",
+                    grad_layer_acts[param_matrix_idx].detach(),
+                    model.all_Bs()[param_matrix_idx],
+                )
+            )
+
+        lp_sparsity_loss = lp_sparsity_loss + sparsity_inner**2
+    lp_sparsity_loss = lp_sparsity_loss / out.shape[-1] + 1e-16
+
+    step_pnorm = (
+        get_step_pnorm(step, config.steps, config.pnorm_end)
+        if config.pnorm is None
+        else config.pnorm
+    )
+
+    # step_pnorm * 0.5 is because we have the squares of sparsity_inner terms above
+    lp_sparsity_loss = ((lp_sparsity_loss.abs() + 1e-16) ** (step_pnorm * 0.5)).sum(dim=-1)
+    lp_sparsity_loss = lp_sparsity_loss.mean(dim=0)  # Mean over batch dim
+    return lp_sparsity_loss
+
+
 def optimize(
     model: SPDModel,
     config: Config,
@@ -234,13 +328,9 @@ def optimize(
     plot_results_fn: Callable[..., plt.Figure | None] | None = None,
     out_dir: Path | None = None,
 ) -> None:
+    model.to(device=device)
+
     has_instance_dim = hasattr(model, "n_instances")
-    if config.loss_type == "param_match":
-        assert pretrained_model is not None, "Need a pretrained model for param_match loss"
-        pretrained_model.requires_grad_(False)
-        pretrained_weights = pretrained_model.all_decomposable_params()
-    else:
-        pretrained_weights = None
 
     # Note that we expect weight decay to be problematic for spd
     opt = torch.optim.AdamW(model.parameters(), lr=config.lr, weight_decay=0.0)
@@ -274,13 +364,15 @@ def optimize(
             data_iter = iter(dataloader)
             batch, labels = next(data_iter)
 
-        if pretrained_model is not None:
-            labels = pretrained_model(batch)
-
         batch = batch.to(device=device)
         labels = labels.to(device=device)
 
-        total_samples += batch.shape[0]  # don't include the number of instances
+        if pretrained_model is not None:
+            pretrained_model.requires_grad_(False)
+            pretrained_model.to(device=device)
+            labels = pretrained_model(batch)
+
+        total_samples += batch.shape[0]
 
         if config.topk_recon_coeff is not None:
             step_topk_recon_coeff = get_sparsity_coeff_linear_warmup(
@@ -301,8 +393,27 @@ def optimize(
         out, layer_acts, inner_acts = model(batch)
         assert len(inner_acts) == model.n_param_matrices
 
-        out_topk = None
-        topk_l2_loss = None
+        # Calculate losses
+        out_recon_loss = calc_recon_mse(out, labels, has_instance_dim)
+
+        param_match_loss = None
+        if config.loss_type == "param_match":
+            assert pretrained_model is not None, "Need a pretrained model for param_match loss"
+            pretrained_weights = pretrained_model.all_decomposable_params()
+            param_match_loss = calc_param_match_loss(model, pretrained_weights, device)
+
+        lp_sparsity_loss = None
+        if config.lp_sparsity_coeff is not None:
+            lp_sparsity_loss = calc_lp_sparsity_loss(
+                model=model,
+                out=out,
+                layer_acts=layer_acts,
+                inner_acts=inner_acts,
+                config=config,
+                step=step,
+            )
+
+        out_topk, topk_l2_loss, topk_recon_loss = None, None, None
         if config.topk is not None:
             attribution_scores = calc_attributions(out, inner_acts)
 
@@ -313,64 +424,20 @@ def optimize(
             # Do a forward pass with only the topk subnetworks
             out_topk, _, inner_acts_topk = model.forward_topk(batch, topk_mask=topk_mask)
             assert len(inner_acts_topk) == model.n_param_matrices
+
             if config.topk_l2_coeff is not None:
                 topk_l2_loss = calc_topk_l2(model, topk_mask, device)
 
-        param_match_loss = torch.zeros(1, device=device)
+            if config.topk_recon_coeff is not None:
+                assert out_topk is not None
+                topk_recon_loss = calc_recon_mse(out_topk, labels, has_instance_dim)
+
+        # Add up the loss terms
         if config.loss_type == "param_match":
-            assert pretrained_weights is not None
-            for i, (A, B) in enumerate(zip(model.all_As(), model.all_Bs(), strict=True)):
-                AB = torch.einsum("...fk,...kg->...fg", A, B)
-                param_match_loss = param_match_loss + ((AB - pretrained_weights[i]) ** 2).mean(
-                    dim=(-2, -1)
-                )
-            param_match_loss = param_match_loss / model.n_param_matrices
-
-        out_recon_loss = calc_recon_mse(out, labels, has_instance_dim)
-
-        lp_sparsity_loss = None
-        if config.lp_sparsity_coeff is not None:
-            lp_sparsity_loss = torch.zeros_like(inner_acts[0], requires_grad=True)
-            for feature_idx in range(out.shape[-1]):
-                grad_layer_acts = torch.autograd.grad(
-                    out[..., feature_idx].sum(),
-                    layer_acts,
-                    retain_graph=True,
-                )
-                sparsity_inner = torch.zeros_like(lp_sparsity_loss, requires_grad=True)
-                for param_matrix_idx in range(model.n_param_matrices):
-                    # h_i * grad_h_i
-                    sparsity_inner = sparsity_inner + (
-                        inner_acts[param_matrix_idx]
-                        * torch.einsum(
-                            "...h,...kh->...k",
-                            grad_layer_acts[param_matrix_idx].detach(),
-                            model.all_Bs()[param_matrix_idx],
-                        )
-                    )
-
-                lp_sparsity_loss = lp_sparsity_loss + sparsity_inner**2
-            lp_sparsity_loss = lp_sparsity_loss / out.shape[-1] + 1e-16
-
-            step_pnorm = (
-                get_step_pnorm(step, config.steps, config.pnorm_end)
-                if config.pnorm is None
-                else config.pnorm
-            )
-
-            # step_pnorm * 0.5 is because we have the squares of sparsity_inner terms above
-            lp_sparsity_loss = ((lp_sparsity_loss.abs() + 1e-16) ** (step_pnorm * 0.5)).sum(dim=-1)
-            lp_sparsity_loss = lp_sparsity_loss.mean(dim=0)  # Mean over batch dim
-
-        topk_recon_loss = None
-        if config.topk_recon_coeff is not None:
-            assert out_topk is not None
-            topk_recon_loss = calc_recon_mse(out_topk, labels, has_instance_dim)
-
-        # Collect loss terms
-        loss = (
-            param_match_loss.mean() if config.loss_type == "param_match" else out_recon_loss.mean()
-        )
+            assert param_match_loss is not None
+            loss = param_match_loss.mean()
+        else:
+            loss = out_recon_loss.mean()
         if lp_sparsity_loss is not None:
             assert step_lp_sparsity_coeff is not None
             loss = loss + step_lp_sparsity_coeff * lp_sparsity_loss.mean()
@@ -396,9 +463,9 @@ def optimize(
             tqdm.write(f"Reconstruction loss: \n{out_recon_loss}")
             if topk_l2_loss is not None:
                 tqdm.write(f"topk l2 loss: \n{topk_l2_loss}")
-            if config.loss_type == "param_match":
+            if param_match_loss is not None:
                 param_match_loss_repr = (
-                    param_match_loss.item() if len(param_match_loss) == 1 else param_match_loss
+                    param_match_loss.item() if param_match_loss.ndim == 0 else param_match_loss
                 )
                 tqdm.write(f"Param match loss: \n{param_match_loss_repr}\n")
 
@@ -428,7 +495,9 @@ def optimize(
                         if topk_recon_loss is not None
                         else None,
                         "recon_loss": out_recon_loss.mean().item(),
-                        "param_match_loss": param_match_loss.mean().item(),
+                        "param_match_loss": param_match_loss.mean().item()
+                        if param_match_loss is not None
+                        else None,
                         "topk_l2_loss": topk_l2_loss.mean().item()
                         if topk_l2_loss is not None
                         else None,
