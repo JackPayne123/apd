@@ -274,11 +274,11 @@ def optimize(
             data_iter = iter(dataloader)
             batch, labels = next(data_iter)
 
-        batch = batch.to(device=device)
-        labels = labels.to(device=device)
-
         if pretrained_model is not None:
             labels = pretrained_model(batch)
+
+        batch = batch.to(device=device)
+        labels = labels.to(device=device)
 
         total_samples += batch.shape[0]  # don't include the number of instances
 
@@ -367,6 +367,24 @@ def optimize(
             assert out_topk is not None
             topk_recon_loss = calc_recon_mse(out_topk, labels, has_instance_dim)
 
+        # Collect loss terms
+        loss = (
+            param_match_loss.mean() if config.loss_type == "param_match" else out_recon_loss.mean()
+        )
+        if lp_sparsity_loss is not None:
+            assert step_lp_sparsity_coeff is not None
+            loss = loss + step_lp_sparsity_coeff * lp_sparsity_loss.mean()
+        if topk_recon_loss is not None:
+            assert step_topk_recon_coeff is not None
+            loss = loss + step_topk_recon_coeff * topk_recon_loss.mean()
+        if topk_l2_loss is not None:
+            assert config.topk_l2_coeff is not None
+            loss = loss + config.topk_l2_coeff * topk_l2_loss.mean()
+
+        loss.backward()
+        opt.step()
+
+        # Logging
         if step % config.print_freq == config.print_freq - 1 or step == 0:
             tqdm.write(f"Step {step}")
             if step_pnorm is not None:
@@ -429,27 +447,6 @@ def optimize(
             with open(out_dir / "config.json", "w") as f:
                 json.dump(config.model_dump(), f, indent=4)
             tqdm.write(f"Saved config to {out_dir / 'config.json'}")
-
-        out_recon_loss = out_recon_loss.mean()
-        topk_recon_loss = topk_recon_loss.mean() if topk_recon_loss is not None else None
-        lp_sparsity_loss = lp_sparsity_loss.mean() if lp_sparsity_loss is not None else None
-        param_match_loss = param_match_loss.mean()
-        topk_l2_loss = topk_l2_loss.mean() if topk_l2_loss is not None else None
-
-        # Collect loss terms
-        loss = param_match_loss if config.loss_type == "param_match" else out_recon_loss
-        if lp_sparsity_loss is not None:
-            assert step_lp_sparsity_coeff is not None
-            loss = loss + step_lp_sparsity_coeff * lp_sparsity_loss
-        if topk_recon_loss is not None:
-            assert step_topk_recon_coeff is not None
-            loss = loss + step_topk_recon_coeff * topk_recon_loss
-        if topk_l2_loss is not None:
-            assert config.topk_l2_coeff is not None
-            loss = loss + config.topk_l2_coeff * topk_l2_loss
-
-        loss.backward()
-        opt.step()
 
     if out_dir is not None:
         torch.save(model.state_dict(), out_dir / f"model_{config.steps}.pth")
