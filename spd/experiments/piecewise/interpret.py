@@ -16,7 +16,9 @@ from spd.run_spd import Config, PiecewiseConfig
 from spd.utils import calc_attributions
 
 
-def make_plot(pretrained_path: Path, title: str, plot_all: bool = False) -> None:
+def make_plot(
+    pretrained_path: Path, title: str, plot_all: bool = False, print_attributions: bool = False
+) -> None:
     with open(pretrained_path.parent / "config.json") as f:
         config = Config(**json.load(f))
 
@@ -72,7 +74,8 @@ def make_plot(pretrained_path: Path, title: str, plot_all: bool = False) -> None
     # Step 3: Get attribution scores by doing a backward pass on the spd model
     attribution_scores = calc_attributions(out, inner_acts)
 
-    print(f"Attribution scores: {attribution_scores}")
+    if print_attributions:
+        print(f"Attribution scores: {attribution_scores}")
     # Plot a matshow of the attribution scores
     # Each row should have it's own color scale
     # Normalize each row to have mean 0 and std 1
@@ -169,13 +172,11 @@ def make_plot(pretrained_path: Path, title: str, plot_all: bool = False) -> None
 # %%
 
 if __name__ == "__main__":
-    pretrained_paths = Path("out/").rglob("reproduce_good*/model_19999.pth")
-    for pretrained_path in pretrained_paths:
-        pretrained_path = Path(
-            "/data/stefan_heimersheim/projects/SPD/spd/spd/experiments/piecewise/" / pretrained_path
-        )
-        print(f"Processing {pretrained_path}")
-        try:
-            make_plot(pretrained_path, title=pretrained_path.parent.name)
-        except Exception as e:
-            print(f"Error processing {pretrained_path}: {e}")
+    pretrained_path = Path(
+        "/data/jake_mendel/SPD/spd/spd/experiments/piecewise/out/lay1_lr0.0001_p0.9_topk1.25_topkrecon0.1_lpsp1e-30_topkl2_0.1_bs2048_hAB/model_4999.pth"
+    )
+    print(f"Processing {pretrained_path}")
+    try:
+        make_plot(pretrained_path, title=pretrained_path.parent.name)
+    except Exception as e:
+        print(f"Error processing {pretrained_path}: {e}")
