@@ -5,7 +5,7 @@ from torch.utils.data import DataLoader
 from spd.experiments.piecewise.piecewise_dataset import PiecewiseDataset
 from spd.experiments.piecewise.piecewise_decomposition import get_model_and_dataloader
 from spd.run_spd import Config, PiecewiseConfig, optimize
-from spd.utils import set_seed
+from spd.utils import calc_neuron_indices, set_seed
 
 
 # Create a simple Piecewise config that we can use in multiple tests
@@ -19,6 +19,7 @@ def get_piecewise_config(handcoded_AB: bool = False, n_layers: int = 2) -> Piece
         range_max=5.0,
         k=6,
         handcoded_AB=handcoded_AB,
+        simple_bias=True,
     )
 
 
@@ -181,3 +182,27 @@ def test_piecewise_dataset():
     # all rows with all zeros). We allow a small difference as we're only using batch_size=10.
     mean_control_bits = control_bits.float().mean()
     assert mean_control_bits >= (feature_probability - 0.1)
+
+
+def test_calc_neuron_indices():
+    neuron_permutations = (torch.tensor([8, 6, 2, 11, 0, 5]), torch.tensor([1, 9, 3, 10, 7, 4]))
+    neurons_per_function = 3
+    num_functions = 4
+    indices = calc_neuron_indices(neuron_permutations, neurons_per_function, num_functions)
+    expected_indices = [
+        [
+            torch.tensor([2, 4]),
+            torch.tensor([5]),
+            torch.tensor([0, 1]),
+            torch.tensor([3]),
+        ],
+        [
+            torch.tensor([0]),
+            torch.tensor([2, 5]),
+            torch.tensor([4]),
+            torch.tensor([1, 3]),
+        ],
+    ]
+    for i in range(2):
+        for j in range(4):
+            torch.testing.assert_close(indices[i][j], expected_indices[i][j])

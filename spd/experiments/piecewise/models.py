@@ -11,6 +11,7 @@ from torch import Tensor
 
 from spd.models.base import Model, SPDModel
 from spd.models.components import MLPComponents
+from spd.utils import calc_neuron_indices
 
 
 def initialize_embeds(
@@ -133,8 +134,9 @@ class ControlledPiecewiseLinear(nn.Module):
         end: float,
         num_neurons: int,
         d_control: int,
+        simple_bias: bool,
         control_W_E: torch.Tensor | None = None,
-        negative_suppression: int = 100,
+        suppression_size: int = 100,
         rng: np.random.Generator | None = None,
         torch_gen: torch.Generator | None = None,
     ):
@@ -144,7 +146,7 @@ class ControlledPiecewiseLinear(nn.Module):
         self.start = start
         self.end = end
         self.num_neurons = num_neurons
-        self.negative_suppression = negative_suppression
+        self.suppression_size = suppression_size
         self.d_control = d_control
         self.control_W_E = control_W_E
         self.input_layer = nn.Linear(
@@ -154,10 +156,13 @@ class ControlledPiecewiseLinear(nn.Module):
         self.output_layer = nn.Linear(
             self.num_functions * self.num_neurons, self.num_functions, bias=True
         )
-        self.initialise_params(rng, torch_gen)
+        self.initialise_params(rng, torch_gen, simple_bias)
 
     def initialise_params(
-        self, rng: np.random.Generator | None = None, torch_gen: torch.Generator | None = None
+        self,
+        rng: np.random.Generator | None = None,
+        torch_gen: torch.Generator | None = None,
+        simple_bias: bool = True,
     ):
         if rng is None:
             rng = np.random.default_rng()
@@ -174,33 +179,36 @@ class ControlledPiecewiseLinear(nn.Module):
         self.piecewise_linears = [
             PiecewiseLinear(f, self.start, self.end, self.num_neurons) for f in self.functions
         ]
-        # initialise all weights and biases to 0
+
+        # initialise all weights to 0
         self.input_layer.weight.data = torch.zeros(
             self.num_functions * self.num_neurons, self.d_control + 1
         )
-        for i in range(self.num_functions):
-            piecewise_linear = self.piecewise_linears[i]
-            self.input_layer.bias.data[
-                i * self.num_neurons : (i + 1) * self.num_neurons
-            ] = -self.negative_suppression
-
-            self.input_layer.weight.data[i * self.num_neurons : (i + 1) * self.num_neurons, 0] = (
-                piecewise_linear.input_layer.weight.data.squeeze()
-            )
-            self.input_layer.weight.data[i * self.num_neurons : (i + 1) * self.num_neurons, 1:] += (
-                self.control_W_E[i]
-                * (self.negative_suppression + piecewise_linear.input_layer.bias.data.unsqueeze(1))
-            )
-
         self.output_layer.weight.data = torch.zeros(
             self.num_functions, self.num_functions * self.num_neurons
         )
+
         for i in range(self.num_functions):
             piecewise_linear = self.piecewise_linears[i]
-            self.output_layer.bias.data[i] = piecewise_linear.output_layer.bias.data
-            self.output_layer.weight.data[i, i * self.num_neurons : (i + 1) * self.num_neurons] = (
-                piecewise_linear.output_layer.weight.data.squeeze()
+            self.input_layer.weight.data[i * self.num_neurons : (i + 1) * self.num_neurons, 0] = (
+                piecewise_linear.input_layer.weight.data.squeeze()
             )
+            if simple_bias:
+                self.input_layer.bias.data[
+                    i * self.num_neurons : (i + 1) * self.num_neurons
+                ] = -self.suppression_size
+                self.input_layer.weight.data[
+                    i * self.num_neurons : (i + 1) * self.num_neurons, 1:
+                ] += self.control_W_E[i] * (
+                    self.suppression_size + piecewise_linear.input_layer.bias.data.unsqueeze(1)
+                )
+            else:
+                self.input_layer.bias.data[i * self.num_neurons : (i + 1) * self.num_neurons] = (
+                    piecewise_linear.input_layer.bias.data - self.suppression_size
+                )
+                self.input_layer.weight.data[
+                    i * self.num_neurons : (i + 1) * self.num_neurons, 1:
+                ] = self.control_W_E[i] * self.suppression_size
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         control_bits = x[:, 1:]
@@ -288,7 +296,8 @@ class ControlledResNet(nn.Module):
         neurons_per_function: int,
         n_layers: int,
         d_control: int,
-        negative_suppression: int = 100,
+        simple_bias: bool = True,
+        suppression_size: int = 100,
         rng: np.random.Generator | None = None,
         torch_gen: torch.Generator | None = None,
     ):
@@ -298,11 +307,12 @@ class ControlledResNet(nn.Module):
         self.num_functions = len(functions)
         self.start = start
         self.end = end
-        self.num_neurons = neurons_per_function
+        self.neurons_per_function = neurons_per_function
         self.n_layers = n_layers
         self.total_neurons = neurons_per_function * self.num_functions
         assert self.total_neurons % n_layers == 0, "num_neurons must be divisible by num layers"
-        self.negative_suppression = negative_suppression
+        self.suppression_size = suppression_size
+        self.simple_bias = simple_bias
 
         self.d_mlp = self.total_neurons // n_layers
         # d_model: one for x, one for each control bit, and one for y (the output of the controlled
@@ -331,10 +341,11 @@ class ControlledResNet(nn.Module):
             self.functions,
             self.start,
             self.end,
-            self.num_neurons,
+            self.neurons_per_function,
             self.d_control,
+            self.simple_bias,
             self.control_W_E,
-            self.negative_suppression,
+            self.suppression_size,
             rng,
             torch_gen,
         )
@@ -344,6 +355,10 @@ class ControlledResNet(nn.Module):
         # split the neurons into n_layers parts
         self.neuron_permutations = torch.split(self.neuron_permutation, self.d_mlp)
         # create n_layers residual layers
+
+        self.neuron_indices = calc_neuron_indices(
+            self.neuron_permutations, self.neurons_per_function, self.num_functions
+        )
 
         output_weights_summed = self.controlled_piecewise_linear.output_layer.weight.data.sum(dim=0)
 
@@ -365,7 +380,8 @@ class ControlledResNet(nn.Module):
             ]
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        # concatenate x and control bits
+        # concatenate x and control bits. The first residual stream dimension is x, and the last
+        # residual stream dimension is y. The other residual dimensions are the control bits
         control_bits = x[:, 1:]
         input_value = x[:, 0].unsqueeze(1)
 
@@ -468,6 +484,8 @@ class PiecewiseFunctionTransformer(Model):
         self.d_embed = self.n_inputs + 1 if d_embed is None else d_embed
         self.d_control = self.d_embed - 2
 
+        self.controlled_resnet: ControlledResNet | None = None
+
         self.num_functions = n_inputs - 1
         self.n_outputs = 1  # this is hardcoded. This class isn't defined for multiple outputs
 
@@ -505,6 +523,7 @@ class PiecewiseFunctionTransformer(Model):
         range_min: float = 0,
         range_max: float = 5,
         seed: int | None = None,
+        simple_bias: bool = False,
     ) -> "PiecewiseFunctionTransformer":
         if seed is not None:
             # Create local random number generators
@@ -530,11 +549,13 @@ class PiecewiseFunctionTransformer(Model):
             end=range_max,
             neurons_per_function=neurons_per_function,
             n_layers=n_layers,
-            d_control=d_embed - 2,  # no superpos
-            negative_suppression=int(range_max + 1),
+            d_control=d_embed - 2,  # no superposition
+            simple_bias=simple_bias,
+            suppression_size=int(range_max + 1),
             rng=rng,
             torch_gen=torch_gen,
         )
+        model.controlled_resnet = handcoded_model
         # Copy the weights from the hand-coded model to the model
 
         # the control_W_E of the ControlledResNet class is just a part of the W_E of this class. In
@@ -698,23 +719,70 @@ class PiecewiseFunctionSPDTransformer(SPDModel):
         assert self.n_layers == target_transformer.n_layers
         assert self.d_embed == target_transformer.d_embed
         assert self.d_control == target_transformer.d_control
-        assert self.n_layers == 1, "Only implemented for n_layers = 1"
+        assert target_transformer.controlled_resnet is not None
         k = self.k
         d_mlp = target_transformer.d_mlp
-        # Input layer
-        self.mlps[0].linear1.A.data[:k, :] = torch.eye(k)
-        self.mlps[0].linear1.A.data[-1, :] = torch.zeros(k)
-        self.mlps[0].linear1.B.data[:, :] = target_transformer.mlps[0].input_layer.weight.T[:k, :]
-        # Output layer
-        original_Wout_last_col = target_transformer.mlps[0].output_layer.weight.T[:, -1]
-        norm = torch.norm(original_Wout_last_col, dim=0)
-        self.mlps[0].linear2.A.data[:, 0] = original_Wout_last_col / norm
-        self.mlps[0].linear2.A.data[:, 1:] = torch.ones(d_mlp, k - 1)
-        self.mlps[0].linear2.B.data[:, :] = torch.zeros(k, self.d_embed)
-        self.mlps[0].linear2.B.data[0, -1] = 1.0 * norm
-        # Assert biases
-        assert torch.allclose(self.mlps[0].bias1, target_transformer.mlps[0].input_layer.bias)
-        assert torch.allclose(torch.tensor(0.0), target_transformer.mlps[0].output_layer.bias)
+
+        simple_bias = target_transformer.controlled_resnet.simple_bias
+        if not simple_bias:
+            assert (
+                k == self.n_inputs - 1
+            ), f"Require k = n_inputs - 1, got k = {k}, n_inputs = {self.n_inputs}"
+            # TODO: implement a similar assertion for simple_bias case
+        for i in range(self.n_layers):
+            # Input layer
+            if simple_bias:
+                assert self.n_layers == 1, "Only implemented for n_layers = 1"
+                self.mlps[i].linear1.A.data[:k, :] = torch.eye(k)
+                self.mlps[i].linear1.A.data[-1, :] = torch.zeros(k)
+                self.mlps[i].linear1.B.data[:, :] = target_transformer.mlps[i].input_layer.weight.T[
+                    :k, :
+                ]
+                # Output layer
+                original_Wout_last_col = target_transformer.mlps[i].output_layer.weight.T[:, -1]
+                norm = torch.norm(original_Wout_last_col, dim=0)
+                self.mlps[i].linear2.A.data[:, 0] = original_Wout_last_col / norm
+                self.mlps[i].linear2.A.data[:, 1:] = torch.ones(d_mlp, k - 1)
+                self.mlps[i].linear2.B.data[:, :] = torch.zeros(k, self.d_embed)
+                self.mlps[i].linear2.B.data[0, -1] = 1.0 * norm
+                # Assert biases
+                assert torch.allclose(
+                    self.mlps[i].bias1, target_transformer.mlps[i].input_layer.bias
+                )
+                assert torch.allclose(
+                    torch.tensor(0.0), target_transformer.mlps[i].output_layer.bias
+                )
+
+            else:
+                # input_layer
+                self.mlps[i].linear1.A.data[:, :] = 0.0
+                self.mlps[i].linear1.A.data[0, :] = 1.0
+                suppression_size = target_transformer.controlled_resnet.suppression_size
+                self.mlps[i].linear1.A.data[1:-1, :] = torch.eye(k) * suppression_size
+                A_col_norm = torch.norm(self.mlps[i].linear1.A[:, 0]).item()
+                self.mlps[i].linear1.A.data /= A_col_norm
+                self.mlps[i].linear1.B.data[:, :] = (
+                    target_transformer.mlps[i].input_layer.weight.T[1:-1, :] / suppression_size
+                )
+                # assert that every entry in B is 0 or 1
+                assert torch.all(
+                    (self.mlps[i].linear1.B.data == 0) | (self.mlps[i].linear1.B.data == 1)
+                )
+                self.mlps[i].linear1.B.data *= A_col_norm
+
+                # output_layer
+                neuron_indices = target_transformer.controlled_resnet.neuron_indices[i]
+                self.mlps[i].linear2.A.data[:, :] = 0.0
+                for j, idx_list in enumerate(neuron_indices):
+                    current_device = self.mlps[i].linear2.A.device
+                    self.mlps[i].linear2.A.data[idx_list, j] = target_transformer.mlps[
+                        i
+                    ].output_layer.weight.data.T.to(current_device)[idx_list, -1]
+                all_norms = torch.norm(self.mlps[i].linear2.A, dim=0, keepdim=True)
+                self.mlps[i].linear2.A.data /= all_norms
+                self.mlps[i].linear2.B.data[:, :] = 0
+                self.mlps[i].linear2.B.data[:, -1] = 1.0
+                self.mlps[i].linear2.B.data *= all_norms.T
 
     def forward(
         self, x: Float[Tensor, "... inputs"]
