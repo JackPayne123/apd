@@ -2,25 +2,25 @@
 wandb_run_name: null
 wandb_run_name_prefix: ""
 seed: 0
-topk: 0.55
-max_sparsity_coeff: 1
-topk_l2_coeff: 0.01
-lr: 0
-batch_size: 20480
-steps: 1
+topk: 1.25
+max_sparsity_coeff: 1e-1
+topk_l2_coeff: 1e-1
+lr: 1e-3
+batch_size: 2048
+steps: 20_000
 print_freq: 200
-save_freq: 1
+save_freq: 5_000
 lr_warmup_pct: 0.01
 loss_type: param_match
 batch_topk: true
 task_config:
   task_name: piecewise
   n_functions: 10
-  neurons_per_function: 10
+  neurons_per_function: 2
   n_layers: 1
   feature_probability: 0.05
   range_min: 0
   range_max: 5
-  k: 10
-  handcoded_AB: true
+  k: 20
+  handcoded_AB: false
   simple_bias: false

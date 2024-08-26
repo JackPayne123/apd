@@ -169,9 +169,9 @@ def make_plot(pretrained_path: Path, title: str, plot_all: bool = False) -> None
 # %%
 
 if __name__ == "__main__":
-    pretrained_paths = Path("out/").rglob("reproduce_good*/model_19999.pth")
+    # pretrained_paths = Path("out/").rglob("reproduce_good*/model_19999.pth")
     pretrained_path = Path(
-        "/data/jake_mendel/SPD/spd/spd/scripts/piecewise/out/sp1.0_l20.01_lay1_lr0.0_pNone_topk0.875_topkl20.01_bs2048_hAB/model_1.pth"
+        "/data/jake_mendel/SPD/spd/spd/scripts/piecewise/out/sp0.01_l20.01_lay1_lr0.001_pNone_topk0.625_topkl20.01_bs2048/model_19999.pth"
     )
     print(f"Processing {pretrained_path}")
     try:
