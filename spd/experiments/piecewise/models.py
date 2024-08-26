@@ -210,6 +210,11 @@ class ControlledPiecewiseLinear(nn.Module):
                     i * self.num_neurons : (i + 1) * self.num_neurons, 1:
                 ] = self.control_W_E[i] * self.suppression_size
 
+            self.output_layer.bias.data[i] = piecewise_linear.output_layer.bias.data
+            self.output_layer.weight.data[i, i * self.num_neurons : (i + 1) * self.num_neurons] = (
+                piecewise_linear.output_layer.weight.data.squeeze()
+            )
+
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         control_bits = x[:, 1:]
         input_value = x[:, 0].unsqueeze(1)
@@ -720,30 +725,36 @@ class PiecewiseFunctionSPDTransformer(SPDModel):
         assert self.d_embed == target_transformer.d_embed
         assert self.d_control == target_transformer.d_control
         assert target_transformer.controlled_resnet is not None
+
         k = self.k
-        d_mlp = target_transformer.d_mlp
+
+        self.to(target_transformer.W_E.weight.device)
+        # set all weights and biases in self to zero
+        for mlp in self.mlps:
+            mlp.linear1.A.data[:, :] = 0.0
+            mlp.linear1.B.data[:, :] = 0.0
+            mlp.linear2.A.data[:, :] = 0.0
+            mlp.linear2.B.data[:, :] = 0.0
 
         simple_bias = target_transformer.controlled_resnet.simple_bias
-        if not simple_bias:
-            assert (
-                k == self.n_inputs - 1
-            ), f"Require k = n_inputs - 1, got k = {k}, n_inputs = {self.n_inputs}"
-            # TODO: implement a similar assertion for simple_bias case
+
+        correct_k = self.d_embed - 1 if simple_bias else self.n_inputs - 1
+        assert correct_k <= k, f"Require k >= {correct_k}, got k = {k}"
+
         for i in range(self.n_layers):
-            # Input layer
             if simple_bias:
+                # Input layer
                 assert self.n_layers == 1, "Only implemented for n_layers = 1"
-                self.mlps[i].linear1.A.data[:k, :] = torch.eye(k)
-                self.mlps[i].linear1.A.data[-1, :] = torch.zeros(k)
-                self.mlps[i].linear1.B.data[:, :] = target_transformer.mlps[i].input_layer.weight.T[
-                    :k, :
-                ]
+                self.mlps[i].linear1.A.data[:correct_k, :correct_k] = torch.eye(correct_k)
+                self.mlps[i].linear1.A.data[:, correct_k:] = 1.0  # avoid division by zero
+                self.mlps[i].linear1.B.data[:correct_k, :] = target_transformer.mlps[
+                    i
+                ].input_layer.weight.T[:correct_k, :]
                 # Output layer
                 original_Wout_last_col = target_transformer.mlps[i].output_layer.weight.T[:, -1]
                 norm = torch.norm(original_Wout_last_col, dim=0)
                 self.mlps[i].linear2.A.data[:, 0] = original_Wout_last_col / norm
-                self.mlps[i].linear2.A.data[:, 1:] = torch.ones(d_mlp, k - 1)
-                self.mlps[i].linear2.B.data[:, :] = torch.zeros(k, self.d_embed)
+                self.mlps[i].linear2.A.data[:, 1:] = 1.0  # avoid division by zero
                 self.mlps[i].linear2.B.data[0, -1] = 1.0 * norm
                 # Assert biases
                 assert torch.allclose(
@@ -755,14 +766,16 @@ class PiecewiseFunctionSPDTransformer(SPDModel):
 
             else:
                 # input_layer
-                self.mlps[i].linear1.A.data[:, :] = 0.0
                 self.mlps[i].linear1.A.data[0, :] = 1.0
                 suppression_size = target_transformer.controlled_resnet.suppression_size
-                self.mlps[i].linear1.A.data[1:-1, :] = torch.eye(k) * suppression_size
+                self.mlps[i].linear1.A.data[1:-1, :correct_k] = (
+                    torch.eye(correct_k) * suppression_size
+                )
                 A_col_norm = torch.norm(self.mlps[i].linear1.A[:, 0]).item()
                 self.mlps[i].linear1.A.data /= A_col_norm
-                self.mlps[i].linear1.B.data[:, :] = (
-                    target_transformer.mlps[i].input_layer.weight.T[1:-1, :] / suppression_size
+                self.mlps[i].linear1.B.data[:correct_k, :] = (
+                    target_transformer.mlps[i].input_layer.weight.T[1 : correct_k + 1, :]
+                    / suppression_size
                 )
                 # assert that every entry in B is 0 or 1
                 assert torch.all(
@@ -772,17 +785,21 @@ class PiecewiseFunctionSPDTransformer(SPDModel):
 
                 # output_layer
                 neuron_indices = target_transformer.controlled_resnet.neuron_indices[i]
-                self.mlps[i].linear2.A.data[:, :] = 0.0
                 for j, idx_list in enumerate(neuron_indices):
-                    current_device = self.mlps[i].linear2.A.device
+                    # current_device = self.mlps[i].linear2.A.device
                     self.mlps[i].linear2.A.data[idx_list, j] = target_transformer.mlps[
                         i
-                    ].output_layer.weight.data.T.to(current_device)[idx_list, -1]
+                    ].output_layer.weight.data.T[idx_list, -1]
+                self.mlps[i].linear2.A.data[:, correct_k:] = 1.0  # avoid division by zero
                 all_norms = torch.norm(self.mlps[i].linear2.A, dim=0, keepdim=True)
                 self.mlps[i].linear2.A.data /= all_norms
-                self.mlps[i].linear2.B.data[:, :] = 0
-                self.mlps[i].linear2.B.data[:, -1] = 1.0
+                self.mlps[i].linear2.B.data[:correct_k, -1] = 1.0
                 self.mlps[i].linear2.B.data *= all_norms.T
+
+            AB_in = torch.einsum("ij,jk->ki", self.mlps[i].linear1.A, self.mlps[i].linear1.B)
+            assert torch.allclose(AB_in, target_transformer.mlps[i].input_layer.weight)
+            AB_out = torch.einsum("ij,jk->ki", self.mlps[i].linear2.A, self.mlps[i].linear2.B)
+            assert torch.allclose(AB_out, target_transformer.mlps[i].output_layer.weight)
 
     def forward(
         self, x: Float[Tensor, "... inputs"]
