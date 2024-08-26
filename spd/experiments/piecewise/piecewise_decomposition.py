@@ -57,6 +57,7 @@ def get_model_and_dataloader(
     PiecewiseFunctionTransformer,
     PiecewiseFunctionSPDTransformer,
     DataLoader[tuple[Float[Tensor, " n_inputs"], Float[Tensor, ""]]],
+    DataLoader[tuple[Float[Tensor, " n_inputs"], Float[Tensor, ""]]],
 ]:
     """Set up the piecewise models and dataset."""
     assert isinstance(config.task_config, PiecewiseConfig)
@@ -105,10 +106,26 @@ def get_model_and_dataloader(
         feature_probability=config.task_config.feature_probability,
         range_min=config.task_config.range_min,
         range_max=config.task_config.range_max,
+        batch_size=config.batch_size,
+        return_labels=config.task_config.return_labels,
     )
-    dataloader = DataLoader(dataset, batch_size=config.batch_size, shuffle=False)
+    dataloader = DataLoader(dataset, batch_size=1, shuffle=False)
 
-    return piecewise_model, piecewise_model_spd, dataloader
+    if config.task_config.return_labels:
+        test_dataloader = dataloader
+    else:
+        test_dataset = PiecewiseDataset(
+            n_inputs=piecewise_model.n_inputs,
+            functions=functions,
+            feature_probability=config.task_config.feature_probability,
+            range_min=config.task_config.range_min,
+            range_max=config.task_config.range_max,
+            batch_size=config.batch_size,
+            return_labels=True,
+        )
+        test_dataloader = DataLoader(test_dataset, batch_size=1, shuffle=False)
+
+    return piecewise_model, piecewise_model_spd, dataloader, test_dataloader
 
 
 def main(
@@ -136,14 +153,17 @@ def main(
     out_dir = Path(__file__).parent / "out" / run_name
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    piecewise_model, piecewise_model_spd, dataloader = get_model_and_dataloader(
+    piecewise_model, piecewise_model_spd, dataloader, test_dataloader = get_model_and_dataloader(
         config, device, out_dir
     )
 
     # Evaluate the hardcoded model on 5 batches to get the labels
     n_batches = 5
     loss = 0
-    for i, (batch, labels) in enumerate(dataloader):
+
+    for i, (batch, labels) in enumerate(test_dataloader):
+        batch = batch[0]
+        labels = labels[0]
         if i >= n_batches:
             break
         hardcoded_out = piecewise_model(batch.to(device))
