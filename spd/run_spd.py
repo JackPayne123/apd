@@ -23,7 +23,6 @@ from torch import Tensor
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
-from spd.experiments.piecewise.models import PiecewiseFunctionSPDTransformer
 from spd.log import logger
 from spd.models.base import Model, SPDModel
 from spd.types import Probability, RootPath
@@ -72,7 +71,6 @@ class PiecewiseConfig(BaseModel):
     k: PositiveInt
     simple_bias: bool = False
     handcoded_AB: bool = False
-    return_labels: bool = False
 
 
 class Config(BaseModel):
@@ -369,9 +367,6 @@ def optimize(
 
         batch = batch.to(device=device)
         labels = labels.to(device=device)
-        if isinstance(model, PiecewiseFunctionSPDTransformer):
-            batch = batch[0]
-            labels = labels[0]
 
         if pretrained_model is not None:
             pretrained_model.requires_grad_(False)
