@@ -24,5 +24,4 @@ task_config:
   range_min: 0
   range_max: 5
   k: 20
-  handcoded_AB: true
-  simple_bias: false
+  handcoded_AB: false
