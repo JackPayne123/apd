@@ -524,9 +524,11 @@ def optimize(
                 json.dump(config.model_dump(), f, indent=4)
             tqdm.write(f"Saved config to {out_dir / 'config.json'}")
 
-        # Note: The plotting uses autograd with retain_graph=True which should not affect things
-        loss.backward()
-        opt.step()
+        # Skip gradient step if we are at the last step (last step just for plotting and logging)
+        if step != config.steps:
+            # Note: The plotting uses autograd with retain_graph=True which should not affect things
+            loss.backward()
+            opt.step()
 
     if out_dir is not None:
         torch.save(model.state_dict(), out_dir / f"model_{config.steps}.pth")
