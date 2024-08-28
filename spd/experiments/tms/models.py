@@ -78,10 +78,12 @@ class TMSSPDModel(SPDModel):
         # to get the inner_acts. In TMS, because we tie the W matrices, our second A matrix
         # is actually the B matrix
         A_1 = einops.rearrange(self.B, "i k h -> i h k")
-        return [self.A / self.A.norm(p=2, dim=-2, keepdim=True), A_1]
+        return [self.A / (self.A.norm(p=2, dim=-2, keepdim=True) + 1e-12), A_1]
 
     def all_Bs(self) -> list[Float[Tensor, "k dim"]]:
-        B_1 = einops.rearrange(self.A / self.A.norm(p=2, dim=-2, keepdim=True), "i f k -> i k f")
+        B_1 = einops.rearrange(
+            self.A / (self.A.norm(p=2, dim=-2, keepdim=True) + 1e-12), "i f k -> i k f"
+        )
         return [self.B, B_1]
 
     def forward(
@@ -89,7 +91,7 @@ class TMSSPDModel(SPDModel):
     ) -> tuple[
         Float[Tensor, "... i f"], list[Float[Tensor, "... i f"]], list[Float[Tensor, "... i k"]]
     ]:
-        normed_A = self.A / self.A.norm(p=2, dim=-2, keepdim=True)
+        normed_A = self.A / (self.A.norm(p=2, dim=-2, keepdim=True) + 1e-12)
         h_0 = torch.einsum("...if,ifk->...ik", features, normed_A)
         hidden_0 = torch.einsum("...ik,ikh->...ih", h_0, self.B)
 
@@ -112,7 +114,7 @@ class TMSSPDModel(SPDModel):
         list[Float[Tensor, "... i k"]],
     ]:
         """Performs a forward pass using only the top-k subnetwork activations."""
-        normed_A = self.A / self.A.norm(p=2, dim=-2, keepdim=True)
+        normed_A = self.A / (self.A.norm(p=2, dim=-2, keepdim=True) + 1e-12)
 
         h_0 = torch.einsum("...if,ifk->...ik", x, normed_A)
         assert topk_mask.shape == h_0.shape

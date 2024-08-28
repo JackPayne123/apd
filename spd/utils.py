@@ -68,7 +68,7 @@ def permute_to_identity(x: torch.Tensor, normalize_rows: bool = False) -> torch.
     out_rows = x[max_row_indices_raw]
 
     if normalize_rows:
-        out_rows = out_rows / out_rows.norm(dim=1, p=2, keepdim=True)
+        out_rows = out_rows / (out_rows.norm(dim=1, p=2, keepdim=True) + 1e-12)
     return out_rows
 
 

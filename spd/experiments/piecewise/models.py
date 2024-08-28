@@ -708,12 +708,12 @@ class PiecewiseFunctionSPDTransformer(SPDModel):
             assert isinstance(mlp, MLPComponents)
             a1 = mlp.linear1.A
             if mlp.linear1.norm_A:
-                a1 = a1 / a1.norm(p=2, dim=-2, keepdim=True)
+                a1 = a1 / (a1.norm(p=2, dim=-2, keepdim=True) + 1e-12)
             As.append(a1)
 
             a2 = mlp.linear2.A
             if mlp.linear2.norm_A:
-                a2 = a2 / a2.norm(p=2, dim=-2, keepdim=True)
+                a2 = a2 / (a2.norm(p=2, dim=-2, keepdim=True) + 1e-12)
             As.append(a2)
         assert len(As) == self.n_param_matrices
         return As
@@ -724,12 +724,12 @@ class PiecewiseFunctionSPDTransformer(SPDModel):
             assert isinstance(mlp, MLPComponents)
             b1 = mlp.linear1.B
             if mlp.linear1.norm_B:
-                b1 = b1 / b1.norm(p=2, dim=-2, keepdim=True)
+                b1 = b1 / (b1.norm(p=2, dim=-2, keepdim=True) + 1e-12)
             Bs.append(b1)
 
             b2 = mlp.linear2.B
             if mlp.linear2.norm_B:
-                b2 = b2 / b2.norm(p=2, dim=-2, keepdim=True)
+                b2 = b2 / (b2.norm(p=2, dim=-2, keepdim=True) + 1e-12)
             Bs.append(b2)
         assert len(Bs) == self.n_param_matrices
         return Bs
@@ -767,7 +767,7 @@ class PiecewiseFunctionSPDTransformer(SPDModel):
                 ].input_layer.weight.T[:correct_k, :]
                 # Output layer
                 original_Wout_last_col = target_transformer.mlps[i].output_layer.weight.T[:, -1]
-                norm = torch.norm(original_Wout_last_col, dim=0)
+                norm = torch.norm(original_Wout_last_col, dim=0) + 1e-12
                 self.mlps[i].linear2.A.data[:, 0] = original_Wout_last_col / norm
                 self.mlps[i].linear2.A.data[:, 1:] = 1.0  # avoid division by zero
                 self.mlps[i].linear2.B.data[0, -1] = 1.0 * norm
@@ -786,7 +786,7 @@ class PiecewiseFunctionSPDTransformer(SPDModel):
                 self.mlps[i].linear1.A.data[1:-1, :correct_k] = (
                     torch.eye(correct_k) * suppression_size
                 )
-                A_col_norm = torch.norm(self.mlps[i].linear1.A[:, 0]).item()
+                A_col_norm = (torch.norm(self.mlps[i].linear1.A[:, 0]) + 1e-12).item()
                 self.mlps[i].linear1.A.data /= A_col_norm
                 self.mlps[i].linear1.B.data[:correct_k, :] = (
                     target_transformer.mlps[i].input_layer.weight.T[1 : correct_k + 1, :]
@@ -806,7 +806,7 @@ class PiecewiseFunctionSPDTransformer(SPDModel):
                         i
                     ].output_layer.weight.data.T[idx_list, -1]
                 self.mlps[i].linear2.A.data[:, correct_k:] = 1.0  # avoid division by zero
-                all_norms = torch.norm(self.mlps[i].linear2.A, dim=0, keepdim=True)
+                all_norms = torch.norm(self.mlps[i].linear2.A, dim=0, keepdim=True) + 1e-12
                 self.mlps[i].linear2.A.data /= all_norms
                 self.mlps[i].linear2.B.data[:correct_k, -1] = 1.0
                 self.mlps[i].linear2.B.data *= all_norms.T

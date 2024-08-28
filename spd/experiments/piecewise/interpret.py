@@ -130,7 +130,7 @@ def make_plot(pretrained_path: Path, title: str, plot_all: bool = False) -> None
         plt.show()
 
     plot_component(
-        x=model.input_component / model.input_component.norm(p=2, dim=-2, keepdim=True),
+        x=model.input_component / (model.input_component.norm(p=2, dim=-2, keepdim=True) + 1e-12),
         ylabel="Input index",
         xlabel="subnetwork index",
         title="Normed input component",
