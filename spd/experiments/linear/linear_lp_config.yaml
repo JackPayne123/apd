@@ -4,7 +4,7 @@ wandb_run_name_prefix: ""
 seed: 0
 batch_size: 1024
 steps: 20_000
-print_freq: 400
+print_freq: 500
 wandb_image_freq: 500
 save_freq: 10_000
 lr: 1e-2
