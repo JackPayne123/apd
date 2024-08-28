@@ -8,7 +8,7 @@ lp_sparsity_coeff: 1e-2
 batch_size: 256
 steps: 20_000
 print_freq: 500
-wandb_image_freq: 500
+image_freq: 500
 save_freq: 10_000
 lr: 1e-2
 lr_schedule: constant

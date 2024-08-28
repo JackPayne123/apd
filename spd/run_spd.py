@@ -84,7 +84,7 @@ class Config(BaseModel):
     batch_size: PositiveInt
     steps: PositiveInt
     print_freq: PositiveInt
-    wandb_image_freq: PositiveInt | None = None
+    image_freq: PositiveInt | None = None
     save_freq: PositiveInt | None = None
     lr: PositiveFloat
     topk_recon_coeff: PositiveFloat | None = None
@@ -495,8 +495,8 @@ def optimize(
 
         if (
             plot_results_fn is not None
-            and config.wandb_image_freq is not None
-            and step % config.wandb_image_freq == 0
+            and config.image_freq is not None
+            and step % config.image_freq == 0
         ):
             fig = plot_results_fn(
                 model=model,
