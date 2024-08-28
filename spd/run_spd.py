@@ -343,7 +343,7 @@ def optimize(
     epoch = 0
     total_samples = 0
     data_iter = iter(dataloader)
-    for step in tqdm(range(config.steps), ncols=50):
+    for step in tqdm(range(config.steps), ncols=0):
         step_lr = get_lr_with_warmup(
             step=step,
             steps=config.steps,
@@ -473,15 +473,16 @@ def optimize(
 
             fig = None
             if plot_results_fn is not None:
-                with torch.inference_mode():
-                    fig = plot_results_fn(
-                        model=model,
-                        device=device,
-                        topk=config.topk,
-                        step=step,
-                        out_dir=out_dir,
-                        batch_topk=config.batch_topk,
-                    )
+                model.zero_grad()
+                fig = plot_results_fn(
+                    model=model,
+                    device=device,
+                    topk=config.topk,
+                    step=step,
+                    out_dir=out_dir,
+                    batch_topk=config.batch_topk,
+                )
+                model.zero_grad()
 
             if config.wandb_project:
                 wandb.log(
