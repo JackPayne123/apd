@@ -91,7 +91,7 @@ class Config(BaseModel):
     lp_sparsity_coeff: PositiveFloat | None = None
     pnorm: PositiveFloat | None = None
     pnorm_end: PositiveFloat | None = None
-    lr_schedule: Literal["linear", "constant", "cosine"] = "constant"
+    lr_schedule: Literal["linear", "constant", "cosine", "exponential"] = "constant"
     lr_warmup_pct: Probability = 0.0
     sparsity_loss_type: Literal["jacobian"] = "jacobian"
     loss_type: Literal["param_match", "behavioral"] = "param_match"
@@ -142,6 +142,9 @@ def get_lr_schedule_fn(
         return lambda *_: 1.0
     elif lr_schedule == "cosine":
         return lambda step, steps: np.cos(0.5 * np.pi * step / (steps - 1))
+    elif lr_schedule == "exponential":
+        gamma = 0.98
+        return lambda step, steps: gamma**step
     else:
         raise ValueError(f"Unknown lr_schedule: {lr_schedule}")
 
