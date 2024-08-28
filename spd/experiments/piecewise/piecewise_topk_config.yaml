@@ -2,15 +2,19 @@ wandb_project: spd-piecewise
 wandb_run_name: null
 wandb_run_name_prefix: ""
 seed: 0
-topk: 4
-max_sparsity_coeff: 1e-5
+topk: 1.25
+topk_recon_coeff: 1e-1
+topk_l2_coeff: 1e-1
+pnorm: 0.9
+lp_sparsity_coeff: 1e-30
+lr: 1e-4
 batch_size: 2048
-steps: 20_000
-print_freq: 200
-save_freq: 10_000
-lr: 5e-3
+steps: 1
+print_freq: 400
+save_freq: 0001
 lr_warmup_pct: 0.01
 loss_type: param_match
+batch_topk: true
 task_config:
   task_name: piecewise
   n_functions: 10
@@ -19,5 +23,5 @@ task_config:
   feature_probability: 0.05
   range_min: 0
   range_max: 5
-  k: 11
-  handcoded_AB: true
+  k: 20
+  handcoded_AB: false
