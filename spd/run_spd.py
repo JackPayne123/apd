@@ -84,6 +84,7 @@ class Config(BaseModel):
     batch_size: PositiveInt
     steps: PositiveInt
     print_freq: PositiveInt
+    wandb_image_freq: PositiveInt | None = None
     save_freq: PositiveInt | None = None
     lr: PositiveFloat
     topk_recon_coeff: PositiveFloat | None = None
@@ -326,7 +327,7 @@ def optimize(
     device: str,
     dataloader: DataLoader[tuple[Float[Tensor, "... n_features"], Float[Tensor, "... n_features"]]],
     pretrained_model: Model | None,
-    plot_results_fn: Callable[..., plt.Figure | None] | None = None,
+    plot_results_fn: Callable[..., plt.Figure] | None = None,
     out_dir: Path | None = None,
 ) -> None:
     model.to(device=device)
@@ -454,7 +455,7 @@ def optimize(
         opt.step()
 
         # Logging
-        if step % config.print_freq == config.print_freq - 1 or step == 0:
+        if step % config.print_freq == 0:
             tqdm.write(f"Step {step}")
             if step_pnorm is not None:
                 tqdm.write(f"Current pnorm: {step_pnorm}")
@@ -469,21 +470,7 @@ def optimize(
                 param_match_loss_repr = (
                     param_match_loss.item() if param_match_loss.ndim <= 1 else param_match_loss
                 )
-                tqdm.write(f"Param match loss: \n{param_match_loss_repr}")
-            fig = None
-            if plot_results_fn is not None:
-                model.zero_grad()
-                fig = plot_results_fn(
-                    model=model,
-                    device=device,
-                    topk=config.topk,
-                    step=step,
-                    out_dir=out_dir,
-                    batch_topk=config.batch_topk,
-                )
-                model.zero_grad()
-            tqdm.write("\n")
-
+                tqdm.write(f"Param match loss: \n{param_match_loss_repr}\n")
             if config.wandb_project:
                 wandb.log(
                     {
@@ -505,14 +492,34 @@ def optimize(
                         "topk_l2_loss": topk_l2_loss.mean().item()
                         if topk_l2_loss is not None
                         else None,
-                        "plots": wandb.Image(fig) if fig else None,
                     },
                     step=step,
                 )
 
         if (
+            plot_results_fn is not None
+            and config.wandb_image_freq is not None
+            and step % config.wandb_image_freq == 0
+        ):
+            model.zero_grad()
+            fig = plot_results_fn(
+                model=model,
+                device=device,
+                topk=config.topk,
+                step=step,
+                out_dir=out_dir,
+                batch_topk=config.batch_topk,
+            )
+            if config.wandb_project:
+                wandb.log(
+                    {"plots": wandb.Image(fig)},
+                    step=step,
+                )
+
+        if (
             config.save_freq is not None
-            and step % config.save_freq == config.save_freq - 1
+            and step % config.save_freq == 0
+            and step > 0
             and out_dir is not None
         ):
             torch.save(model.state_dict(), out_dir / f"model_{step}.pth")
