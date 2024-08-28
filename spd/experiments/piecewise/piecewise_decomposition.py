@@ -13,6 +13,7 @@ from jaxtyping import Float
 from matplotlib.colors import CenteredNorm
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 from torch import Tensor
+from tqdm import tqdm
 
 from spd.experiments.piecewise.models import (
     PiecewiseFunctionSPDTransformer,
@@ -178,7 +179,7 @@ def plot_components(
     if out_dir:
         fig.savefig(out_dir / f"subnetwork_analysis_{step}.png")
         plt.close(fig)
-        logger.info(f"Saved subnetwork analysis to {out_dir / f'subnetwork_analysis_{step}.png'}")
+        tqdm.write(f"Saved subnetwork analysis to {out_dir / f'subnetwork_analysis_{step}.png'}")
 
     return fig
 

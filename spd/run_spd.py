@@ -467,10 +467,9 @@ def optimize(
                 tqdm.write(f"topk l2 loss: \n{topk_l2_loss}")
             if param_match_loss is not None:
                 param_match_loss_repr = (
-                    param_match_loss.item() if param_match_loss.ndim == 0 else param_match_loss
+                    param_match_loss.item() if param_match_loss.ndim <= 1 else param_match_loss
                 )
-                tqdm.write(f"Param match loss: \n{param_match_loss_repr}\n")
-
+                tqdm.write(f"Param match loss: \n{param_match_loss_repr}")
             fig = None
             if plot_results_fn is not None:
                 model.zero_grad()
@@ -483,6 +482,7 @@ def optimize(
                     batch_topk=config.batch_topk,
                 )
                 model.zero_grad()
+            tqdm.write("\n")
 
             if config.wandb_project:
                 wandb.log(
@@ -505,7 +505,7 @@ def optimize(
                         "topk_l2_loss": topk_l2_loss.mean().item()
                         if topk_l2_loss is not None
                         else None,
-                        "inner_acts": wandb.Image(fig) if fig else None,
+                        "plots": wandb.Image(fig) if fig else None,
                     },
                     step=step,
                 )
