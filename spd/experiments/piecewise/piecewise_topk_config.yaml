@@ -1,8 +1,8 @@
 wandb_project: spd-piecewise
 wandb_run_name: null
-wandb_run_name_prefix: "changeme_"
+wandb_run_name_prefix: ""
 seed: 0
-topk: 4
+topk: 1.25
 topk_recon_coeff: 1
 topk_l2_coeff: 0.01
 lp_sparsity_coeff: null
@@ -14,7 +14,7 @@ wandb_image_freq: 500
 save_freq: 20_000
 lr_warmup_pct: 0.01
 loss_type: param_match
-batch_topk: false
+batch_topk: true
 task_config:
   task_name: piecewise
   n_functions: 10
