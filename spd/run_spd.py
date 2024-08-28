@@ -344,7 +344,7 @@ def optimize(
     epoch = 0
     total_samples = 0
     data_iter = iter(dataloader)
-    for step in tqdm(range(config.steps), ncols=0):
+    for step in tqdm(range(config.steps + 1), ncols=0):
         step_lr = get_lr_with_warmup(
             step=step,
             steps=config.steps,
@@ -451,9 +451,6 @@ def optimize(
             assert config.topk_l2_coeff is not None
             loss = loss + config.topk_l2_coeff * topk_l2_loss.mean()
 
-        loss.backward()
-        opt.step()
-
         # Logging
         if step % config.print_freq == 0:
             tqdm.write(f"Step {step}")
@@ -501,7 +498,6 @@ def optimize(
             and config.wandb_image_freq is not None
             and step % config.wandb_image_freq == 0
         ):
-            model.zero_grad()
             fig = plot_results_fn(
                 model=model,
                 device=device,
@@ -527,6 +523,10 @@ def optimize(
             with open(out_dir / "config.json", "w") as f:
                 json.dump(config.model_dump(), f, indent=4)
             tqdm.write(f"Saved config to {out_dir / 'config.json'}")
+
+        # Note: The plotting uses autograd with retain_graph=True which should not affect things
+        loss.backward()
+        opt.step()
 
     if out_dir is not None:
         torch.save(model.state_dict(), out_dir / f"model_{config.steps}.pth")

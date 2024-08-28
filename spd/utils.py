@@ -253,6 +253,12 @@ def calc_attributions(
     Returns:
         The sum of the (squared) attributions from each output dimension.
     """
+    # Note: This code may be run in between the training forward pass, and the loss.backward() and
+    # opt.step() calls. It must not mess with the training! The reason the current setup
+    # (empirically) doesn't change the training is that we just use autograd rather than backward,
+    # and we use retain_graph=True -- unsure about the latter though.
+    # #TODO for review, copilot thought the opposite retain_graph was needed.
+
     attribution_scores: Float[Tensor, "... k"] = torch.zeros_like(inner_acts[0])
     for feature_idx in range(out.shape[-1]):
         feature_attributions: Float[Tensor, "... k"] = torch.zeros_like(inner_acts[0])

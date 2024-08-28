@@ -47,7 +47,6 @@ def plot_components(
     n_layers = model.n_layers
 
     # Create a batch of inputs with different control bits active
-    # TODO Is just one value good enough?
     x_val = torch.tensor(2.5, device=device)
     batch_size = model.n_inputs - 1  # Assuming first input is for x_val and rest are control bits
     x = torch.zeros(batch_size, model.n_inputs, device=device)
