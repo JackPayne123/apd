@@ -526,6 +526,5 @@ def optimize(
 
         # Skip gradient step if we are at the last step (last step just for plotting and logging)
         if step != config.steps:
-            # Note: The plotting uses autograd with retain_graph=True which should not affect things
             loss.backward()
             opt.step()
