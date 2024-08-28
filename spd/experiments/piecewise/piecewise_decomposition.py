@@ -10,6 +10,7 @@ import numpy as np
 import torch
 import wandb
 from jaxtyping import Float
+from matplotlib.colors import CenteredNorm
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 from torch import Tensor
 from torch.utils.data import DataLoader
@@ -71,8 +72,7 @@ def plot_components(
     im1 = axes[0, 0].matshow(
         attribution_scores.detach().cpu().numpy(),
         cmap="coolwarm",
-        vmin=-max_abs_value,
-        vmax=max_abs_value,
+        norm=CenteredNorm(),
     )
     axes[0, 0].set_yticks(range(attribution_scores.shape[0]))
     axes[0, 0].set_yticklabels(range(1, attribution_scores.shape[0] + 1))
@@ -89,8 +89,7 @@ def plot_components(
     im2 = axes[0, 1].matshow(
         attribution_scores_normed.detach().cpu().numpy(),
         cmap="coolwarm",
-        vmin=-max_abs_value,
-        vmax=max_abs_value,
+        norm=CenteredNorm(),
     )
     axes[0, 1].set_ylabel("Function index")
     axes[0, 1].set_xlabel("Subnetwork index")
@@ -112,7 +111,9 @@ def plot_components(
         l_row = s_row + 1
         assert n_layers == 1
         # Plot AB product in 2nd row pos 1 and 2
-        im5 = axes[l_row, 0].matshow(ABs[n].detach().cpu().numpy(), cmap="coolwarm")
+        im5 = axes[l_row, 0].matshow(
+            ABs[n].detach().cpu().numpy(), cmap="coolwarm", norm=CenteredNorm()
+        )
         axes[l_row, 0].set_ylabel("Embedding index")
         axes[l_row, 0].set_xlabel("Neuron index")
         axes[l_row, 0].set_title(f"AB Product (W_in, Layer {n+1})")
@@ -120,7 +121,9 @@ def plot_components(
         cax = divider.append_axes("right", size="5%", pad=0.05)
         fig.colorbar(im5, cax=cax, format=tkr.FormatStrFormatter("%.2f"))
 
-        im6 = axes[l_row, 1].matshow(ABs[n + 1].detach().cpu().numpy().T, cmap="coolwarm")
+        im6 = axes[l_row, 1].matshow(
+            ABs[n + 1].detach().cpu().numpy().T, cmap="coolwarm", norm=CenteredNorm()
+        )
         axes[l_row, 1].set_ylabel("Embedding index")
         axes[l_row, 1].set_xlabel("Neuron index")
         axes[l_row, 1].set_title(f"AB Product Transposed (W_out.T, Layer {n+1})")
@@ -129,7 +132,9 @@ def plot_components(
         fig.colorbar(im6, cax=cax, format=tkr.FormatStrFormatter("%.2f"))
 
         # Plot A of W_in
-        im1 = axes[s_row, 2].matshow(normed_As[2 * n].detach().cpu().numpy(), cmap="coolwarm")
+        im1 = axes[s_row, 2].matshow(
+            normed_As[2 * n].detach().cpu().numpy(), cmap="coolwarm", norm=CenteredNorm()
+        )
         axes[s_row, 2].set_ylabel("Embedding index")
         axes[s_row, 2].set_xlabel("Subnetwork index")
         axes[s_row, 2].set_title(f"Normed A Matrix (W_in, layer {n+1})")
@@ -138,7 +143,9 @@ def plot_components(
         fig.colorbar(im1, cax=cax, format=tkr.FormatStrFormatter("%.1f"))
 
         # Plot B of W_out
-        im2 = axes[s_row, 3].matshow(Bs[2 * n + 1].T.detach().cpu().numpy(), cmap="coolwarm")
+        im2 = axes[s_row, 3].matshow(
+            Bs[2 * n + 1].T.detach().cpu().numpy(), cmap="coolwarm", norm=CenteredNorm()
+        )
         axes[s_row, 3].set_ylabel("Embedding index")
         axes[s_row, 3].set_xlabel("Subnetwork index")
         axes[s_row, 3].set_title(f"B Matrix (W_out, layer {n+1})")
@@ -147,7 +154,9 @@ def plot_components(
         fig.colorbar(im2, cax=cax, format=tkr.FormatStrFormatter("%.1f"))
 
         # Plot B of W_in in 2nd row
-        im3 = axes[l_row, 2].matshow(Bs[2 * n].detach().cpu().numpy(), cmap="coolwarm")
+        im3 = axes[l_row, 2].matshow(
+            Bs[2 * n].detach().cpu().numpy(), cmap="coolwarm", norm=CenteredNorm()
+        )
         axes[l_row, 2].set_ylabel("Subnetwork index")
         axes[l_row, 2].set_xlabel("Neuron index")
         axes[l_row, 2].set_title(f"Normed A Matrix (W_in, layer {n+1})")
@@ -156,7 +165,9 @@ def plot_components(
         fig.colorbar(im3, cax=cax, format=tkr.FormatStrFormatter("%.2f"))
 
         # Plot A of W_out in 2nd row
-        im4 = axes[l_row, 3].matshow(normed_As[2 * n + 1].T.detach().cpu().numpy(), cmap="coolwarm")
+        im4 = axes[l_row, 3].matshow(
+            normed_As[2 * n + 1].T.detach().cpu().numpy(), cmap="coolwarm", norm=CenteredNorm()
+        )
         axes[l_row, 3].set_ylabel("Subnetwork index")
         axes[l_row, 3].set_xlabel("Neuron index")
         axes[l_row, 3].set_title(f"B Matrix (W_out, layer {n+1})")
