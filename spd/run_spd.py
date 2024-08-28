@@ -529,9 +529,3 @@ def optimize(
             # Note: The plotting uses autograd with retain_graph=True which should not affect things
             loss.backward()
             opt.step()
-
-    if out_dir is not None:
-        torch.save(model.state_dict(), out_dir / f"model_{config.steps}.pth")
-        logger.info(f"Saved model to {out_dir / f'model_{config.steps}.pth'}")
-        if config.wandb_project:
-            wandb.save(str(out_dir / f"model_{config.steps}.pth"))
