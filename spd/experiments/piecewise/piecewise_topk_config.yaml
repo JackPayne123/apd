@@ -10,7 +10,7 @@ lr: 5e-2
 batch_size: 2048
 steps: 20_000
 print_freq: 50
-save_freq: 1_000
+save_freq: 20_000
 lr_warmup_pct: 0.01
 loss_type: param_match
 batch_topk: false
