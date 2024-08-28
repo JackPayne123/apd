@@ -465,7 +465,7 @@ def optimize(
                 tqdm.write(f"topk l2 loss: \n{topk_l2_loss}")
             if param_match_loss is not None:
                 param_match_loss_repr = (
-                    param_match_loss.item() if param_match_loss.numel() <= 1 else param_match_loss
+                    param_match_loss.item() if param_match_loss.numel() == 1 else param_match_loss
                 )
                 tqdm.write(f"Param match loss: \n{param_match_loss_repr}\n")
             if config.wandb_project:
