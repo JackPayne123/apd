@@ -418,7 +418,7 @@ def optimize(
 
         out_topk, topk_l2_loss, topk_recon_loss = None, None, None
         if config.topk is not None:
-            attribution_scores = calc_attributions(out, inner_acts)
+            attribution_scores = calc_attributions(out, inner_acts, retain_graph=True)
 
             topk_mask = calc_topk_mask(
                 attribution_scores, config.topk, batch_topk=config.batch_topk

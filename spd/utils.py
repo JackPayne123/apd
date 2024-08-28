@@ -238,32 +238,37 @@ class BatchedDataLoader(DataLoader[Q], Generic[Q]):
 
 
 def calc_attributions(
-    out: Float[Tensor, "... out_dim"], inner_acts: list[Float[Tensor, "... k"]]
+    out: Float[Tensor, "... out_dim"],
+    inner_acts: list[Float[Tensor, "... k"]],
+    retain_graph: bool = True,
 ) -> Float[Tensor, "... k"]:
     """Calculate the sum of the (squared) attributions from each output dimension.
 
     An attribution is the element-wise product of the gradient of the output dimension w.r.t. the
     inner acts and the inner acts themselves.
 
+    Note: This code may be run in between the training forward pass, and the loss.backward() and
+    opt.step() calls; it must not mess with the training. The reason the current implementation is
+    fine to run anywhere is that we just use autograd rather than backward which does not
+    populate the .grad attributes. Unrelatedly, we use retain_graph=True in a bunch of cases
+    where we want to later use the `out` variable in e.g. the loss function.
+
     Args:
         out: The output of the model.
         inner_acts: The inner acts of the model (i.e. the set of subnetwork activations for each
             parameter matrix).
+        retain_graph: retain_graph argument for autograd.grad. In the model forward pass we use
+            the out variable multiple times, and thus require retain_graph. In the plotting function
+            we don't, and thus don't require retain_graph.
 
     Returns:
         The sum of the (squared) attributions from each output dimension.
     """
-    # Note: This code may be run in between the training forward pass, and the loss.backward() and
-    # opt.step() calls. It must not mess with the training! The reason the current setup
-    # (empirically) doesn't change the training is that we just use autograd rather than backward,
-    # and we use retain_graph=True -- unsure about the latter though.
-    # #TODO for review, copilot thought the opposite retain_graph was needed.
-
     attribution_scores: Float[Tensor, "... k"] = torch.zeros_like(inner_acts[0])
     for feature_idx in range(out.shape[-1]):
         feature_attributions: Float[Tensor, "... k"] = torch.zeros_like(inner_acts[0])
         feature_grads: tuple[Float[Tensor, "... k"], ...] = torch.autograd.grad(
-            out[..., feature_idx].sum(), inner_acts, retain_graph=True
+            out[..., feature_idx].sum(), inner_acts, retain_graph=retain_graph
         )
         assert len(feature_grads) == len(inner_acts)
         for param_matrix_idx in range(len(inner_acts)):

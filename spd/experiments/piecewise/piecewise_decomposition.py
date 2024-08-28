@@ -57,7 +57,7 @@ def plot_components(
     out, layer_acts, inner_acts = model(x)
 
     # Calculate attribution scores
-    attribution_scores = calc_attributions(out, inner_acts)
+    attribution_scores = calc_attributions(out, inner_acts, retain_graph=False)
     n_functions = attribution_scores.shape[0]
 
     # Create figure with subplots
