@@ -257,8 +257,7 @@ def calc_lp_sparsity_loss(
     out: Float[Tensor, "... n_features"],
     layer_acts: Float[Tensor, "... n_features"],
     inner_acts: list[Float[Tensor, "... n_features"]],
-    config: Config,
-    step: int,
+    step_pnorm: float,
 ) -> Float[Tensor, ""] | Float[Tensor, " n_instances"]:
     """Calculate the Lp sparsity loss on the attributions.
 
@@ -279,8 +278,7 @@ def calc_lp_sparsity_loss(
             after both A and B transformations).
         inner_acts (list[Float[Tensor, "... n_features"]]): The inner acts of the model (i.e.
             the set of subnetwork activations after the A transformation for each parameter matrix).
-        config (Config): The config to use for the sparsity loss.
-        step (int): The current step of the optimization.
+        step_pnorm (float): The pnorm at the current step.
 
     Returns:
         The Lp sparsity loss. Will have an n_instances dimension if the model has an n_instances
@@ -307,12 +305,6 @@ def calc_lp_sparsity_loss(
 
         lp_sparsity_loss = lp_sparsity_loss + sparsity_inner**2
     lp_sparsity_loss = lp_sparsity_loss / out.shape[-1] + 1e-16
-
-    step_pnorm = (
-        get_step_pnorm(step, config.steps, config.pnorm_end)
-        if config.pnorm is None
-        else config.pnorm
-    )
 
     # step_pnorm * 0.5 is because we have the squares of sparsity_inner terms above
     lp_sparsity_loss = ((lp_sparsity_loss.abs() + 1e-16) ** (step_pnorm * 0.5)).sum(dim=-1)
@@ -406,13 +398,13 @@ def optimize(
 
         lp_sparsity_loss = None
         if config.lp_sparsity_coeff is not None:
+            step_pnorm = config.pnorm or get_step_pnorm(step, config.steps, config.pnorm_end)
             lp_sparsity_loss = calc_lp_sparsity_loss(
                 model=model,
                 out=out,
                 layer_acts=layer_acts,
                 inner_acts=inner_acts,
-                config=config,
-                step=step,
+                step_pnorm=step_pnorm,
             )
 
         out_topk, topk_l2_loss, topk_recon_loss = None, None, None
