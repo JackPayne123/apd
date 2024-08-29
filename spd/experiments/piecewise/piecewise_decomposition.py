@@ -71,6 +71,8 @@ def plot_components(
         cmap="coolwarm",
         norm=CenteredNorm(),
     )
+    for (j, i), label in np.ndenumerate(attribution_scores.detach().cpu().numpy()):
+        axes[0, 0].text(i, j, f"{label:.2f}", ha="center", va="center", fontsize=6)
     axes[0, 0].set_yticks(range(n_functions))
     axes[0, 0].set_yticklabels(range(1, n_functions + 1))
     axes[0, 0].set_ylabel("Function index")
@@ -87,6 +89,8 @@ def plot_components(
         cmap="coolwarm",
         norm=CenteredNorm(),
     )
+    for (j, i), label in np.ndenumerate(attribution_scores_normed.detach().cpu().numpy()):
+        axes[0, 1].text(i, j, f"{label:.2f}", ha="center", va="center", fontsize=6)
     axes[0, 1].set_yticks(range(n_functions))
     axes[0, 1].set_yticklabels(range(1, n_functions + 1))
     axes[0, 1].set_ylabel("Function index")
@@ -113,6 +117,8 @@ def plot_components(
         im1 = axes[s_row, 2].matshow(
             normed_As[2 * n].detach().cpu().numpy(), cmap="coolwarm", norm=CenteredNorm()
         )
+        for (j, i), label in np.ndenumerate(normed_As[2 * n].detach().cpu().numpy()):
+            axes[s_row, 2].text(i, j, f"{label:.2f}", ha="center", va="center", fontsize=6)
         axes[s_row, 2].set_ylabel("Embedding index")
         axes[s_row, 2].set_xlabel("Subnetwork index")
         axes[s_row, 2].set_title(f"Normed A (W_in, layer {n})")
@@ -124,6 +130,8 @@ def plot_components(
         im2 = axes[s_row, 3].matshow(
             Bs[2 * n + 1].T.detach().cpu().numpy(), cmap="coolwarm", norm=CenteredNorm()
         )
+        for (j, i), label in np.ndenumerate(Bs[2 * n + 1].T.detach().cpu().numpy()):
+            axes[s_row, 3].text(i, j, f"{label:.2f}", ha="center", va="center", fontsize=6)
         axes[s_row, 3].set_ylabel("Embedding index")
         axes[s_row, 3].set_xlabel("Subnetwork index")
         axes[s_row, 3].set_title(f"B (W_out, layer {n})")
