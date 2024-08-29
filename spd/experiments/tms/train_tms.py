@@ -118,9 +118,9 @@ if __name__ == "__main__":
     device = "cuda" if torch.cuda.is_available() else "cpu"
     # %%
     config = TMSTrainConfig(
-        n_features=5,
-        n_hidden=2,
-        n_instances=12,
+        n_features=10,
+        n_hidden=5,
+        n_instances=8,
         feature_probability=0.05,
         batch_size=1024,
     )
@@ -150,7 +150,8 @@ if __name__ == "__main__":
     torch.save(model.state_dict(), out_dir / run_name)
     print(f"Saved model to {out_dir / run_name}")
     # %%
-    plot_intro_diagram(model, filepath=out_dir / run_name.replace(".pth", ".png"))
-    print(f"Saved diagram to {out_dir / run_name.replace('.pth', '.png')}")
+    if config.n_hidden == 2:
+        plot_intro_diagram(model, filepath=out_dir / run_name.replace(".pth", ".png"))
+        print(f"Saved diagram to {out_dir / run_name.replace('.pth', '.png')}")
 
 # %%

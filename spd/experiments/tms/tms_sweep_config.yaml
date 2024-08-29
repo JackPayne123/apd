@@ -5,13 +5,11 @@ metric:
   goal: minimize
 parameters:
   lr:
-    values: [1e-2, 1e-3]
-  topk:
-    values: [1, 2, 4]
-  topk_recon_coeff:
-    values: [0.1, 1, 10]
+    values: [1e-3, 3e-4]
+  lp_sparsity_coeff:
+    values: [10, 1, 0.1, 0.01]
 command:
 - ${env}
 - ${interpreter}
 - ${program}
-- spd/experiments/tms/tms_topk_config.yaml
+- spd/experiments/tms/tms_lp_config.yaml

@@ -24,6 +24,7 @@ from torch import Tensor
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
+from spd.experiments.tms.models import TMSSPDModel
 from spd.log import logger
 from spd.models.base import Model, SPDModel
 from spd.types import Probability, RootPath
@@ -142,6 +143,33 @@ class Config(BaseModel):
             logger.warning(f"lp_sparsity_coeff {msg}")
 
         return self
+
+
+@torch.inference_mode()
+def set_A_norm_to_unit_norm(A: torch.Tensor):
+    A /= A.norm(p=2, dim=-2, keepdim=True)
+
+
+@torch.inference_mode()
+def remove_gradient_parallel_to_subnetwork_vecs(A: torch.Tensor, A_grad: torch.Tensor):
+    """
+    NOTE: Currently only used for TMS A matrix of shape (n_instances, n_features, k)
+    Update grads so that they remove the parallel component. This is needed to avoid having the
+    wrong optimizer state in Adam.
+    """
+
+    parallel_component = einops.einsum(
+        A_grad,
+        A,
+        # "d_sae d_in, d_sae d_in -> d_sae",
+        "n_instances n_features k, n_instances n_features k -> n_instances k",
+    )
+    A_grad -= einops.einsum(
+        parallel_component,
+        A,
+        # "d_sae, d_sae d_in -> d_sae d_in",
+        "n_instances k, n_instances n_features k -> n_instances n_features k",
+    )
 
 
 def get_lr_schedule_fn(
@@ -356,6 +384,9 @@ def optimize(
     total_samples = 0
     data_iter = iter(dataloader)
     for step in tqdm(range(config.steps + 1), ncols=0):
+        if isinstance(model, TMSSPDModel):
+            set_A_norm_to_unit_norm(model.A.data)
+
         step_lr = get_lr_with_warmup(
             step=step,
             steps=config.steps,
@@ -539,4 +570,10 @@ def optimize(
         # Skip gradient step if we are at the last step (last step just for plotting and logging)
         if step != config.steps:
             loss.backward()
+            if isinstance(model, TMSSPDModel):
+                assert model.A.grad is not None
+                remove_gradient_parallel_to_subnetwork_vecs(
+                    A=model.A.data,
+                    A_grad=model.A.grad,
+                )
             opt.step()
