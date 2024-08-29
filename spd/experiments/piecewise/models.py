@@ -724,12 +724,12 @@ class PiecewiseFunctionSPDTransformer(SPDModel):
             assert isinstance(mlp, MLPComponents)
             b1 = mlp.linear1.B
             if mlp.linear1.norm_B:
-                b1 = b1 / (b1.norm(p=2, dim=-2, keepdim=True) + 1e-12)
+                b1 = b1 / (b1.norm(p=2, dim=-1, keepdim=True) + 1e-12)
             Bs.append(b1)
 
             b2 = mlp.linear2.B
             if mlp.linear2.norm_B:
-                b2 = b2 / (b2.norm(p=2, dim=-2, keepdim=True) + 1e-12)
+                b2 = b2 / (b2.norm(p=2, dim=-1, keepdim=True) + 1e-12)
             Bs.append(b2)
         assert len(Bs) == self.n_param_matrices
         return Bs
