@@ -467,14 +467,14 @@ def optimize(
             tqdm.write(f"Step {step}")
             tqdm.write(f"Total loss: {loss.mean().item()}")
             if step_pnorm is not None:
-                tqdm.write(f"Current pnorm: {step_pnorm}")
+                tqdm.write(f"Current pnorm:    {step_pnorm}")
             if lp_sparsity_loss is not None:
                 tqdm.write(f"LP sparsity loss: {lp_sparsity_loss}")
             if topk_recon_loss is not None:
-                tqdm.write(f"Topk recon loss: {topk_recon_loss}")
-            tqdm.write(f"Reconstruction loss: {out_recon_loss}")
+                tqdm.write(f"Topk recon loss:  {topk_recon_loss}")
+            tqdm.write(f"Reconstruction loss:  {out_recon_loss}")
             if topk_l2_loss is not None:
-                tqdm.write(f"topk l2 loss: {topk_l2_loss}")
+                tqdm.write(f"topk l2 loss:     {topk_l2_loss}")
             if param_match_loss is not None:
                 param_match_loss_repr = (
                     param_match_loss.item() if param_match_loss.numel() == 1 else param_match_loss
