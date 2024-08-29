@@ -145,6 +145,7 @@ def get_lr_schedule_fn(config: Config) -> Callable[[int, int], float]:
     elif lr_schedule == "exponential":
         halflife = config.lr_exponential_halflife
         gamma = 0.5 ** (1 / halflife)
+        logger.info(f"Using exponential LR schedule with halflife {halflife} steps (gamma {gamma})")
         return lambda step, steps: gamma**step
     else:
         raise ValueError(f"Unknown lr_schedule: {lr_schedule}")
