@@ -63,7 +63,9 @@ def plot_components(
     normed_As = [A / A.norm(p=2, dim=-2, keepdim=True) for A in As]
     Bs = model.all_Bs()
     ABs = [torch.einsum("...fk,...kg->...fg", normed_As[i], Bs[i]) for i in range(len(normed_As))]
-    ABks = [torch.einsum("...fk,...kg->...kfg", normed_As[i], Bs[i]) for i in range(len(normed_As))]
+    ABs_by_k = [
+        torch.einsum("...fk,...kg->...kfg", normed_As[i], Bs[i]) for i in range(len(normed_As))
+    ]
 
     def plot_matrix(
         ax: plt.Axes,
@@ -112,9 +114,8 @@ def plot_components(
         "Function index",
     )
 
+    assert n_layers == 1, "Current implementation only supports 1 layer"
     for n in range(n_layers):
-        assert n_layers == 1, "Current implementation only supports 1 layer"
-
         plot_matrix(
             fig.add_subplot(gs[0, 2]),
             normed_As[2 * n],
@@ -166,7 +167,7 @@ def plot_components(
         for k in range(model.k):
             plot_matrix(
                 fig.add_subplot(gs[3 + k, :2]),
-                ABks[n][k],
+                ABs_by_k[n][k],
                 f"AB Product (W_in, layer {n})",
                 "Neuron index",
                 "Embedding index",
@@ -174,7 +175,7 @@ def plot_components(
             )
             plot_matrix(
                 fig.add_subplot(gs[3 + k, 2:]),
-                ABks[n + 1][k].T,
+                ABs_by_k[n + 1][k].T,
                 f"AB Product (W_in, layer {n})",
                 "Neuron index",
                 "Embedding index",
