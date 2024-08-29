@@ -59,13 +59,10 @@ def plot_components(
     assert len(model.all_As()) == len(model.all_Bs()), "A and B matrices must have the same length"
     assert len(model.all_As()) % 2 == 0, "A and B matrices must have an even length (MLP in + out)"
     assert len(model.all_As()) // 2 == n_layers, "Number of A and B matrices must be 2*n_layers"
-    As = model.all_As()
-    normed_As = [A / A.norm(p=2, dim=-2, keepdim=True) for A in As]
+    As = model.all_As()  # Note that all_As() returns normed A matrices
     Bs = model.all_Bs()
-    ABs = [torch.einsum("...fk,...kg->...fg", normed_As[i], Bs[i]) for i in range(len(normed_As))]
-    ABs_by_k = [
-        torch.einsum("...fk,...kg->...kfg", normed_As[i], Bs[i]) for i in range(len(normed_As))
-    ]
+    ABs = [torch.einsum("...fk,...kg->...fg", As[i], Bs[i]) for i in range(len(As))]
+    ABs_by_k = [torch.einsum("...fk,...kg->...kfg", As[i], Bs[i]) for i in range(len(As))]
 
     def plot_matrix(
         ax: plt.Axes,
@@ -118,7 +115,7 @@ def plot_components(
     for n in range(n_layers):
         plot_matrix(
             fig.add_subplot(gs[0, 2]),
-            normed_As[2 * n],
+            As[2 * n],
             f"Normed A (W_in, layer {n})",
             "Subnetwork index",
             "Embedding index",
@@ -142,7 +139,7 @@ def plot_components(
         )
         plot_matrix(
             fig.add_subplot(gs[1, 2:]),
-            normed_As[2 * n + 1].T,
+            As[2 * n + 1].T,
             f"Normed A (W_out, layer {n})",
             "Neuron index",
             "",
