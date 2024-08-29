@@ -58,13 +58,6 @@ def make_plot(pretrained_path: Path) -> None:
 # %%
 
 if __name__ == "__main__":
-    pretrained_paths = Path("out/").rglob("reproduce_good*/model_19999.pth")
-    for pretrained_path in pretrained_paths:
-        pretrained_path = Path(
-            "/data/stefan_heimersheim/projects/SPD/spd/spd/experiments/piecewise/" / pretrained_path
-        )
-        print(f"Processing {pretrained_path}")
-        try:
-            make_plot(pretrained_path)
-        except Exception as e:
-            print(f"Error processing {pretrained_path}: {e}")
+    pretrained_path = Path("demo_spd_model/model_50000.pth")
+    print(f"Processing {pretrained_path}")
+    make_plot(pretrained_path)
