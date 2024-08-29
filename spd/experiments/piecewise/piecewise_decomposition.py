@@ -6,6 +6,7 @@ from pathlib import Path
 import fire
 import matplotlib.pyplot as plt
 import matplotlib.ticker as tkr
+import numpy as np
 import torch
 import wandb
 from jaxtyping import Float
@@ -73,8 +74,8 @@ def plot_components(
         colorbar_format: str = "%.0f",
     ) -> None:
         im = ax.matshow(matrix.detach().cpu().numpy(), cmap="coolwarm", norm=CenteredNorm())
-        # for (j, i), label in np.ndenumerate(matrix.detach().cpu().numpy()):
-        #     ax.text(i, j, f"{label:.2f}", ha="center", va="center", fontsize=4)
+        for (j, i), label in np.ndenumerate(matrix.detach().cpu().numpy()):
+            ax.text(i, j, f"{label:.2f}", ha="center", va="center", fontsize=4)
         ax.set_xlabel(xlabel)
         if ylabel != "":
             ax.set_ylabel(ylabel)
@@ -162,7 +163,6 @@ def plot_components(
             "",
             "%.2f",
         )
-        print(f"{model.k=}")
         for k in range(model.k):
             plot_matrix(
                 fig.add_subplot(gs[3 + k, :2]),
