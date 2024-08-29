@@ -684,9 +684,9 @@ class PiecewiseFunctionSPDTransformer(SPDModel):
         initialize_embeds(self.W_E, self.W_U, n_inputs, self.d_embed, self.superposition)
 
         # The input_component is used for all A matrices in the first linear layer of each MLP
-        self.input_component = nn.Parameter(torch.empty(self.d_embed, self.k))
+        # self.input_component = nn.Parameter(torch.empty(self.d_embed, self.k))
         # The output_component is used for all B matrices in the second linear layer of each MLP
-        self.output_component = nn.Parameter(torch.empty(self.k, self.d_embed))
+        # self.output_component = nn.Parameter(torch.empty(self.k, self.d_embed))
 
         self.mlps = nn.ModuleList(
             [
@@ -695,8 +695,8 @@ class PiecewiseFunctionSPDTransformer(SPDModel):
                     d_mlp=d_mlp,
                     k=k,
                     input_bias=input_biases[i] if input_biases is not None else None,
-                    input_component=self.input_component,  # type: ignore
-                    output_component=self.output_component,  # type: ignore
+                    input_component=None,  # self.input_component,  # type: ignore
+                    output_component=None,  # self.output_component,  # type: ignore
                 )
                 for i in range(n_layers)
             ]
