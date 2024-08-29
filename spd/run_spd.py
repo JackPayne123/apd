@@ -232,8 +232,9 @@ def calc_topk_l2(
         # B: [k, d_in] or [n_instances, k, d_in]
         # topk_mask: [batch, k] or [batch, n_instances, k]
         A_topk = torch.einsum("...fk,b...k ->b...fk", A, topk_mask)
-        AB_topk = torch.einsum("b...fk,...kh->b...fh", A_topk, B)
-        topk_l2_penalty = topk_l2_penalty + ((AB_topk) ** 2).mean(dim=(-2, -1))
+        # AB_topk = torch.einsum("b...fk,...kh->b...fh", A_topk, B)
+        ABk_topk = torch.einsum("b...fk,...kh->b...kfh", A_topk, B)
+        topk_l2_penalty = topk_l2_penalty + ((ABk_topk) ** 2).mean(dim=(-3, -2, -1))
     # Mean over batch_dim and divide by number of parameter matrices we iterated over
     return topk_l2_penalty.mean(dim=0) / model.n_param_matrices
 
