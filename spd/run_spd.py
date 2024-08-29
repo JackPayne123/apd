@@ -152,10 +152,7 @@ def get_lr_schedule_fn(
     elif lr_schedule == "cosine":
         return lambda step, steps: np.cos(0.5 * np.pi * step / (steps - 1))
     elif lr_schedule == "exponential":
-        assert lr_exponential_halflife is not None, (
-            "lr_exponential_halflife must be set if lr_schedule is exponential."
-            "Should have been caught by model validator!"
-        )
+        assert lr_exponential_halflife is not None  # Should have been caught by model validator
         halflife = lr_exponential_halflife
         gamma = 0.5 ** (1 / halflife)
         logger.info(f"Using exponential LR schedule with halflife {halflife} steps (gamma {gamma})")
