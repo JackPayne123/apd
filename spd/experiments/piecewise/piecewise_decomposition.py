@@ -6,7 +6,6 @@ from pathlib import Path
 import fire
 import matplotlib.pyplot as plt
 import matplotlib.ticker as tkr
-import numpy as np
 import torch
 import wandb
 from jaxtyping import Float
@@ -63,6 +62,7 @@ def plot_components(
     normed_As = [A / A.norm(p=2, dim=-2, keepdim=True) for A in As]
     Bs = model.all_Bs()
     ABs = [torch.einsum("...fk,...kg->...fg", normed_As[i], Bs[i]) for i in range(len(normed_As))]
+    ABks = [torch.einsum("...fk,...kg->...kfg", normed_As[i], Bs[i]) for i in range(len(normed_As))]
 
     def plot_matrix(
         ax: plt.Axes,
@@ -73,8 +73,8 @@ def plot_components(
         colorbar_format: str = "%.0f",
     ) -> None:
         im = ax.matshow(matrix.detach().cpu().numpy(), cmap="coolwarm", norm=CenteredNorm())
-        for (j, i), label in np.ndenumerate(matrix.detach().cpu().numpy()):
-            ax.text(i, j, f"{label:.2f}", ha="center", va="center", fontsize=4)
+        # for (j, i), label in np.ndenumerate(matrix.detach().cpu().numpy()):
+        #     ax.text(i, j, f"{label:.2f}", ha="center", va="center", fontsize=4)
         ax.set_xlabel(xlabel)
         if ylabel != "":
             ax.set_ylabel(ylabel)
@@ -90,8 +90,8 @@ def plot_components(
             ax.set_yticklabels([f"{L:.0f}" for L in range(1, n_functions + 1)])
 
     # Create figure with subplots using gridspec
-    fig = plt.figure(figsize=(40, 20), constrained_layout=True)
-    gs = fig.add_gridspec(3, 4)
+    fig = plt.figure(figsize=(40, 40), constrained_layout=True)
+    gs = fig.add_gridspec(3 + model.k, 4)
     plt.suptitle(f"Subnetwork Analysis (Step {step})")
 
     # Plot attribution scores
@@ -162,6 +162,24 @@ def plot_components(
             "",
             "%.2f",
         )
+        print(f"{model.k=}")
+        for k in range(model.k):
+            plot_matrix(
+                fig.add_subplot(gs[3 + k, :2]),
+                ABks[n][k],
+                f"AB Product (W_in, layer {n})",
+                "Neuron index",
+                "Embedding index",
+                "%.2f",
+            )
+            plot_matrix(
+                fig.add_subplot(gs[3 + k, 2:]),
+                ABks[n + 1][k].T,
+                f"AB Product (W_in, layer {n})",
+                "Neuron index",
+                "Embedding index",
+                "%.2f",
+            )
 
     if out_dir:
         fig.savefig(out_dir / f"subnetwork_analysis_{step}.png", dpi=300)
