@@ -92,6 +92,7 @@ class Config(BaseModel):
     pnorm: PositiveFloat | None = None
     pnorm_end: PositiveFloat | None = None
     lr_schedule: Literal["linear", "constant", "cosine", "exponential"] = "constant"
+    lr_exponential_halflife: PositiveFloat = 5000
     lr_warmup_pct: Probability = 0.0
     sparsity_loss_type: Literal["jacobian"] = "jacobian"
     loss_type: Literal["param_match", "behavioral"] = "param_match"
@@ -133,9 +134,8 @@ class Config(BaseModel):
         return self
 
 
-def get_lr_schedule_fn(
-    lr_schedule: Literal["linear", "constant", "cosine"],
-) -> Callable[[int, int], float]:
+def get_lr_schedule_fn(config: Config) -> Callable[[int, int], float]:
+    lr_schedule = config.lr_schedule
     if lr_schedule == "linear":
         return lambda step, steps: 1 - (step / steps)
     elif lr_schedule == "constant":
@@ -143,7 +143,8 @@ def get_lr_schedule_fn(
     elif lr_schedule == "cosine":
         return lambda step, steps: np.cos(0.5 * np.pi * step / (steps - 1))
     elif lr_schedule == "exponential":
-        gamma = 0.98
+        halflife = config.lr_exponential_halflife
+        gamma = 0.5 ** (1 / halflife)
         return lambda step, steps: gamma**step
     else:
         raise ValueError(f"Unknown lr_schedule: {lr_schedule}")
@@ -340,7 +341,7 @@ def optimize(
     # Note that we expect weight decay to be problematic for spd
     opt = torch.optim.AdamW(model.parameters(), lr=config.lr, weight_decay=0.0)
 
-    lr_schedule_fn = get_lr_schedule_fn(config.lr_schedule)
+    lr_schedule_fn = get_lr_schedule_fn(config)
 
     step_lp_sparsity_coeff = None
     step_topk_recon_coeff = None
