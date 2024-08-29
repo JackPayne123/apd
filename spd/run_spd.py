@@ -92,7 +92,7 @@ class Config(BaseModel):
     pnorm: PositiveFloat | None = None
     pnorm_end: PositiveFloat | None = None
     lr_schedule: Literal["linear", "constant", "cosine", "exponential"] = "constant"
-    lr_exponential_halflife: PositiveFloat = 5000
+    lr_exponential_halflife: PositiveFloat | None = None
     lr_warmup_pct: Probability = 0.0
     sparsity_loss_type: Literal["jacobian"] = "jacobian"
     loss_type: Literal["param_match", "behavioral"] = "param_match"
@@ -131,11 +131,20 @@ class Config(BaseModel):
         if self.topk is None:
             assert self.topk_l2_coeff is None, "topk_l2_coeff is not None but topk is"
             assert self.topk_recon_coeff is None, "topk_recon_coeff is not None but topk is"
+
+        # Check that lr_exponential_halflife is not None if lr_schedule is "exponential"
+        if self.lr_schedule == "exponential":
+            assert (
+                self.lr_exponential_halflife is not None
+            ), "lr_exponential_halflife must be set if lr_schedule is exponential"
+
         return self
 
 
-def get_lr_schedule_fn(config: Config) -> Callable[[int, int], float]:
-    lr_schedule = config.lr_schedule
+def get_lr_schedule_fn(
+    lr_schedule: Literal["linear", "constant", "cosine", "exponential"],
+    lr_exponential_halflife: PositiveFloat | None = None,
+) -> Callable[[int, int], float]:
     if lr_schedule == "linear":
         return lambda step, steps: 1 - (step / steps)
     elif lr_schedule == "constant":
@@ -143,7 +152,11 @@ def get_lr_schedule_fn(config: Config) -> Callable[[int, int], float]:
     elif lr_schedule == "cosine":
         return lambda step, steps: np.cos(0.5 * np.pi * step / (steps - 1))
     elif lr_schedule == "exponential":
-        halflife = config.lr_exponential_halflife
+        assert lr_exponential_halflife is not None, (
+            "lr_exponential_halflife must be set if lr_schedule is exponential."
+            "Should have been caught by model validator!"
+        )
+        halflife = lr_exponential_halflife
         gamma = 0.5 ** (1 / halflife)
         logger.info(f"Using exponential LR schedule with halflife {halflife} steps (gamma {gamma})")
         return lambda step, steps: gamma**step
@@ -342,7 +355,7 @@ def optimize(
     # Note that we expect weight decay to be problematic for spd
     opt = torch.optim.AdamW(model.parameters(), lr=config.lr, weight_decay=0.0)
 
-    lr_schedule_fn = get_lr_schedule_fn(config)
+    lr_schedule_fn = get_lr_schedule_fn(config.lr_schedule, config.lr_exponential_halflife)
 
     step_lp_sparsity_coeff = None
     step_topk_recon_coeff = None
