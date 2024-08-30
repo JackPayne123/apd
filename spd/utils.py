@@ -346,3 +346,15 @@ def calc_neuron_indices(
         for layer in range(n_layers)
     ]
     return neuron_indices
+
+
+@torch.inference_mode()
+def remove_grad_parallel_to_subnetwork_vecs(
+    A: Float[Tensor, "... n_features k"], A_grad: Float[Tensor, "... n_features k"]
+) -> None:
+    """
+    Update grads so that they remove the parallel component. This is needed to avoid Adam from
+    using the wrong gradients when we fix the subnetwork vectors to be unit norm.
+    """
+    parallel_component = einops.einsum(A_grad, A, "... n_features k, ... n_features k -> ... k")
+    A_grad -= einops.einsum(parallel_component, A, "... k, ... n_features k -> ... n_features k")

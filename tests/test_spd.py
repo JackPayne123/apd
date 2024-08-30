@@ -38,6 +38,12 @@ class DummySPDModel(SPDModel):
     def from_pretrained(cls, path: str | Path) -> "DummySPDModel":
         return cls(d_in=1, d_out=1, k=1)
 
+    def set_matrices_to_unit_norm(self):
+        pass
+
+    def fix_normalized_adam_gradients(self):
+        pass
+
 
 def test_calc_topk_l2_single_instance_single_param_true_and_false():
     model = DummySPDModel(d_in=2, d_out=2, k=3)
