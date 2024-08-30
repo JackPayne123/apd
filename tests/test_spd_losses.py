@@ -45,7 +45,11 @@ class TestCalcTopkL2:
         topk_mask: Float[Tensor, "batch=1 k=2"] = torch.tensor(
             [[True, False, False]], dtype=torch.bool
         )
-        result = calc_topk_l2(model, topk_mask, device="cpu")
+        result = calc_topk_l2(
+            layer_in_params=model.all_As(),
+            layer_out_params=model.all_Bs(),
+            topk_mask=topk_mask,
+        )
 
         # Below we write what the intermediate values are
         # A_topk = torch.tensor([[[1, 0, 0], [1, 0, 0]]])
@@ -56,7 +60,11 @@ class TestCalcTopkL2:
     def test_calc_topk_l2_single_instance_single_param_true_and_true(self):
         model = DummySPDModel(d_in=2, d_out=2, k=3)
         topk_mask = torch.tensor([[True, True, True]], dtype=torch.bool)
-        result = calc_topk_l2(model, topk_mask, device="cpu")
+        result = calc_topk_l2(
+            layer_in_params=model.all_As(),
+            layer_out_params=model.all_Bs(),
+            topk_mask=topk_mask,
+        )
 
         # Below we write what the intermediate values are
         # A_topk = torch.tensor([[[1, 1, 1], [1, 1, 1]]])
@@ -68,7 +76,11 @@ class TestCalcTopkL2:
         model = DummySPDModel(d_in=1, d_out=1, n_instances=2, k=2)
         # topk_mask: [batch=2, n_instances=2, k=2]
         topk_mask = torch.tensor([[[1, 0], [0, 1]], [[0, 1], [1, 1]]], dtype=torch.bool)
-        result = calc_topk_l2(model, topk_mask, device="cpu")
+        result = calc_topk_l2(
+            layer_in_params=model.all_As(),
+            layer_out_params=model.all_Bs(),
+            topk_mask=topk_mask,
+        )
 
         # Below we write what the intermediate values are
         # A: [n_instances=2, d_in=1, k=2] = torch.tensor(

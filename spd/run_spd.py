@@ -191,9 +191,9 @@ def calc_recon_mse(
 
 
 def calc_topk_l2(
-    model: SPDModel,
+    layer_in_params: list[Float[Tensor, " ... d_in k"]],
+    layer_out_params: list[Float[Tensor, " ... k d_out"]],
     topk_mask: Bool[Tensor, "batch ... k"],
-    device: str,
 ) -> Float[Tensor, ""] | Float[Tensor, " n_instances"]:
     """Calculate the L2 of the sum of the topk subnetworks.
 
@@ -201,10 +201,10 @@ def calc_topk_l2(
     produce the same operation without it. The ... indicates an optional n_instances dimension.
 
     Args:
-        model (SPDModel): The model to calculate the L2 penalty for.
+        layer_in_params (list[Float[Tensor, " ... d_in k"]]): The input parameters of each layer.
+        layer_out_params (list[Float[Tensor, " ... k d_out"]]): The output parameters of each layer.
         topk_mask (Bool[Tensor, "batch ... k"]): The topk mask to use for the L2 penalty.
             Will contain an n_instances dimension if the model has an n_instances dimension.
-        device (str): The device to run computations on.
 
     Returns:
         The L2 penalty for the topk subnetworks. One value for each n_instance (used in tms and
@@ -214,8 +214,8 @@ def calc_topk_l2(
     n_instances = topk_mask.shape[1] if topk_mask.ndim == 3 else None
     accumulate_shape = (batch_size,) if n_instances is None else (batch_size, n_instances)
 
-    topk_l2_penalty = torch.zeros(accumulate_shape, device=device)
-    for A, B in zip(model.all_As(), model.all_Bs(), strict=True):
+    topk_l2_penalty = torch.zeros(accumulate_shape, device=layer_in_params[0].device)
+    for A, B in zip(layer_in_params, layer_out_params, strict=True):
         # A: [d_in, k] or [n_instances, d_in, k]
         # B: [k, d_in] or [n_instances, k, d_in]
         # topk_mask: [batch, k] or [batch, n_instances, k]
@@ -223,7 +223,7 @@ def calc_topk_l2(
         AB_topk = torch.einsum("b...fk,...kh->b...fh", A_topk, B)
         topk_l2_penalty = topk_l2_penalty + ((AB_topk) ** 2).mean(dim=(-2, -1))
     # Mean over batch_dim and divide by number of parameter matrices we iterated over
-    return topk_l2_penalty.mean(dim=0) / model.n_param_matrices
+    return topk_l2_penalty.mean(dim=0) / len(layer_in_params)
 
 
 def calc_param_match_loss(
@@ -426,7 +426,11 @@ def optimize(
             assert len(inner_acts_topk) == model.n_param_matrices
 
             if config.topk_l2_coeff is not None:
-                topk_l2_loss = calc_topk_l2(model, topk_mask, device)
+                topk_l2_loss = calc_topk_l2(
+                    layer_in_params=model.all_As(),
+                    layer_out_params=model.all_Bs(),
+                    topk_mask=topk_mask,
+                )
 
             if config.topk_recon_coeff is not None:
                 assert out_topk is not None
