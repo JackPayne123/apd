@@ -253,37 +253,39 @@ def calc_param_match_loss(
 
 
 def calc_lp_sparsity_loss(
-    model: SPDModel,
-    out: Float[Tensor, "... n_features"],
-    layer_acts: Float[Tensor, "... n_features"],
-    inner_acts: list[Float[Tensor, "... n_features"]],
+    out: Float[Tensor, "... d_model_out"],
+    layer_acts: list[Float[Tensor, "... d_in"]],
+    inner_acts: list[Float[Tensor, "... d_in"]],
+    layer_out_params: list[Float[Tensor, "... k d_out"]],
     step_pnorm: float,
 ) -> Float[Tensor, ""] | Float[Tensor, " n_instances"]:
-    """Calculate the Lp sparsity loss on the attributions.
+    """Calculate the Lp sparsity loss on the attributions (inner_acts * grad w.r.t inner_acts).
 
     Unlike the attributions we calculate for topk in `spd.utils.calc_attributions`, in this function
     we calculate the derivative w.r.t. the layer activations and multiply by that layer's B matrix.
-    This will give the same gradient as taking the derivative w.r.t. the inner_acts, but importantly
-    it puts the B matrix in the computational graph for this calculation so backprop can pass
-    through it (autograd.grad will not build a computational graph from intermediate tensors
+    This will give the same gradient as taking the derivative w.r.t. the inner_acts using the chain
+    rule, but importantly it puts the B matrix in the computational graph for this calculation so
+    backprop can pass through it (autograd.grad will not build a computational graph from
+    intermediate tensors
     https://gist.github.com/danbraunai-apollo/388c3c76be92922cf7b2a2f7da7d0d43). This is a
     (somewhat arbitrary) decision to include this layer's B matrix but not future layer parameters
     in the sparsity loss. We don't do this in topk because topk isn't a differentiable operation
     anyway.
 
     Args:
-        model (SPDModel): The model to calculate the Lp sparsity loss for.
-        out (Float[Tensor, "... n_features"]): The output of the model.
-        layer_acts (Float[Tensor, "... n_features"]): Activations at the output of each layer (i.e.
+        out (Float[Tensor, "... d_model_out"]): The output of the model.
+        layer_acts (list[Float[Tensor, "... d_in"]]): Activations at the output of each layer (i.e.
             after both A and B transformations).
-        inner_acts (list[Float[Tensor, "... n_features"]]): The inner acts of the model (i.e.
+        inner_acts (list[Float[Tensor, "... d_in"]]): The inner acts of the model (i.e.
             the set of subnetwork activations after the A transformation for each parameter matrix).
+        layer_out_params (list[Float[Tensor, "... k d_out"]]): The output parameters of each layer.
         step_pnorm (float): The pnorm at the current step.
 
     Returns:
         The Lp sparsity loss. Will have an n_instances dimension if the model has an n_instances
             dimension.
     """
+    assert len(layer_acts) == len(inner_acts) == len(layer_out_params)
     lp_sparsity_loss = torch.zeros_like(inner_acts[0], requires_grad=True)
     for feature_idx in range(out.shape[-1]):
         grad_layer_acts = torch.autograd.grad(
@@ -292,19 +294,19 @@ def calc_lp_sparsity_loss(
             retain_graph=True,
         )
         sparsity_inner = torch.zeros_like(lp_sparsity_loss, requires_grad=True)
-        for param_matrix_idx in range(model.n_param_matrices):
+        for param_matrix_idx in range(len(layer_out_params)):
             # h_i * grad_h_i
             sparsity_inner = sparsity_inner + (
                 inner_acts[param_matrix_idx]
                 * torch.einsum(
-                    "...h,...kh->...k",
+                    "...o,...ko->...k",
                     grad_layer_acts[param_matrix_idx].detach(),
-                    model.all_Bs()[param_matrix_idx],
+                    layer_out_params[param_matrix_idx],
                 )
             )
 
         lp_sparsity_loss = lp_sparsity_loss + sparsity_inner**2
-    lp_sparsity_loss = lp_sparsity_loss / out.shape[-1] + 1e-16
+    lp_sparsity_loss = lp_sparsity_loss / out.shape[-1]
 
     # step_pnorm * 0.5 is because we have the squares of sparsity_inner terms above
     lp_sparsity_loss = ((lp_sparsity_loss.abs() + 1e-16) ** (step_pnorm * 0.5)).sum(dim=-1)
@@ -400,10 +402,10 @@ def optimize(
         if config.lp_sparsity_coeff is not None:
             step_pnorm = config.pnorm or get_step_pnorm(step, config.steps, config.pnorm_end)
             lp_sparsity_loss = calc_lp_sparsity_loss(
-                model=model,
                 out=out,
                 layer_acts=layer_acts,
                 inner_acts=inner_acts,
+                layer_out_params=model.all_Bs(),
                 step_pnorm=step_pnorm,
             )
 

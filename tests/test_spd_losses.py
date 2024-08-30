@@ -4,7 +4,7 @@ import torch
 from jaxtyping import Bool, Float
 from torch import Tensor
 
-from spd.run_spd import SPDModel, calc_param_match_loss, calc_topk_l2
+from spd.run_spd import SPDModel, calc_lp_sparsity_loss, calc_param_match_loss, calc_topk_l2
 
 
 class DummySPDModel(SPDModel):
@@ -174,3 +174,51 @@ class TestCalcParamMatchLoss:
         # mean: [1, 4]
         expected = torch.tensor([1.0, 4.0])
         assert torch.allclose(result, expected), f"Expected {expected}, but got {result}"
+
+
+class TestCalcLpSparsityLoss:
+    def test_calc_lp_sparsity_loss_single_instance(self):
+        inner_acts: list[Float[Tensor, "batch=1 k=3"]] = [torch.tensor([[1.0, 1.0, 1.0]])]
+        layer_out_params: list[Float[Tensor, "k=3 d_out=2"]] = [
+            torch.tensor([[1.0, 2.0], [3.0, 4.0], [5.0, 6.0]], requires_grad=True)
+        ]
+
+        # Compute layer_acts
+        layer_acts = [inner_acts[0] @ layer_out_params[0]]
+        # Expected layer_acts: [9.0, 12.0]
+
+        # Compute out (assuming identity activation function)
+        out = layer_acts[0]
+        # Expected out: [9.0, 12.0]
+
+        step_pnorm = 0.9
+
+        result = calc_lp_sparsity_loss(
+            out=out,
+            layer_acts=layer_acts,
+            inner_acts=inner_acts,
+            layer_out_params=layer_out_params,
+            step_pnorm=step_pnorm,
+        )
+
+        # Take derivative w.r.t each output dimension
+
+        # d9/dlayer_acts = 1
+        # d9/dinner_acts = [1, 3, 5]
+        # attributions for 9 = [1, 3, 5] * [1, 1, 1] = [1, 3, 5]
+
+        # d12/dinner_acts = [2, 4, 6]
+        # attributions for 12 = [2, 4, 6] * [1, 1, 1] = [2, 4, 6]
+
+        # Add the squared attributions = [1^2, 3^2, 5^2] + [2^2, 4^2, 6^2] = [5, 25, 61]
+        # Divide by 2 (since we have two terms) = [2.5, 12.5, 30.5]
+        # Take to the power of 0.9 and sqrt = [2.5^(0.9*0.5), 12.5^(0.9*0.5), 30.5^(0.9*0.5)]
+        # Sum = 2.5^(0.9*0.5) + 12.5^(0.9*0.5) + 30.5^(0.9*0.5)
+
+        expected_val = (2.5 ** (0.9 * 0.5)) + (12.5 ** (0.9 * 0.5)) + (30.5 ** (0.9 * 0.5))
+        expected = torch.tensor(expected_val)
+        assert torch.allclose(result, expected), f"Expected {expected}, but got {result}"
+
+        # Also check that the layer_out_params is in the computation graph of the sparsity result.
+        result.backward()
+        assert layer_out_params[0].grad is not None
