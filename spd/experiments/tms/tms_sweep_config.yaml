@@ -4,12 +4,10 @@ metric:
   name: final_closeness
   goal: minimize
 parameters:
-  lr:
-    values: [1e-3, 3e-4]
-  lp_sparsity_coeff:
-    values: [10, 1, 0.1, 0.01]
+  topk_l2_coeff:
+    values: [3e-3, 1e-2, 3e-2, 3e-1, 1, 3]
 command:
 - ${env}
 - ${interpreter}
 - ${program}
-- spd/experiments/tms/tms_lp_config.yaml
+- spd/experiments/tms/tms_topk_config.yaml
