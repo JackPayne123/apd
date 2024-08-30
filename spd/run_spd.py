@@ -259,7 +259,7 @@ def calc_lp_sparsity_loss(
     layer_out_params: list[Float[Tensor, "... k d_out"]],
     step_pnorm: float,
 ) -> Float[Tensor, ""] | Float[Tensor, " n_instances"]:
-    """Calculate the Lp sparsity loss on the attributions (inner_acts * grad w.r.t inner_acts).
+    """Calculate the Lp sparsity loss on the attributions (inner_acts * d(out)/d(inner_acts).
 
     Unlike the attributions we calculate for topk in `spd.utils.calc_attributions`, in this function
     we calculate the derivative w.r.t. the layer activations and multiply by that layer's B matrix.
