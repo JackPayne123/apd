@@ -227,29 +227,29 @@ def calc_topk_l2(
 
 
 def calc_param_match_loss(
-    model: SPDModel,
     pretrained_weights: list[Float[Tensor, " ... d_in d_out"]],
-    device: str,
+    layer_in_params: list[Float[Tensor, " ... d_in k"]],
+    layer_out_params: list[Float[Tensor, " ... k d_out"]],
 ) -> Float[Tensor, ""] | Float[Tensor, " n_instances"]:
     """Calculate the parameter match loss.
 
     This is the L2 difference between the AB matrices of the SPDModel and the pretrained weights.
 
     Args:
-        model (SPDModel): The model to calculate the parameter match loss for.
         pretrained_weights (list[Float[Tensor, " ... d_in d_out"]]): The pretrained weights to be
             matched.
-        device (str): The device to run computations on.
+        layer_in_params (list[Float[Tensor, " ... d_in k"]]): The input parameters of each layer.
+        layer_out_params (list[Float[Tensor, " ... k d_out"]]): The output parameters of each layer.
 
     Returns:
         The parameter match loss of shape [n_instances] if the model has an n_instances dimension,
         otherwise of shape [].
     """
-    param_match_loss = torch.zeros(1, device=device)
-    for i, (A, B) in enumerate(zip(model.all_As(), model.all_Bs(), strict=True)):
+    param_match_loss = torch.zeros(1, device=layer_in_params[0].device)
+    for i, (A, B) in enumerate(zip(layer_in_params, layer_out_params, strict=True)):
         AB = torch.einsum("...fk,...kg->...fg", A, B)
         param_match_loss = param_match_loss + ((AB - pretrained_weights[i]) ** 2).mean(dim=(-2, -1))
-    return param_match_loss / model.n_param_matrices
+    return param_match_loss / len(layer_in_params)
 
 
 def calc_lp_sparsity_loss(
@@ -396,7 +396,11 @@ def optimize(
         if config.loss_type == "param_match":
             assert pretrained_model is not None, "Need a pretrained model for param_match loss"
             pretrained_weights = pretrained_model.all_decomposable_params()
-            param_match_loss = calc_param_match_loss(model, pretrained_weights, device)
+            param_match_loss = calc_param_match_loss(
+                pretrained_weights=pretrained_weights,
+                layer_in_params=model.all_As(),
+                layer_out_params=model.all_Bs(),
+            )
 
         lp_sparsity_loss = None
         if config.lp_sparsity_coeff is not None:

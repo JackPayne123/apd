@@ -120,7 +120,11 @@ class TestCalcParamMatchLoss:
     def test_calc_param_match_loss_single_instance_single_param(self):
         model = DummySPDModel(d_in=2, d_out=2, k=3)
         pretrained_weights = [torch.tensor([[1.0, 1.0], [1.0, 1.0]])]
-        result = calc_param_match_loss(model, pretrained_weights, device="cpu")
+        result = calc_param_match_loss(
+            pretrained_weights=pretrained_weights,
+            layer_in_params=model.all_As(),
+            layer_out_params=model.all_Bs(),
+        )
 
         # A: [2, 3], B: [3, 2], both filled with ones
         # AB: [[3, 3], [3, 3]]
@@ -147,7 +151,11 @@ class TestCalcParamMatchLoss:
             torch.tensor([[2.0, 2.0, 2.0], [2.0, 2.0, 2.0]]),
             torch.tensor([[1.0, 1.0], [1.0, 1.0], [1.0, 1.0]]),
         ]
-        result = calc_param_match_loss(model, pretrained_weights, device="cpu")
+        result = calc_param_match_loss(
+            pretrained_weights=pretrained_weights,
+            layer_in_params=model.all_As(),
+            layer_out_params=model.all_Bs(),
+        )
 
         # First layer: AB1: [[3, 3, 3], [3, 3, 3]], diff^2: [[1, 1, 1], [1, 1, 1]]
         # Second layer: AB2: [[3, 3], [3, 3], [3, 3]], diff^2: [[4, 4], [4, 4], [4, 4]]
@@ -167,7 +175,11 @@ class TestCalcParamMatchLoss:
 
         model = MultiInstanceDummySPDModel(d_in=2, d_out=2, k=3, n_instances=2)
         pretrained_weights = [torch.tensor([[[2.0, 2.0], [2.0, 2.0]], [[1.0, 1.0], [1.0, 1.0]]])]
-        result = calc_param_match_loss(model, pretrained_weights, device="cpu")
+        result = calc_param_match_loss(
+            pretrained_weights=pretrained_weights,
+            layer_in_params=model.all_As(),
+            layer_out_params=model.all_Bs(),
+        )
 
         # AB [n_instances=2, d_in=2, d_out=2]: [[[3, 3], [3, 3]], [[3, 3], [3, 3]]]
         # diff^2: [[[1, 1], [1, 1]], [[4, 4], [4, 4]]]
