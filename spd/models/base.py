@@ -37,7 +37,7 @@ class SPDModel(ABC, nn.Module):
 
     @abstractmethod
     def fix_normalized_adam_gradients(self) -> None:
-        """Prevent Adam from using incorrect gradients since we set some matrices to unit norm."""
+        """Modify the gradient by subtracting it's component parallel to the activation."""
         pass
 
 
