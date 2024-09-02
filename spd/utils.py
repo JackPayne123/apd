@@ -240,7 +240,6 @@ class BatchedDataLoader(DataLoader[Q], Generic[Q]):
 def calc_attributions(
     out: Float[Tensor, "... out_dim"],
     inner_acts: list[Float[Tensor, "... k"]],
-    retain_graph: bool = True,
 ) -> Float[Tensor, "... k"]:
     """Calculate the sum of the (squared) attributions from each output dimension.
 
@@ -257,9 +256,6 @@ def calc_attributions(
         out: The output of the model.
         inner_acts: The inner acts of the model (i.e. the set of subnetwork activations for each
             parameter matrix).
-        retain_graph: retain_graph argument for autograd.grad. In the model forward pass we use
-            the out variable multiple times, and thus require retain_graph. In the plotting function
-            we don't, and thus don't require retain_graph.
 
     Returns:
         The sum of the (squared) attributions from each output dimension.
@@ -268,7 +264,7 @@ def calc_attributions(
     for feature_idx in range(out.shape[-1]):
         feature_attributions: Float[Tensor, "... k"] = torch.zeros_like(inner_acts[0])
         feature_grads: tuple[Float[Tensor, "... k"], ...] = torch.autograd.grad(
-            out[..., feature_idx].sum(), inner_acts, retain_graph=retain_graph
+            out[..., feature_idx].sum(), inner_acts, retain_graph=True
         )
         assert len(feature_grads) == len(inner_acts)
         for param_matrix_idx in range(len(inner_acts)):
@@ -346,3 +342,19 @@ def calc_neuron_indices(
         for layer in range(n_layers)
     ]
     return neuron_indices
+
+
+@torch.inference_mode()
+def remove_grad_parallel_to_subnetwork_vecs(
+    A: Float[Tensor, "... d_in k"], A_grad: Float[Tensor, "... d_in k"]
+) -> None:
+    """Modify the gradient by subtracting it's component parallel to the activation.
+
+    I.e. subtract the projection of the gradient vector onto the activation vector.
+
+    This is to stop Adam from changing the norm of A. Note that this will not completely prevent
+    Adam from changing the norm due to Adam's (m/(sqrt(v) + eps)) term not preserving the norm
+    direction.
+    """
+    parallel_component = einops.einsum(A_grad, A, "... d_in k, ... d_in k -> ... k")
+    A_grad -= einops.einsum(parallel_component, A, "... k, ... d_in k -> ... d_in k")

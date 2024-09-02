@@ -53,14 +53,14 @@ def plot_components(
     # Forward pass to get the output and inner activations
     out, layer_acts, inner_acts = model(x)
     # Calculate attribution scores
-    attribution_scores = calc_attributions(out, inner_acts, retain_graph=False)
+    attribution_scores = calc_attributions(out, inner_acts)
     attribution_scores_normed = attribution_scores / attribution_scores.std(dim=1, keepdim=True)
     # Get As and Bs and ABs
     n_layers = model.n_layers
     assert len(model.all_As()) == len(model.all_Bs()), "A and B matrices must have the same length"
     assert len(model.all_As()) % 2 == 0, "A and B matrices must have an even length (MLP in + out)"
     assert len(model.all_As()) // 2 == n_layers, "Number of A and B matrices must be 2*n_layers"
-    As = model.all_As()  # Note that all_As() returns normed A matrices
+    As = model.all_As()
     Bs = model.all_Bs()
     ABs = [torch.einsum("...fk,...kg->...fg", As[i], Bs[i]) for i in range(len(As))]
     ABs_by_k = [torch.einsum("...fk,...kg->...kfg", As[i], Bs[i]) for i in range(len(As))]
@@ -120,7 +120,7 @@ def plot_components(
         plot_matrix(
             fig.add_subplot(gs[0, 2]),
             As[2 * n],
-            f"Normed A (W_in, layer {n})",
+            f"A (W_in, layer {n})",
             "Subnetwork index",
             "Embedding index",
             "%.1f",
@@ -144,7 +144,7 @@ def plot_components(
         plot_matrix(
             fig.add_subplot(gs[1, 2:]),
             As[2 * n + 1].T,
-            f"Normed A (W_out, layer {n})",
+            f"A (W_out, layer {n})",
             "Neuron index",
             "",
             "%.2f",
@@ -152,7 +152,7 @@ def plot_components(
         plot_matrix(
             fig.add_subplot(gs[2, :2]),
             ABs[n],
-            f"AB Product (W_in, layer {n})",
+            f"AB summed (W_in, layer {n})",
             "Neuron index",
             "Embedding index",
             "%.2f",
@@ -160,7 +160,7 @@ def plot_components(
         plot_matrix(
             fig.add_subplot(gs[2, 2:]),
             ABs[n + 1].T,
-            f"AB Product Transposed (W_out.T, layer {n})",
+            f"AB.T  summed (W_out.T, layer {n})",
             "Neuron index",
             "",
             "%.2f",
@@ -170,7 +170,7 @@ def plot_components(
                 plot_matrix(
                     fig.add_subplot(gs[3 + k, :2]),
                     ABs_by_k[n][k],
-                    f"AB Product (W_in, layer {n})",
+                    f"AB k={k} (W_in, layer {n})",
                     "Neuron index",
                     "Embedding index",
                     "%.2f",
@@ -178,7 +178,7 @@ def plot_components(
                 plot_matrix(
                     fig.add_subplot(gs[3 + k, 2:]),
                     ABs_by_k[n + 1][k].T,
-                    f"AB Product (W_in, layer {n})",
+                    f"AB.T k={k} (W_out.T, layer {n})",
                     "Neuron index",
                     "Embedding index",
                     "%.2f",
