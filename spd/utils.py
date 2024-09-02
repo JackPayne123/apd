@@ -5,7 +5,7 @@ import time
 from collections.abc import Iterator
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from typing import Any, TypeVar
+from typing import Any, Generic, TypeVar
 
 import einops
 import numpy as np
@@ -22,6 +22,7 @@ from torch.utils.data import DataLoader, Dataset
 from spd.settings import REPO_ROOT
 
 T = TypeVar("T", bound=BaseModel)
+Q = TypeVar("Q")
 
 
 def to_root_path(path: str | Path):
@@ -197,12 +198,12 @@ def init_param_(param: torch.Tensor) -> None:
     torch.nn.init.kaiming_uniform_(param, a=math.sqrt(5))
 
 
-class BatchedDataLoader(DataLoader[tuple[torch.Tensor, torch.Tensor]]):
+class DatasetGeneratedDataLoader(DataLoader[Q], Generic[Q]):
     """DataLoader that generates batches by calling the dataset's `generate_batch` method."""
 
     def __init__(
         self,
-        dataset: Dataset[tuple[torch.Tensor, torch.Tensor]],
+        dataset: Dataset[Q],
         batch_size: int = 1,
         shuffle: bool = False,
         num_workers: int = 0,
@@ -213,18 +214,43 @@ class BatchedDataLoader(DataLoader[tuple[torch.Tensor, torch.Tensor]]):
 
     def __iter__(  # type: ignore
         self,
-    ) -> Iterator[tuple[torch.Tensor, torch.Tensor]]:
+    ) -> Iterator[Q]:
         for _ in range(len(self)):
             yield self.dataset.generate_batch(self.batch_size)  # type: ignore
 
 
+class BatchedDataLoader(DataLoader[Q], Generic[Q]):
+    """DataLoader that unpacks the batch in __getitem__.
+
+    This is used for datasets which generate a whole batch in one call to __getitem__.
+    """
+
+    def __init__(
+        self,
+        dataset: Dataset[Q],
+        num_workers: int = 0,
+    ):
+        super().__init__(dataset, num_workers=num_workers)
+
+    def __iter__(self) -> Iterator[tuple[torch.Tensor, torch.Tensor]]:  # type: ignore
+        for batch, label in super().__iter__():
+            yield batch[0], label[0]
+
+
 def calc_attributions(
-    out: Float[Tensor, "... out_dim"], inner_acts: list[Float[Tensor, "... k"]]
+    out: Float[Tensor, "... out_dim"],
+    inner_acts: list[Float[Tensor, "... k"]],
 ) -> Float[Tensor, "... k"]:
     """Calculate the sum of the (squared) attributions from each output dimension.
 
     An attribution is the element-wise product of the gradient of the output dimension w.r.t. the
     inner acts and the inner acts themselves.
+
+    Note: This code may be run in between the training forward pass, and the loss.backward() and
+    opt.step() calls; it must not mess with the training. The reason the current implementation is
+    fine to run anywhere is that we just use autograd rather than backward which does not
+    populate the .grad attributes. Unrelatedly, we use retain_graph=True in a bunch of cases
+    where we want to later use the `out` variable in e.g. the loss function.
 
     Args:
         out: The output of the model.
@@ -316,3 +342,35 @@ def calc_neuron_indices(
         for layer in range(n_layers)
     ]
     return neuron_indices
+
+
+@torch.inference_mode()
+def remove_grad_parallel_to_subnetwork_vecs_A(
+    A: Float[Tensor, "... d_in k"], A_grad: Float[Tensor, "... d_in k"]
+) -> None:
+    """Modify the gradient by subtracting it's component parallel to the activation.
+
+    I.e. subtract the projection of the gradient vector onto the activation vector.
+
+    This is to stop Adam from changing the norm of A. Note that this will not completely prevent
+    Adam from changing the norm due to Adam's (m/(sqrt(v) + eps)) term not preserving the norm
+    direction.
+    """
+    parallel_component = einops.einsum(A_grad, A, "... d_in k, ... d_in k -> ... k")
+    A_grad -= einops.einsum(parallel_component, A, "... k, ... d_in k -> ... d_in k")
+
+
+@torch.inference_mode()
+def remove_grad_parallel_to_subnetwork_vecs_B(
+    B: Float[Tensor, "... k d_out"], B_grad: Float[Tensor, "... k d_out"]
+) -> None:
+    """Modify the gradient by subtracting it's component parallel to the activation.
+
+    I.e. subtract the projection of the gradient vector onto the activation vector.
+
+    This is to stop Adam from changing the norm of A. Note that this will not completely prevent
+    Adam from changing the norm due to Adam's (m/(sqrt(v) + eps)) term not preserving the norm
+    direction.
+    """
+    parallel_component = einops.einsum(B_grad, B, "... k d_out, ... k d_out -> ... k")
+    B_grad -= einops.einsum(parallel_component, B, "... k, ... k d_out -> ... k d_out")

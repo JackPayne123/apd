@@ -18,7 +18,7 @@ from spd.experiments.tms.utils import TMSDataset, plot_A_matrix
 from spd.log import logger
 from spd.run_spd import Config, TMSConfig, optimize
 from spd.utils import (
-    BatchedDataLoader,
+    DatasetGeneratedDataLoader,
     init_wandb,
     load_config,
     permute_to_identity,
@@ -51,8 +51,7 @@ def get_run_name(config: Config, task_config: TMSConfig) -> str:
 def plot_perumated_A(model: TMSSPDModel, step: int, out_dir: Path, **_) -> plt.Figure:
     permuted_A_T_list: list[torch.Tensor] = []
     for i in range(model.n_instances):
-        normed_A = model.A / (model.A.norm(p=2, dim=-2, keepdim=True) + 1e-12)
-        permuted_matrix = permute_to_identity(normed_A[i].T.abs())
+        permuted_matrix = permute_to_identity(model.A[i].T.abs())
         permuted_A_T_list.append(permuted_matrix)
     permuted_A_T = torch.stack(permuted_A_T_list, dim=0)
 
@@ -113,7 +112,7 @@ def main(
         feature_probability=task_config.feature_probability,
         device=device,
     )
-    dataloader = BatchedDataLoader(dataset, batch_size=config.batch_size)
+    dataloader = DatasetGeneratedDataLoader(dataset, batch_size=config.batch_size)
 
     optimize(
         model=model,

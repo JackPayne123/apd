@@ -54,11 +54,8 @@ class ParamComponents(nn.Module):
         self,
         x: Float[Tensor, "... dim1"],
     ) -> tuple[Float[Tensor, "... dim2"], Float[Tensor, "... k"]]:
-        A = self.A / (self.A.norm(p=2, dim=-2, keepdim=True) + 1e-12) if self.norm_A else self.A
-        inner_acts = torch.einsum("bf,fk->bk", x, A)
-
-        B = self.B / (self.B.norm(p=2, dim=-1, keepdim=True) + 1e-12) if self.norm_B else self.B
-        out = torch.einsum("bk,kg->bg", inner_acts, B)
+        inner_acts = torch.einsum("bf,fk->bk", x, self.A)
+        out = torch.einsum("bk,kg->bg", inner_acts, self.B)
         return out, inner_acts
 
     def forward_topk(
@@ -78,8 +75,7 @@ class ParamComponents(nn.Module):
             inner_acts: Subnetwork activations
         """
 
-        normed_A = self.A / (self.A.norm(p=2, dim=-2, keepdim=True) + 1e-12)
-        inner_acts = torch.einsum("bf,fk->bk", x, normed_A)
+        inner_acts = torch.einsum("bf,fk->bk", x, self.A)
         inner_acts_topk = inner_acts * topk_mask
         out = torch.einsum("bk,kg->bg", inner_acts_topk, self.B)
         return out, inner_acts_topk

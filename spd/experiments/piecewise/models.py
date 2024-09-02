@@ -11,7 +11,11 @@ from torch import Tensor
 
 from spd.models.base import Model, SPDModel
 from spd.models.components import MLPComponents
-from spd.utils import calc_neuron_indices
+from spd.utils import (
+    calc_neuron_indices,
+    remove_grad_parallel_to_subnetwork_vecs_A,
+    remove_grad_parallel_to_subnetwork_vecs_B,
+)
 
 
 def initialize_embeds(
@@ -703,34 +707,18 @@ class PiecewiseFunctionSPDTransformer(SPDModel):
         )
 
     def all_As(self) -> list[Float[Tensor, "dim k"]]:
-        As = []
-        for mlp in self.mlps:
-            assert isinstance(mlp, MLPComponents)
-            a1 = mlp.linear1.A
-            if mlp.linear1.norm_A:
-                a1 = a1 / (a1.norm(p=2, dim=-2, keepdim=True) + 1e-12)
-            As.append(a1)
-
-            a2 = mlp.linear2.A
-            if mlp.linear2.norm_A:
-                a2 = a2 / (a2.norm(p=2, dim=-2, keepdim=True) + 1e-12)
-            As.append(a2)
+        all_A_pairs = [
+            (self.mlps[i].linear1.A, self.mlps[i].linear2.A) for i in range(self.n_layers)
+        ]
+        As = [A for A_pair in all_A_pairs for A in A_pair]
         assert len(As) == self.n_param_matrices
         return As
 
     def all_Bs(self) -> list[Float[Tensor, "k dim"]]:
-        Bs = []
-        for mlp in self.mlps:
-            assert isinstance(mlp, MLPComponents)
-            b1 = mlp.linear1.B
-            if mlp.linear1.norm_B:
-                b1 = b1 / (b1.norm(p=2, dim=-1, keepdim=True) + 1e-12)
-            Bs.append(b1)
-
-            b2 = mlp.linear2.B
-            if mlp.linear2.norm_B:
-                b2 = b2 / (b2.norm(p=2, dim=-1, keepdim=True) + 1e-12)
-            Bs.append(b2)
+        all_B_pairs = [
+            (self.mlps[i].linear1.B, self.mlps[i].linear2.B) for i in range(self.n_layers)
+        ]
+        Bs = [B for B_pair in all_B_pairs for B in B_pair]
         assert len(Bs) == self.n_param_matrices
         return Bs
 
@@ -890,3 +878,27 @@ class PiecewiseFunctionSPDTransformer(SPDModel):
         )
         model.load_state_dict(params)
         return model
+
+    def set_matrices_to_unit_norm(self):
+        # Note that this might norm tensors that share weights more than once, but this isn't an
+        # issue because norming more than once produces the same output
+        for mlp in self.mlps:
+            if mlp.linear1.norm_A:
+                mlp.linear1.A.data /= mlp.linear1.A.data.norm(p=2, dim=-2, keepdim=True)
+            if mlp.linear1.norm_B:
+                mlp.linear1.B.data /= mlp.linear1.B.data.norm(p=2, dim=-1, keepdim=True)
+            if mlp.linear2.norm_A:
+                mlp.linear2.A.data /= mlp.linear2.A.data.norm(p=2, dim=-2, keepdim=True)
+            if mlp.linear2.norm_B:
+                mlp.linear2.B.data /= mlp.linear2.B.data.norm(p=2, dim=-1, keepdim=True)
+
+    def fix_normalized_adam_gradients(self):
+        for mlp in self.mlps:
+            if mlp.linear1.norm_A:
+                remove_grad_parallel_to_subnetwork_vecs_A(mlp.linear1.A.data, mlp.linear1.A.grad)
+            if mlp.linear1.norm_B:
+                remove_grad_parallel_to_subnetwork_vecs_B(mlp.linear1.B.data, mlp.linear1.B.grad)
+            if mlp.linear2.norm_A:
+                remove_grad_parallel_to_subnetwork_vecs_A(mlp.linear2.A.data, mlp.linear2.A.grad)
+            if mlp.linear2.norm_B:
+                remove_grad_parallel_to_subnetwork_vecs_B(mlp.linear2.B.data, mlp.linear2.B.grad)
