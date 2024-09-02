@@ -15,29 +15,31 @@ from spd.utils import calc_neuron_indices
 
 
 def initialize_embeds(
-    W_E: nn.Linear,
-    W_U: nn.Linear,
+    W_E: Float[Tensor, "d_embed n_inputs"],
+    W_U: Float[Tensor, "n_outputs d_embed"],
     n_inputs: int,
     d_embed: int,
     superposition: bool,
     torch_gen: torch.Generator | None = None,
-):
+) -> tuple[Float[Tensor, "d_embed n_inputs"], Float[Tensor, "n_outputs d_embed"]]:
     if torch_gen is None:
         torch_gen = torch.Generator()
-    W_E.weight.data = torch.zeros(d_embed, n_inputs)
-    W_E.weight.data[0, 0] = 1.0
+    W_E = torch.zeros(d_embed, n_inputs)
+    W_E[0, 0] = 1.0
     num_functions = n_inputs - 1
     d_control = d_embed - 2
 
     if not superposition:
-        W_E.weight.data[1:-1, 1:] = torch.eye(num_functions)
+        W_E[1:-1, 1:] = torch.eye(num_functions)
     else:
         random_matrix = torch.randn(d_control, num_functions, generator=torch_gen)
         random_normalised = random_matrix / torch.norm(random_matrix, dim=1, keepdim=True)
-        W_E.weight.data[1:-1, 1:] = random_normalised
+        W_E[1:-1, 1:] = random_normalised
 
-    W_U.weight.data = torch.zeros(1, d_embed)  # Assuming n_outputs is always 1
-    W_U.weight.data[:, -1] = 1.0
+    W_U = torch.zeros(1, d_embed)  # Assuming n_outputs is always 1
+    W_U[:, -1] = 1.0
+
+    return W_E, W_U
 
 
 class PiecewiseLinear(nn.Module):
@@ -190,9 +192,9 @@ class ControlledPiecewiseLinear(nn.Module):
 
         for i in range(self.num_functions):
             piecewise_linear = self.piecewise_linears[i]
-            self.input_layer.weight.data[i * self.num_neurons : (i + 1) * self.num_neurons, 0] = (
-                piecewise_linear.input_layer.weight.data.squeeze()
-            )
+            self.input_layer.weight.data[
+                i * self.num_neurons : (i + 1) * self.num_neurons, 0
+            ] = piecewise_linear.input_layer.weight.data.squeeze()
             if simple_bias:
                 self.input_layer.bias.data[
                     i * self.num_neurons : (i + 1) * self.num_neurons
@@ -211,9 +213,9 @@ class ControlledPiecewiseLinear(nn.Module):
                 ] = self.control_W_E[i] * self.suppression_size
 
             self.output_layer.bias.data[i] = piecewise_linear.output_layer.bias.data
-            self.output_layer.weight.data[i, i * self.num_neurons : (i + 1) * self.num_neurons] = (
-                piecewise_linear.output_layer.weight.data.squeeze()
-            )
+            self.output_layer.weight.data[
+                i, i * self.num_neurons : (i + 1) * self.num_neurons
+            ] = piecewise_linear.output_layer.weight.data.squeeze()
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         control_bits = x[:, 1:]
@@ -370,11 +372,11 @@ class ControlledResNet(nn.Module):
         # set the weights of the residual layers to be the weights of the corresponding neurons in
         # the controlled piecewise linear
         for i in range(self.n_layers):
-            self.mlps[i].input_layer.weight.data[:, :-1] = (
-                self.controlled_piecewise_linear.input_layer.weight.data[
-                    self.neuron_permutations[i]
-                ]
-            )
+            self.mlps[i].input_layer.weight.data[
+                :, :-1
+            ] = self.controlled_piecewise_linear.input_layer.weight.data[
+                self.neuron_permutations[i]
+            ]
             self.mlps[
                 i
             ].input_layer.bias.data = self.controlled_piecewise_linear.input_layer.bias.data[
@@ -678,10 +680,17 @@ class PiecewiseFunctionSPDTransformer(SPDModel):
         self.superposition = self.num_functions > self.d_control
         if not self.superposition:
             assert self.num_functions == self.d_control
+        # Use register_buffer for W_E and W_U to make them buffers (not trained)
+        self.register_buffer("W_E", torch.empty(self.d_embed, n_inputs))
+        self.register_buffer("W_U", torch.empty(self.n_outputs, self.d_embed))
 
-        self.W_E = nn.Linear(n_inputs, self.d_embed, bias=False)
-        self.W_U = nn.Linear(self.d_embed, self.n_outputs, bias=False)
-        initialize_embeds(self.W_E, self.W_U, n_inputs, self.d_embed, self.superposition)
+        # Initialize W_E and W_U
+        with torch.no_grad():
+            W_E, W_U = initialize_embeds(
+                self.W_E, self.W_U, n_inputs, self.d_embed, self.superposition
+            )
+            self.W_E.copy_(W_E)
+            self.W_U.copy_(W_U)
 
         # The input_component is used for all A matrices in the first linear layer of each MLP
         # self.input_component = nn.Parameter(torch.empty(self.d_embed, self.k))
@@ -816,13 +825,14 @@ class PiecewiseFunctionSPDTransformer(SPDModel):
         """
         layer_acts = []
         inner_acts = []
-        residual = self.W_E(x)
+        residual = torch.einsum("...i,ij->...j", x, self.W_E.T)
         for layer in self.mlps:
             layer_out, layer_acts_i, inner_acts_i = layer(residual)
             residual = residual + layer_out
             layer_acts.extend(layer_acts_i)
             inner_acts.extend(inner_acts_i)
-        return self.W_U(residual), layer_acts, inner_acts
+        output = torch.einsum("...i,ij->...j", residual, self.W_U)
+        return output, layer_acts, inner_acts
 
     def forward_topk(
         self,
