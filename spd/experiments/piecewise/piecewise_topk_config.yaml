@@ -20,7 +20,7 @@ loss_type: param_match
 task_config:
   task_name: piecewise
   n_functions: 10
-  neurons_per_function: 10 #todo
+  neurons_per_function: 10
   n_layers: 1
   feature_probability: 0.05
   range_min: 0
