@@ -91,9 +91,11 @@ def plot_components(
             ax.set_yticklabels([f"{L:.0f}" for L in range(1, n_functions + 1)])
 
     # Create figure with subplots using gridspec
-    fig = plt.figure(figsize=(40, 40), constrained_layout=True)
     n_rows = 3 + model.k if plot_individual_components else 3
-    gs = fig.add_gridspec(n_rows, 4)
+    n_cols = 4
+    figsize = (8 * n_cols, 4 + 4 * n_rows)
+    fig = plt.figure(figsize=figsize, constrained_layout=True)
+    gs = fig.add_gridspec(n_rows, n_cols)
     plt.suptitle(f"Subnetwork Analysis (Step {step})")
 
     # Plot attribution scores
