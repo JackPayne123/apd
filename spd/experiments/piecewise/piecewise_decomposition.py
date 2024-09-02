@@ -42,6 +42,7 @@ def plot_components(
     step: int,
     out_dir: Path | None,
     batch_topk: bool,
+    plot_individual_components: bool = False,
 ) -> plt.Figure:
     # Create a batch of inputs with different control bits active
     x_val = torch.tensor(2.5, device=device)
@@ -91,7 +92,8 @@ def plot_components(
 
     # Create figure with subplots using gridspec
     fig = plt.figure(figsize=(40, 40), constrained_layout=True)
-    gs = fig.add_gridspec(3 + model.k, 4)
+    n_rows = 3 + model.k if plot_individual_components else 3
+    gs = fig.add_gridspec(n_rows, 4)
     plt.suptitle(f"Subnetwork Analysis (Step {step})")
 
     # Plot attribution scores
@@ -161,23 +163,24 @@ def plot_components(
             "",
             "%.2f",
         )
-        for k in range(model.k):
-            plot_matrix(
-                fig.add_subplot(gs[3 + k, :2]),
-                ABs_by_k[n][k],
-                f"AB Product (W_in, layer {n})",
-                "Neuron index",
-                "Embedding index",
-                "%.2f",
-            )
-            plot_matrix(
-                fig.add_subplot(gs[3 + k, 2:]),
-                ABs_by_k[n + 1][k].T,
-                f"AB Product (W_in, layer {n})",
-                "Neuron index",
-                "Embedding index",
-                "%.2f",
-            )
+        if plot_individual_components:
+            for k in range(model.k):
+                plot_matrix(
+                    fig.add_subplot(gs[3 + k, :2]),
+                    ABs_by_k[n][k],
+                    f"AB Product (W_in, layer {n})",
+                    "Neuron index",
+                    "Embedding index",
+                    "%.2f",
+                )
+                plot_matrix(
+                    fig.add_subplot(gs[3 + k, 2:]),
+                    ABs_by_k[n + 1][k].T,
+                    f"AB Product (W_in, layer {n})",
+                    "Neuron index",
+                    "Embedding index",
+                    "%.2f",
+                )
 
     if out_dir:
         fig.savefig(out_dir / f"subnetwork_analysis_{step}.png", dpi=300)
