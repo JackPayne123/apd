@@ -92,7 +92,8 @@ class Config(BaseModel):
     out_recon_coeff: NonNegativeFloat | None = None
     param_match_coeff: NonNegativeFloat | None = 1.0
     topk_recon_coeff: NonNegativeFloat | None = None
-    topk_l2_coeff: NonNegativeFloat | None = None
+    l2_coeff: NonNegativeFloat | None = None
+    l2_type: Literal["topk_AB", "topk_A_and_topk_B", "A_and_B"] = "topk_AB"
     lp_sparsity_coeff: NonNegativeFloat | None = None
     pnorm: PositiveFloat | None = None
     pnorm_end: PositiveFloat | None = None
@@ -133,7 +134,7 @@ class Config(BaseModel):
 
         # Check that topk_l2_coeff and topk_recon_coeff are None if topk is None
         if self.topk is None:
-            assert self.topk_l2_coeff is None, "topk_l2_coeff is not None but topk is"
+            assert self.l2_coeff is None, "topk_l2_coeff is not None but topk is"
             assert self.topk_recon_coeff is None, "topk_recon_coeff is not None but topk is"
 
         # Give a warning if both out_recon_coeff and param_match_coeff are > 0
@@ -149,7 +150,7 @@ class Config(BaseModel):
 
         # If any of the coeffs are 0, raise a warning
         msg = "is 0, you may wish to instead set it to null to avoid calculating the loss"
-        if self.topk_l2_coeff == 0:
+        if self.l2_coeff == 0:
             logger.warning(f"topk_l2_coeff {msg}")
         if self.topk_recon_coeff == 0:
             logger.warning(f"topk_recon_coeff {msg}")
@@ -236,7 +237,11 @@ def calc_topk_l2(
     layer_in_params: list[Float[Tensor, " ... d_in k"]],
     layer_out_params: list[Float[Tensor, " ... k d_out"]],
     topk_mask: Bool[Tensor, "batch ... k"],
-) -> Float[Tensor, ""] | Float[Tensor, " n_instances"]:
+) -> tuple[
+    Float[Tensor, ""] | Float[Tensor, " n_instances"],
+    Float[Tensor, ""] | Float[Tensor, " n_instances"],
+    Float[Tensor, ""] | Float[Tensor, " n_instances"],
+]:
     """Calculate the L2 of the sum of the topk subnetworks.
 
     Note that we explicitly write the batch dimension to aid understanding. The einsums
@@ -256,16 +261,26 @@ def calc_topk_l2(
     n_instances = topk_mask.shape[1] if topk_mask.ndim == 3 else None
     accumulate_shape = (batch_size,) if n_instances is None else (batch_size, n_instances)
 
-    topk_l2_penalty = torch.zeros(accumulate_shape, device=layer_in_params[0].device)
+    l2_topk_AB = torch.zeros(accumulate_shape, device=layer_in_params[0].device)
+    l2_topk_AandB = torch.zeros(accumulate_shape, device=layer_in_params[0].device)
+    l2_AandB = torch.zeros(accumulate_shape, device=layer_in_params[0].device)
     for A, B in zip(layer_in_params, layer_out_params, strict=True):
         # A: [d_in, k] or [n_instances, d_in, k]
         # B: [k, d_in] or [n_instances, k, d_in]
         # topk_mask: [batch, k] or [batch, n_instances, k]
         A_topk = torch.einsum("...fk,b...k ->b...fk", A, topk_mask)
+        B_topk = torch.einsum("...kg,b...k ->b...kg", B, topk_mask)
         AB_topk = torch.einsum("b...fk,...kh->b...fh", A_topk, B)
-        topk_l2_penalty = topk_l2_penalty + ((AB_topk) ** 2).mean(dim=(-2, -1))
+        l2_topk_AB = l2_topk_AB + (AB_topk**2).mean(dim=(-2, -1))
+        l2_topk_AandB = (
+            l2_topk_AandB + (A_topk**2).mean(dim=(-2, -1)) + (B_topk**2).mean(dim=(-2, -1))
+        )
+        l2_AandB = l2_AandB + (A**2).mean(dim=(-2, -1)) + (B**2).mean(dim=(-2, -1))
     # Mean over batch_dim and divide by number of parameter matrices we iterated over
-    return topk_l2_penalty.mean(dim=0) / len(layer_in_params)
+    l2_topk_AandB = l2_topk_AandB.mean(dim=0) / len(layer_in_params)
+    l2_AandB = l2_AandB.mean(dim=0) / len(layer_in_params)
+    l2_topk_AB = l2_topk_AB.mean(dim=0) / len(layer_in_params)
+    return l2_topk_AB, l2_topk_AandB, l2_AandB
 
 
 def calc_param_match_loss(
@@ -458,7 +473,7 @@ def optimize(
                 step_pnorm=step_pnorm,
             )
 
-        out_topk, topk_l2_loss, topk_recon_loss = None, None, None
+        out_topk, topk_recon_loss, l2_loss = None, None, None
         if config.topk is not None:
             attribution_scores = calc_attributions(out, inner_acts)
 
@@ -470,12 +485,20 @@ def optimize(
             out_topk, _, inner_acts_topk = model.forward_topk(batch, topk_mask=topk_mask)
             assert len(inner_acts_topk) == model.n_param_matrices
 
-            if config.topk_l2_coeff is not None:
-                topk_l2_loss = calc_topk_l2(
+            if config.l2_coeff is not None:
+                l2_topk_AB_loss, l2_topk_AandB_loss, l2_AandB_loss = calc_topk_l2(
                     layer_in_params=model.all_As(),
                     layer_out_params=model.all_Bs(),
                     topk_mask=topk_mask,
                 )
+                if config.l2_type == "topk_AB":
+                    l2_loss = l2_topk_AB_loss
+                elif config.l2_type == "topk_A_and_topk_B":
+                    l2_loss = l2_topk_AandB_loss
+                elif config.l2_type == "A_and_B":
+                    l2_loss = l2_AandB_loss
+                else:
+                    raise ValueError(f"Unknown l2_type: {config.l2_type}")
 
             if config.topk_recon_coeff is not None:
                 assert out_topk is not None
@@ -494,9 +517,9 @@ def optimize(
         if topk_recon_loss is not None:
             assert step_topk_recon_coeff is not None
             loss = loss + step_topk_recon_coeff * topk_recon_loss.mean()
-        if topk_l2_loss is not None:
-            assert config.topk_l2_coeff is not None
-            loss = loss + config.topk_l2_coeff * topk_l2_loss.mean()
+        if l2_loss is not None:
+            assert config.l2_coeff is not None
+            loss = loss + config.l2_coeff * l2_loss.mean()
 
         # Logging
         if step % config.print_freq == 0:
@@ -511,8 +534,8 @@ def optimize(
             if topk_recon_loss is not None:
                 tqdm.write(f"Topk recon loss:{nl}{topk_recon_loss}")
             tqdm.write(f"Out recon loss:{nl}{out_recon_loss}")
-            if topk_l2_loss is not None:
-                tqdm.write(f"topk l2 loss:{nl}{topk_l2_loss}")
+            if l2_loss is not None:
+                tqdm.write(f"topk l2 loss:{nl}{l2_loss}")
             if param_match_loss is not None:
                 tqdm.write(f"Param match loss:{nl}{param_match_loss}")
             if config.wandb_project:
@@ -534,9 +557,7 @@ def optimize(
                         "param_match_loss": param_match_loss.mean().item()
                         if param_match_loss is not None
                         else None,
-                        "topk_l2_loss": topk_l2_loss.mean().item()
-                        if topk_l2_loss is not None
-                        else None,
+                        "topk_l2_loss": l2_loss.mean().item() if l2_loss is not None else None,
                     },
                     step=step,
                 )

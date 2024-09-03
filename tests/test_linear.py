@@ -71,7 +71,7 @@ def test_deep_linear_batch_topk_no_l2() -> None:
         save_freq=None,
         lr=1e-3,
         topk_recon_coeff=0.01,
-        topk_l2_coeff=None,
+        l2_coeff=None,
         task_config=DEEP_LINEAR_TASK_CONFIG,
     )
     deep_linear_decomposition_optimize_test(config)
@@ -87,7 +87,7 @@ def test_deep_linear_batch_topk_and_l2() -> None:
         save_freq=None,
         lr=1e-3,
         topk_recon_coeff=0.01,
-        topk_l2_coeff=0.1,
+        l2_coeff=0.1,
         task_config=DEEP_LINEAR_TASK_CONFIG,
     )
     deep_linear_decomposition_optimize_test(config)
@@ -105,7 +105,7 @@ def test_deep_linear_batch_topk_and_lp_and_l2() -> None:
         save_freq=None,
         lr=1e-3,
         topk_recon_coeff=0.01,
-        topk_l2_coeff=0.1,
+        l2_coeff=0.1,
         task_config=DEEP_LINEAR_TASK_CONFIG,
     )
     deep_linear_decomposition_optimize_test(config)
@@ -121,7 +121,7 @@ def test_deep_linear_topk_and_l2() -> None:
         save_freq=None,
         lr=1e-3,
         topk_recon_coeff=0.01,
-        topk_l2_coeff=0.1,
+        l2_coeff=0.1,
         task_config=DEEP_LINEAR_TASK_CONFIG,
     )
     deep_linear_decomposition_optimize_test(config)
@@ -138,7 +138,7 @@ def test_deep_linear_lp() -> None:
         lr=1e-3,
         lp_sparsity_coeff=0.01,
         pnorm=0.9,
-        topk_l2_coeff=None,
+        l2_coeff=None,
         task_config=DEEP_LINEAR_TASK_CONFIG,
     )
     deep_linear_decomposition_optimize_test(config)

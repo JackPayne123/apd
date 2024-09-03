@@ -204,7 +204,7 @@ def get_run_name(config: Config) -> str:
             f"topk{config.topk}_"
             f"topkrecon{config.topk_recon_coeff}_"
             f"lpsp{config.lp_sparsity_coeff}_"
-            f"topkl2_{config.topk_l2_coeff}_"
+            f"topkl2_{config.l2_coeff}_"
             f"bs{config.batch_size}"
         )
         if config.task_config.handcoded_AB:

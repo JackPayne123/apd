@@ -82,7 +82,7 @@ def test_piecewise_batch_tokp_no_l2_handcoded_AB() -> None:
         save_freq=None,
         lr=1e-3,
         topk_recon_coeff=1,
-        topk_l2_coeff=None,
+        l2_coeff=None,
         task_config=get_piecewise_config(handcoded_AB=True, n_layers=1),
     )
     piecewise_decomposition_optimize_test(config)
@@ -98,7 +98,7 @@ def test_piecewise_batch_topk_no_l2() -> None:
         save_freq=None,
         lr=1e-3,
         topk_recon_coeff=1,
-        topk_l2_coeff=None,
+        l2_coeff=None,
         task_config=get_piecewise_config(),
     )
     piecewise_decomposition_optimize_test(config)
@@ -114,7 +114,7 @@ def test_piecewise_batch_topk_and_l2() -> None:
         save_freq=None,
         lr=1e-3,
         topk_recon_coeff=1,
-        topk_l2_coeff=0.1,
+        l2_coeff=0.1,
         task_config=get_piecewise_config(),
     )
     piecewise_decomposition_optimize_test(config)
@@ -130,7 +130,7 @@ def test_piecewise_topk_and_l2() -> None:
         save_freq=None,
         lr=1e-3,
         topk_recon_coeff=1,
-        topk_l2_coeff=0.1,
+        l2_coeff=0.1,
         task_config=get_piecewise_config(),
     )
     piecewise_decomposition_optimize_test(config)
@@ -147,7 +147,7 @@ def test_piecewise_lp() -> None:
         lr=1e-3,
         lp_sparsity_coeff=0.01,
         pnorm=0.9,
-        topk_l2_coeff=None,
+        l2_coeff=None,
         task_config=get_piecewise_config(),
     )
     piecewise_decomposition_optimize_test(config)
@@ -164,7 +164,7 @@ def test_piecewise_lp_simple_bias_false() -> None:
         lr=1e-3,
         lp_sparsity_coeff=0.01,
         pnorm=0.9,
-        topk_l2_coeff=None,
+        l2_coeff=None,
         task_config=get_piecewise_config(simple_bias=False),
     )
     piecewise_decomposition_optimize_test(config)
@@ -185,7 +185,7 @@ def test_piecewise_batch_topk_simple_bias_false_loss_stable() -> None:
         topk_recon_coeff=0.1,
         lp_sparsity_coeff=None,
         pnorm=None,
-        topk_l2_coeff=None,
+        l2_coeff=None,
         task_config=get_piecewise_config(
             handcoded_AB=True,
             n_layers=1,
