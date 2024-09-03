@@ -86,6 +86,7 @@ class Config(BaseModel):
     steps: PositiveInt
     print_freq: PositiveInt
     image_freq: PositiveInt | None = None
+    slow_images: bool = False
     save_freq: PositiveInt | None = None
     lr: PositiveFloat
     topk_recon_coeff: NonNegativeFloat | None = None
@@ -532,7 +533,7 @@ def optimize(
             plot_results_fn is not None
             and config.image_freq is not None
             and step % config.image_freq == 0
-            and step > 0
+            and (step > 0 or not config.slow_images)
         ):
             fig = plot_results_fn(
                 model=model,

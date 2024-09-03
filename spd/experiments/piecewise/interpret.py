@@ -45,7 +45,7 @@ model.to(device)
 
 topk = config.topk
 batch_topk = config.batch_topk
-fig = plot_components(model, device, topk=topk, step=-1, out_dir=None, batch_topk=batch_topk)
+fig = plot_components(model=model, step=-1, out_dir=None, device=device, slow_images=True)
 
 out_path = Path("out/attribution_scores/") / pretrained_path.parent.name
 out_path.mkdir(parents=True, exist_ok=True)

@@ -37,12 +37,11 @@ wandb.require("core")
 
 def plot_components(
     model: PiecewiseFunctionSPDTransformer,
-    device: str,
-    topk: float | None,
     step: int,
     out_dir: Path | None,
-    batch_topk: bool,
-    plot_individual_components: bool = False,
+    device: str,
+    slow_images: bool,
+    **_,
 ) -> plt.Figure:
     # Create a batch of inputs with different control bits active
     x_val = torch.tensor(2.5, device=device)
@@ -91,7 +90,7 @@ def plot_components(
             ax.set_yticklabels([f"{L:.0f}" for L in range(1, n_functions + 1)])
 
     # Create figure with subplots using gridspec
-    n_rows = 3 + model.k if plot_individual_components else 3
+    n_rows = 3 + model.k if slow_images else 3
     n_cols = 4
     figsize = (8 * n_cols, 4 + 4 * n_rows)
     fig = plt.figure(figsize=figsize, constrained_layout=True)
@@ -165,7 +164,7 @@ def plot_components(
             "",
             "%.2f",
         )
-        if plot_individual_components:
+        if slow_images:
             for k in range(model.k):
                 plot_matrix(
                     fig.add_subplot(gs[3 + k, :2]),
