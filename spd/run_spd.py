@@ -537,11 +537,12 @@ def optimize(
         ):
             fig = plot_results_fn(
                 model=model,
-                device=device,
-                topk=config.topk,
                 step=step,
                 out_dir=out_dir,
+                device=device,
+                topk=config.topk,
                 batch_topk=config.batch_topk,
+                slow_images=config.slow_images,
             )
             if config.wandb_project:
                 wandb.log(
