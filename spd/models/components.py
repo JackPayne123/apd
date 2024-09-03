@@ -24,7 +24,7 @@ class ParamComponents(nn.Module):
         """
         super().__init__()
 
-        self.subnetworks = torch.empty(k, in_dim, out_dim)
+        self.subnetworks = nn.Parameter(torch.empty(k, in_dim, out_dim))
         init_param_(self.subnetworks)
 
     def forward(

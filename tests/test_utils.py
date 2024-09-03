@@ -57,6 +57,9 @@ def test_closeness_to_identity(A: torch.Tensor, expected_closeness_max: float):
 
 
 def test_calc_attributions_one_inner_act():
+    print(
+        "WARNING: This test passes for full rank subnetworks, but it is not a very thorough test."
+    )
     # Set up a simple linear model with known gradients
     inner_acts = [torch.tensor([2.0, 3.0], requires_grad=True)]
 
@@ -72,7 +75,7 @@ def test_calc_attributions_one_inner_act():
     out = torch.matmul(weights, inner_acts[0])
 
     # Calculate attributions
-    attributions = calc_attributions(out, inner_acts)
+    attributions = calc_attributions(out, inner_acts, [out])
 
     # Expected attributions
     expected_attributions = torch.zeros_like(inner_acts[0])
@@ -88,6 +91,9 @@ def test_calc_attributions_one_inner_act():
 
 
 def test_calc_attributions_two_inner_acts():
+    print(
+        "WARNING: This test passes for full rank subnetworks, but it is not a very thorough test."
+    )
     # Set up a simple linear model with known gradients
     inner_acts = [
         torch.tensor([1.0, 2.0, 3.0], requires_grad=True),
@@ -110,7 +116,7 @@ def test_calc_attributions_two_inner_acts():
     )
 
     # Calculate attributions
-    attributions = calc_attributions(out, inner_acts)
+    attributions = calc_attributions(out, inner_acts, [out])
 
     # Expected attributions
     expected_attributions = torch.zeros_like(inner_acts[0])

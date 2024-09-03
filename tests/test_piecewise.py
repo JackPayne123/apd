@@ -203,7 +203,7 @@ def test_piecewise_batch_topk_simple_bias_false_loss_stable() -> None:
     with torch.inference_mode():
         labels = piecewise_model(batch)
 
-    out, _, inner_acts = piecewise_model_spd(batch)
+    out, layer_acts, inner_acts = piecewise_model_spd(batch)
 
     def get_topk_recon_on_batch(
         batch: Float[torch.Tensor, "batch_size input_dim"],
@@ -226,11 +226,10 @@ def test_piecewise_batch_topk_simple_bias_false_loss_stable() -> None:
     pretrained_weights = piecewise_model.all_decomposable_params()
     initial_param_match_loss = calc_param_match_loss(
         pretrained_weights=pretrained_weights,
-        layer_in_params=piecewise_model_spd.all_As(),
-        layer_out_params=piecewise_model_spd.all_Bs(),
+        subnetwork_params=piecewise_model_spd.all_subnetworks(),
     )
 
-    attribution_scores = calc_attributions(out, inner_acts)
+    attribution_scores = calc_attributions(out, inner_acts, layer_acts)
     initial_topk_recon_loss = get_topk_recon_on_batch(
         batch, labels, attribution_scores, piecewise_model_spd
     )
@@ -253,12 +252,11 @@ def test_piecewise_batch_topk_simple_bias_false_loss_stable() -> None:
     # Check that the losses have not reduced
     final_param_match_loss = calc_param_match_loss(
         pretrained_weights=pretrained_weights,
-        layer_in_params=piecewise_model_spd.all_As(),
-        layer_out_params=piecewise_model_spd.all_Bs(),
+        subnetwork_params=piecewise_model_spd.all_subnetworks(),
     )
 
-    out, _, inner_acts = piecewise_model_spd(batch)
-    attribution_scores = calc_attributions(out, inner_acts)
+    out, layer_acts, inner_acts = piecewise_model_spd(batch)
+    attribution_scores = calc_attributions(out, inner_acts, layer_acts)
     final_topk_recon_loss = get_topk_recon_on_batch(
         batch, labels, attribution_scores, piecewise_model_spd
     )

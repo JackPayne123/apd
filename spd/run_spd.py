@@ -252,6 +252,7 @@ def calc_topk_l2(
     for subnetwork_param in subnetwork_params:
         # subnetwork_param: [k, d_in, d_out] or [n_instances, k, d_in, d_out]
         # topk_mask: [batch, k] or [batch, n_instances, k]
+        topk_mask = topk_mask.float()
         topk_params = einsum(
             subnetwork_param, topk_mask, "... k d_in d_out, batch ... k -> batch ... d_in d_out"
         )
