@@ -22,22 +22,8 @@ class SPDModel(ABC, nn.Module):
         pass
 
     @abstractmethod
-    def all_As(self) -> list[Float[Tensor, "dim k"]]:
-        """Pre-normalized A matrices."""
-        pass
-
-    @abstractmethod
-    def all_Bs(self) -> list[Float[Tensor, "k dim"]]:
-        pass
-
-    @abstractmethod
-    def set_matrices_to_unit_norm(self) -> None:
-        """Set the matrices that need to be normalized to unit norm."""
-        pass
-
-    @abstractmethod
-    def fix_normalized_adam_gradients(self) -> None:
-        """Modify the gradient by subtracting it's component parallel to the activation."""
+    def all_subnetworks(self) -> list[Float[Tensor, "..."]]:
+        """All subnetwork tensors."""
         pass
 
 

@@ -19,8 +19,8 @@ class ParamComponents(nn.Module):
             in_dim: Input dimension of the parameter to be replaced with subnetworks
             out_dim: Output dimension of the parameter to be replaced with subnetworks
             k: Number of subnetworks.
-            DAN: resid_component and resid_dim deleted here. I am not sure what the point of them was in
-            the first place, so you may want to add them back in.
+            DAN: resid_component and resid_dim deleted here. I am not sure what the point of them
+            was in the first place, so you may want to add them back in.
         """
         super().__init__()
 

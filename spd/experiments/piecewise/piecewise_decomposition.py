@@ -52,7 +52,7 @@ def plot_components(
     # Forward pass to get the output and inner activations
     out, layer_acts, inner_acts = model(x)
     # Calculate attribution scores
-    attribution_scores = calc_attributions(out, inner_acts)
+    attribution_scores = calc_attributions(out, inner_acts, layer_acts)
     attribution_scores_normed = attribution_scores / attribution_scores.std(dim=1, keepdim=True)
     # Get As and Bs and ABs
     n_layers = model.n_layers

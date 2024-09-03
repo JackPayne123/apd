@@ -10,6 +10,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import torch
 import wandb
+from einops import einsum
 from jaxtyping import Bool, Float
 from pydantic import (
     BaseModel,
@@ -94,7 +95,6 @@ class Config(BaseModel):
     lr_warmup_pct: Probability = 0.0
     sparsity_loss_type: Literal["jacobian"] = "jacobian"
     sparsity_warmup_pct: Probability = 0.0
-    unit_norm_matrices: bool = True
     task_config: DeepLinearConfig | PiecewiseConfig | TMSConfig = Field(
         ..., discriminator="task_name"
     )
@@ -226,8 +226,7 @@ def calc_recon_mse(
 
 
 def calc_topk_l2(
-    layer_in_params: list[Float[Tensor, " ... d_in k"]],
-    layer_out_params: list[Float[Tensor, " ... k d_out"]],
+    subnetwork_params: list[Float[Tensor, " ... k d_in d_out"]],
     topk_mask: Bool[Tensor, "batch ... k"],
 ) -> Float[Tensor, ""] | Float[Tensor, " n_instances"]:
     """Calculate the L2 of the sum of the topk subnetworks.
@@ -236,8 +235,8 @@ def calc_topk_l2(
     produce the same operation without it. The ... indicates an optional n_instances dimension.
 
     Args:
-        layer_in_params (list[Float[Tensor, " ... d_in k"]]): The input parameters of each layer.
-        layer_out_params (list[Float[Tensor, " ... k d_out"]]): The output parameters of each layer.
+        subnetwork_params (list[Float[Tensor, " ... k d_in d_out"]]): The parameters of the
+            subnetworks.
         topk_mask (Bool[Tensor, "batch ... k"]): The topk mask to use for the L2 penalty.
             Will contain an n_instances dimension if the model has an n_instances dimension.
 
@@ -249,79 +248,69 @@ def calc_topk_l2(
     n_instances = topk_mask.shape[1] if topk_mask.ndim == 3 else None
     accumulate_shape = (batch_size,) if n_instances is None else (batch_size, n_instances)
 
-    topk_l2_penalty = torch.zeros(accumulate_shape, device=layer_in_params[0].device)
-    for A, B in zip(layer_in_params, layer_out_params, strict=True):
-        # A: [d_in, k] or [n_instances, d_in, k]
-        # B: [k, d_in] or [n_instances, k, d_in]
+    topk_l2_penalty = torch.zeros(accumulate_shape, device=subnetwork_params[0].device)
+    for subnetwork_param in subnetwork_params:
+        # subnetwork_param: [k, d_in, d_out] or [n_instances, k, d_in, d_out]
         # topk_mask: [batch, k] or [batch, n_instances, k]
-        A_topk = torch.einsum("...fk,b...k ->b...fk", A, topk_mask)
-        AB_topk = torch.einsum("b...fk,...kh->b...fh", A_topk, B)
-        topk_l2_penalty = topk_l2_penalty + ((AB_topk) ** 2).mean(dim=(-2, -1))
+        topk_params = einsum(
+            subnetwork_param, topk_mask, "... k d_in d_out, batch ... k -> batch ... d_in d_out"
+        )
+        topk_l2_penalty = topk_l2_penalty + ((topk_params) ** 2).mean(dim=(-2, -1))
     # Mean over batch_dim and divide by number of parameter matrices we iterated over
-    return topk_l2_penalty.mean(dim=0) / len(layer_in_params)
+    return topk_l2_penalty.mean(dim=0) / len(subnetwork_params)
 
 
 def calc_param_match_loss(
     pretrained_weights: list[Float[Tensor, " ... d_in d_out"]],
-    layer_in_params: list[Float[Tensor, " ... d_in k"]],
-    layer_out_params: list[Float[Tensor, " ... k d_out"]],
+    subnetwork_params: list[Float[Tensor, " ... k d_in d_out"]],
 ) -> Float[Tensor, ""] | Float[Tensor, " n_instances"]:
     """Calculate the parameter match loss.
 
-    This is the L2 difference between the AB matrices of the SPDModel and the pretrained weights.
+    This is the L2 difference between the sum of the subnetwork matrices of the SPDModel and the
+    pretrained weights.
 
     Args:
         pretrained_weights (list[Float[Tensor, " ... d_in d_out"]]): The pretrained weights to be
             matched.
-        layer_in_params (list[Float[Tensor, " ... d_in k"]]): The input parameters of each layer.
-        layer_out_params (list[Float[Tensor, " ... k d_out"]]): The output parameters of each layer.
+        subnetwork_params (list[Float[Tensor, " ... k d_in d_out"]]): The parameters of the SPDModel
 
     Returns:
         The parameter match loss of shape [n_instances] if the model has an n_instances dimension,
         otherwise of shape [].
     """
-    param_match_loss = torch.tensor(0.0, device=layer_in_params[0].device)
-    for i, (A, B) in enumerate(zip(layer_in_params, layer_out_params, strict=True)):
-        AB = torch.einsum("...fk,...kg->...fg", A, B)
-        param_match_loss = param_match_loss + ((AB - pretrained_weights[i]) ** 2).mean(dim=(-2, -1))
-    return param_match_loss / len(layer_in_params)
+    param_match_loss = torch.tensor(0.0, device=subnetwork_params[0].device)
+    for pretrained_weight, subnetwork_param in zip(
+        pretrained_weights, subnetwork_params, strict=False
+    ):
+        summed_param = einsum(subnetwork_param, "... k d_in d_out -> ... d_in d_out")
+        param_match_loss += ((summed_param - pretrained_weight) ** 2).mean(dim=(-2, -1))
+    return param_match_loss / len(subnetwork_params)
 
 
 def calc_lp_sparsity_loss(
     out: Float[Tensor, "... d_model_out"],
-    layer_acts: list[Float[Tensor, "... d_in"]],
-    inner_acts: list[Float[Tensor, "... d_in"]],
-    layer_out_params: list[Float[Tensor, "... k d_out"]],
+    layer_acts: list[Float[Tensor, "... d_out"]],
+    inner_acts: list[Float[Tensor, "... k d_out"]],
     step_pnorm: float,
 ) -> Float[Tensor, ""] | Float[Tensor, " n_instances"]:
     """Calculate the Lp sparsity loss on the attributions (inner_acts * d(out)/d(inner_acts).
 
-    Unlike the attributions we calculate for topk in `spd.utils.calc_attributions`, in this function
-    we calculate the derivative w.r.t. the layer activations and multiply by that layer's B matrix.
-    This will give the same gradient as taking the derivative w.r.t. the inner_acts using the chain
-    rule, but importantly it puts the B matrix in the computational graph for this calculation so
-    backprop can pass through it (autograd.grad will not build a computational graph from
-    intermediate tensors
-    https://gist.github.com/danbraunai-apollo/388c3c76be92922cf7b2a2f7da7d0d43). This is a
-    (somewhat arbitrary) decision to include this layer's B matrix but not future layer parameters
-    in the sparsity loss. We don't do this in topk because topk isn't a differentiable operation
-    anyway.
+    The attributions here now work the same as in the topk case, because there is no B matrix.
 
     Args:
         out (Float[Tensor, "... d_model_out"]): The output of the model.
-        layer_acts (list[Float[Tensor, "... d_in"]]): Activations at the output of each layer (i.e.
-            after both A and B transformations).
-        inner_acts (list[Float[Tensor, "... d_in"]]): The inner acts of the model (i.e.
-            the set of subnetwork activations after the A transformation for each parameter matrix).
-        layer_out_params (list[Float[Tensor, "... k d_out"]]): The output parameters of each layer.
-        step_pnorm (float): The pnorm at the current step.
-
+        layer_acts (list[Float[Tensor, "... d_out"]]): The activations of each layer.
+        inner_acts (list[Float[Tensor, "... k d_out"]]): The activations of each subnetwork.
+        step_pnorm (float): The pnorm to use for the sparsity loss.
     Returns:
         The Lp sparsity loss. Will have an n_instances dimension if the model has an n_instances
             dimension.
     """
-    assert len(layer_acts) == len(inner_acts) == len(layer_out_params)
-    lp_sparsity_loss = torch.zeros_like(inner_acts[0], requires_grad=True)
+    n_param_matrices = len(layer_acts)
+    assert n_param_matrices == len(inner_acts)
+    batch = out.shape[0]
+    assert batch == layer_acts[0].shape[0] == inner_acts[0].shape[0]
+    lp_sparsity_loss = torch.zeros(inner_acts[0].shape[:-1], requires_grad=True)
     for feature_idx in range(out.shape[-1]):
         grad_layer_acts = torch.autograd.grad(
             out[..., feature_idx].sum(),
@@ -329,19 +318,17 @@ def calc_lp_sparsity_loss(
             retain_graph=True,
         )
         sparsity_inner = torch.zeros_like(lp_sparsity_loss, requires_grad=True)
-        for param_matrix_idx in range(len(layer_out_params)):
+        for param_matrix_idx in range(n_param_matrices):
             # h_i * grad_h_i
-            sparsity_inner = sparsity_inner + (
-                inner_acts[param_matrix_idx]
-                * torch.einsum(
-                    "...o,...ko->...k",
-                    grad_layer_acts[param_matrix_idx].detach(),
-                    layer_out_params[param_matrix_idx],
-                )
+            sparsity_inner += einsum(
+                grad_layer_acts[param_matrix_idx].detach(),
+                inner_acts[param_matrix_idx],
+                "... d_out ,... k d_out -> ... k",
             )
 
         lp_sparsity_loss = lp_sparsity_loss + sparsity_inner**2
-    lp_sparsity_loss = lp_sparsity_loss / out.shape[-1]
+    d_model_out = out.shape[-1]
+    lp_sparsity_loss = lp_sparsity_loss / d_model_out
 
     # step_pnorm * 0.5 is because we have the squares of sparsity_inner terms above
     lp_sparsity_loss = ((lp_sparsity_loss.abs() + 1e-16) ** (step_pnorm * 0.5)).sum(dim=-1)
@@ -373,9 +360,6 @@ def optimize(
     total_samples = 0
     data_iter = iter(dataloader)
     for step in tqdm(range(config.steps + 1), ncols=0):
-        if config.unit_norm_matrices:
-            model.set_matrices_to_unit_norm()
-
         step_lr = get_lr_with_warmup(
             step=step,
             steps=config.steps,
@@ -435,9 +419,7 @@ def optimize(
             assert pretrained_model is not None, "Need a pretrained model for param_match loss"
             pretrained_weights = pretrained_model.all_decomposable_params()
             param_match_loss = calc_param_match_loss(
-                pretrained_weights=pretrained_weights,
-                layer_in_params=model.all_As(),
-                layer_out_params=model.all_Bs(),
+                pretrained_weights=pretrained_weights, subnetwork_params=model.all_subnetworks()
             )
 
         lp_sparsity_loss = None
@@ -447,13 +429,12 @@ def optimize(
                 out=out,
                 layer_acts=layer_acts,
                 inner_acts=inner_acts,
-                layer_out_params=model.all_Bs(),
                 step_pnorm=step_pnorm,
             )
 
         out_topk, topk_l2_loss, topk_recon_loss = None, None, None
         if config.topk is not None:
-            attribution_scores = calc_attributions(out, inner_acts)
+            attribution_scores = calc_attributions(out, inner_acts, layer_acts)
 
             topk_mask = calc_topk_mask(
                 attribution_scores, config.topk, batch_topk=config.batch_topk
@@ -465,8 +446,7 @@ def optimize(
 
             if config.topk_l2_coeff is not None:
                 topk_l2_loss = calc_topk_l2(
-                    layer_in_params=model.all_As(),
-                    layer_out_params=model.all_Bs(),
+                    subnetwork_params=model.all_subnetworks(),
                     topk_mask=topk_mask,
                 )
 
@@ -570,6 +550,4 @@ def optimize(
         # Skip gradient step if we are at the last step (last step just for plotting and logging)
         if step != config.steps:
             loss.backward()
-            if config.unit_norm_matrices:
-                model.fix_normalized_adam_gradients()
             opt.step()

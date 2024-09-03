@@ -11,7 +11,7 @@ from torch import Tensor
 
 from spd.models.base import Model, SPDModel
 from spd.models.components import MLPComponents
-from spd.utils import calc_neuron_indices, remove_grad_parallel_to_subnetwork_vecs
+from spd.utils import calc_neuron_indices
 
 
 def initialize_embeds(
@@ -693,111 +693,24 @@ class PiecewiseFunctionSPDTransformer(SPDModel):
                     d_mlp=d_mlp,
                     k=k,
                     input_bias=input_biases[i] if input_biases is not None else None,
-                    input_component=self.input_component,  # type: ignore
-                    output_component=self.output_component,  # type: ignore
                 )
                 for i in range(n_layers)
             ]
         )
 
-    def all_As(self) -> list[Float[Tensor, "dim k"]]:
-        all_A_pairs = [
-            (self.mlps[i].linear1.A, self.mlps[i].linear2.A) for i in range(self.n_layers)
+    def all_subnetworks(self) -> list[Float[Tensor, "..."]]:
+        all_subnetwork_pairs = [
+            (self.mlps[i].linear1.subnetworks, self.mlps[i].linear2.subnetworks)
+            for i in range(self.n_layers)
         ]
-        As = [A for A_pair in all_A_pairs for A in A_pair]
-        assert len(As) == self.n_param_matrices
-        return As
-
-    def all_Bs(self) -> list[Float[Tensor, "k dim"]]:
-        # Get all B matrices
-        all_B_pairs = [
-            (self.mlps[i].linear1.B, self.mlps[i].linear2.B) for i in range(self.n_layers)
+        all_subnetworks = [
+            subnetwork for subnetwork_pair in all_subnetwork_pairs for subnetwork in subnetwork_pair
         ]
-        As = [B for B_pair in all_B_pairs for B in B_pair]
-        assert len(As) == self.n_param_matrices
-        return As
+        assert len(all_subnetworks) == self.n_param_matrices
+        return all_subnetworks
 
-    def set_handcoded_AB(self, target_transformer: PiecewiseFunctionTransformer):
-        assert self.n_inputs == target_transformer.n_inputs
-        assert self.n_layers == target_transformer.n_layers
-        assert self.d_embed == target_transformer.d_embed
-        assert self.d_control == target_transformer.d_control
-        assert target_transformer.controlled_resnet is not None
-
-        k = self.k
-
-        self.to(target_transformer.W_E.weight.device)
-        # set all weights and biases in self to zero
-        for mlp in self.mlps:
-            mlp.linear1.A.data[:, :] = 0.0
-            mlp.linear1.B.data[:, :] = 0.0
-            mlp.linear2.A.data[:, :] = 0.0
-            mlp.linear2.B.data[:, :] = 0.0
-
-        simple_bias = target_transformer.controlled_resnet.simple_bias
-
-        correct_k = self.d_embed - 1 if simple_bias else self.n_inputs - 1
-        assert correct_k <= k, f"Require k >= {correct_k}, got k = {k}"
-
-        for i in range(self.n_layers):
-            if simple_bias:
-                # Input layer
-                assert self.n_layers == 1, "Only implemented for n_layers = 1"
-                self.mlps[i].linear1.A.data[:correct_k, :correct_k] = torch.eye(correct_k)
-                self.mlps[i].linear1.A.data[:, correct_k:] = 1.0  # avoid division by zero
-                self.mlps[i].linear1.B.data[:correct_k, :] = target_transformer.mlps[
-                    i
-                ].input_layer.weight.T[:correct_k, :]
-                # Output layer
-                original_Wout_last_col = target_transformer.mlps[i].output_layer.weight.T[:, -1]
-                norm = torch.norm(original_Wout_last_col, dim=0)
-                self.mlps[i].linear2.A.data[:, 0] = original_Wout_last_col / norm
-                self.mlps[i].linear2.A.data[:, 1:] = 1.0  # avoid division by zero
-                self.mlps[i].linear2.B.data[0, -1] = 1.0 * norm
-                # Assert biases
-                assert torch.allclose(
-                    self.mlps[i].bias1, target_transformer.mlps[i].input_layer.bias
-                )
-                assert torch.allclose(
-                    torch.tensor(0.0), target_transformer.mlps[i].output_layer.bias
-                )
-
-            else:
-                # input_layer
-                self.mlps[i].linear1.A.data[0, :] = 1.0
-                suppression_size = target_transformer.controlled_resnet.suppression_size
-                self.mlps[i].linear1.A.data[1:-1, :correct_k] = (
-                    torch.eye(correct_k) * suppression_size
-                )
-                A_col_norm = torch.norm(self.mlps[i].linear1.A[:, 0]).item()
-                self.mlps[i].linear1.A.data /= A_col_norm
-                self.mlps[i].linear1.B.data[:correct_k, :] = (
-                    target_transformer.mlps[i].input_layer.weight.T[1 : correct_k + 1, :]
-                    / suppression_size
-                )
-                # assert that every entry in B is 0 or 1
-                assert torch.all(
-                    (self.mlps[i].linear1.B.data == 0) | (self.mlps[i].linear1.B.data == 1)
-                )
-                self.mlps[i].linear1.B.data *= A_col_norm
-
-                # output_layer
-                neuron_indices = target_transformer.controlled_resnet.neuron_indices[i]
-                for j, idx_list in enumerate(neuron_indices):
-                    # current_device = self.mlps[i].linear2.A.device
-                    self.mlps[i].linear2.A.data[idx_list, j] = target_transformer.mlps[
-                        i
-                    ].output_layer.weight.data.T[idx_list, -1]
-                self.mlps[i].linear2.A.data[:, correct_k:] = 1.0  # avoid division by zero
-                all_norms = torch.norm(self.mlps[i].linear2.A, dim=0, keepdim=True)
-                self.mlps[i].linear2.A.data /= all_norms
-                self.mlps[i].linear2.B.data[:correct_k, -1] = 1.0
-                self.mlps[i].linear2.B.data *= all_norms.T
-
-            AB_in = torch.einsum("ij,jk->ki", self.mlps[i].linear1.A, self.mlps[i].linear1.B)
-            assert torch.allclose(AB_in, target_transformer.mlps[i].input_layer.weight)
-            AB_out = torch.einsum("ij,jk->ki", self.mlps[i].linear2.A, self.mlps[i].linear2.B)
-            assert torch.allclose(AB_out, target_transformer.mlps[i].output_layer.weight)
+    def set_handcoded_AB(self, target_transformer: PiecewiseFunctionTransformer) -> None:
+        raise NotImplementedError("Not implemented for this branch")
 
     def forward(
         self, x: Float[Tensor, "... inputs"]
@@ -873,13 +786,3 @@ class PiecewiseFunctionSPDTransformer(SPDModel):
         )
         model.load_state_dict(params)
         return model
-
-    def set_matrices_to_unit_norm(self):
-        for mlp in self.mlps:
-            mlp.linear1.A.data /= mlp.linear1.A.data.norm(p=2, dim=-2, keepdim=True)
-            mlp.linear2.A.data /= mlp.linear2.A.data.norm(p=2, dim=-2, keepdim=True)
-
-    def fix_normalized_adam_gradients(self):
-        for mlp in self.mlps:
-            remove_grad_parallel_to_subnetwork_vecs(mlp.linear1.A.data, mlp.linear1.A.grad)
-            remove_grad_parallel_to_subnetwork_vecs(mlp.linear2.A.data, mlp.linear2.A.grad)
