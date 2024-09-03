@@ -93,7 +93,7 @@ class Config(BaseModel):
     param_match_coeff: NonNegativeFloat | None = 1.0
     topk_recon_coeff: NonNegativeFloat | None = None
     l2_coeff: NonNegativeFloat | None = None
-    l2_type: Literal["topk_AB", "topk_A_and_topk_B", "A_and_B"] = "topk_AB"
+    l2_type: Literal["topk_AB", "topk_A_and_topk_B", "A_and_B", "topk_AB_sum"] = "topk_AB_sum"
     lp_sparsity_coeff: NonNegativeFloat | None = None
     pnorm: PositiveFloat | None = None
     pnorm_end: PositiveFloat | None = None
@@ -241,6 +241,7 @@ def calc_topk_l2(
     Float[Tensor, ""] | Float[Tensor, " n_instances"],
     Float[Tensor, ""] | Float[Tensor, " n_instances"],
     Float[Tensor, ""] | Float[Tensor, " n_instances"],
+    Float[Tensor, ""] | Float[Tensor, " n_instances"],
 ]:
     """Calculate the L2 of the sum of the topk subnetworks.
 
@@ -261,6 +262,7 @@ def calc_topk_l2(
     n_instances = topk_mask.shape[1] if topk_mask.ndim == 3 else None
     accumulate_shape = (batch_size,) if n_instances is None else (batch_size, n_instances)
 
+    l2_topk_AB_sum = torch.zeros(accumulate_shape, device=layer_in_params[0].device)
     l2_topk_AB = torch.zeros(accumulate_shape, device=layer_in_params[0].device)
     l2_topk_AandB = torch.zeros(accumulate_shape, device=layer_in_params[0].device)
     l2_AandB = torch.zeros(accumulate_shape, device=layer_in_params[0].device)
@@ -270,8 +272,10 @@ def calc_topk_l2(
         # topk_mask: [batch, k] or [batch, n_instances, k]
         A_topk = torch.einsum("...fk,b...k ->b...fk", A, topk_mask)
         B_topk = torch.einsum("...kg,b...k ->b...kg", B, topk_mask)
-        AB_topk = torch.einsum("b...fk,...kh->b...fh", A_topk, B)
-        l2_topk_AB = l2_topk_AB + (AB_topk**2).mean(dim=(-2, -1))
+        AB_topk_sum = torch.einsum("b...fk,...kh->b...fh", A_topk, B)
+        AB_topk = torch.einsum("b...fk,...kh->b...kfh", A_topk, B)
+        l2_topk_AB_sum = l2_topk_AB_sum + (AB_topk_sum**2).mean(dim=(-2, -1))
+        l2_topk_AB = l2_topk_AB + (AB_topk**2).mean(dim=(-3, -2, -1))
         l2_topk_AandB = (
             l2_topk_AandB + (A_topk**2).mean(dim=(-2, -1)) + (B_topk**2).mean(dim=(-2, -1))
         )
@@ -280,7 +284,8 @@ def calc_topk_l2(
     l2_topk_AandB = l2_topk_AandB.mean(dim=0) / len(layer_in_params)
     l2_AandB = l2_AandB.mean(dim=0) / len(layer_in_params)
     l2_topk_AB = l2_topk_AB.mean(dim=0) / len(layer_in_params)
-    return l2_topk_AB, l2_topk_AandB, l2_AandB
+    l2_topk_AB_sum = l2_topk_AB_sum / len(layer_in_params)
+    return l2_topk_AB_sum, l2_topk_AB, l2_topk_AandB, l2_AandB
 
 
 def calc_param_match_loss(
@@ -486,17 +491,20 @@ def optimize(
             assert len(inner_acts_topk) == model.n_param_matrices
 
             if config.l2_coeff is not None:
-                l2_topk_AB_loss, l2_topk_AandB_loss, l2_AandB_loss = calc_topk_l2(
+                l2_topk_AB_sum, l2_topk_AB, l2_topk_AandB, l2_AandB = calc_topk_l2(
                     layer_in_params=model.all_As(),
                     layer_out_params=model.all_Bs(),
                     topk_mask=topk_mask,
                 )
-                if config.l2_type == "topk_AB":
-                    l2_loss = l2_topk_AB_loss
+
+                if config.l2_type == "topk_AB_sum":
+                    l2_loss = l2_topk_AB_sum
+                elif config.l2_type == "topk_AB":
+                    l2_loss = l2_topk_AB
                 elif config.l2_type == "topk_A_and_topk_B":
-                    l2_loss = l2_topk_AandB_loss
+                    l2_loss = l2_topk_AandB
                 elif config.l2_type == "A_and_B":
-                    l2_loss = l2_AandB_loss
+                    l2_loss = l2_AandB
                 else:
                     raise ValueError(f"Unknown l2_type: {config.l2_type}")
 
