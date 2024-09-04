@@ -293,11 +293,11 @@ def get_model_and_dataloader(
         )
     if config.task_config.handcoded_AB and not config.full_rank:
         logger.info("Setting handcoded A and B matrices (!)")
-        assert isinstance(piecewise_model, PiecewiseFunctionSPDTransformer)
+        assert isinstance(piecewise_model_spd, PiecewiseFunctionSPDTransformer)
         piecewise_model_spd.set_handcoded_AB(piecewise_model)
     elif config.task_config.handcoded_AB and config.full_rank:
         logger.info("Setting handcoded A and B matrices (!)")
-        assert isinstance(piecewise_model, PiecewiseFunctionSPDFullRankTransformer)
+        assert isinstance(piecewise_model_spd, PiecewiseFunctionSPDFullRankTransformer)
         non_fr_model = PiecewiseFunctionSPDTransformer(
             n_inputs=piecewise_model.n_inputs,
             d_mlp=piecewise_model.d_mlp,
@@ -305,7 +305,7 @@ def get_model_and_dataloader(
             k=config.task_config.k,
             input_biases=input_biases,
         )
-        assert isinstance(non_fr_model, PiecewiseFunctionSPDFullRankTransformer)
+        assert isinstance(non_fr_model, PiecewiseFunctionSPDTransformer)
         piecewise_model_spd.set_handcoded_AB(non_fr_model)
 
     piecewise_model_spd.to(device)
