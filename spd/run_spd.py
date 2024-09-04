@@ -300,23 +300,6 @@ def calc_topk_l2_full_rank(
     return topk_l2_penalty.mean(dim=0) / len(subnetwork_params)
 
 
-def calc_topk_l2(
-    model: SPDModel | SPDFullRankModel,
-    topk_mask: Bool[Tensor, "batch ... k"],
-) -> Float[Tensor, ""] | Float[Tensor, " n_instances"]:
-    """Calculate the L2 of the sum of the topk subnetworks."""
-    if isinstance(model, SPDModel):
-        topk_l2 = calc_topk_l2_rank_one(
-            layer_in_params=model.all_As(), layer_out_params=model.all_Bs(), topk_mask=topk_mask
-        )
-    else:
-        assert isinstance(model, SPDFullRankModel)
-        topk_l2 = calc_topk_l2_full_rank(
-            subnetwork_params=model.all_subnetwork_params(), topk_mask=topk_mask
-        )
-    return topk_l2
-
-
 def calc_param_match_loss_rank_one(
     pretrained_weights: list[Float[Tensor, " ... d_in d_out"]],
     layer_in_params: list[Float[Tensor, " ... d_in k"]],
@@ -616,7 +599,16 @@ def optimize(
             assert len(inner_acts_topk) == model.n_param_matrices
 
             if config.topk_l2_coeff is not None:
-                topk_l2_loss = calc_topk_l2(model, topk_mask)
+                if config.full_rank:
+                    topk_l2_loss = calc_topk_l2_full_rank(
+                        subnetwork_params=model.all_subnetwork_params(), topk_mask=topk_mask
+                    )
+                else:
+                    topk_l2_loss = calc_topk_l2_rank_one(
+                        layer_in_params=model.all_As(),
+                        layer_out_params=model.all_Bs(),
+                        topk_mask=topk_mask,
+                    )
 
             if config.topk_recon_coeff is not None:
                 assert out_topk is not None
