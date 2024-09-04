@@ -1031,13 +1031,3 @@ class PiecewiseFunctionSPDFullRankTransformer(SPDFullRankModel):
         )
         model.load_state_dict(params)
         return model
-
-    def set_matrices_to_unit_norm(self):
-        for mlp in self.mlps:
-            mlp.linear1.A.data /= mlp.linear1.A.data.norm(p=2, dim=-2, keepdim=True)
-            mlp.linear2.A.data /= mlp.linear2.A.data.norm(p=2, dim=-2, keepdim=True)
-
-    def fix_normalized_adam_gradients(self):
-        for mlp in self.mlps:
-            remove_grad_parallel_to_subnetwork_vecs(mlp.linear1.A.data, mlp.linear1.A.grad)
-            remove_grad_parallel_to_subnetwork_vecs(mlp.linear2.A.data, mlp.linear2.A.grad)
