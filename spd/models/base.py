@@ -32,12 +32,12 @@ class SPDModel(ABC, nn.Module):
         pass
 
     @abstractmethod
-    def all_As(self) -> list[Float[Tensor, "... d_model_in k"]]:
+    def all_As(self) -> list[Float[Tensor, "... d_layer_in k"]]:
         """Pre-normalized A matrices."""
         pass
 
     @abstractmethod
-    def all_Bs(self) -> list[Float[Tensor, "... k d_model_out"]]:
+    def all_Bs(self) -> list[Float[Tensor, "... k d_layer_out"]]:
         pass
 
     @abstractmethod
