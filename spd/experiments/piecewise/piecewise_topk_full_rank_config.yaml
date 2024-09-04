@@ -13,13 +13,13 @@ lp_sparsity_coeff: null
 pnorm: 0.9
 lr: 0.001
 batch_size: 2048
-steps: 1
+steps: 50_000
 print_freq: 500
-image_freq: 1
+image_freq: 50_000
 slow_images: true
 save_freq: 50_000
 lr_warmup_pct: 0.004
-lr_schedule: constant
+lr_schedule: cosine
 task_config:
   task_name: piecewise
   n_functions: 10
