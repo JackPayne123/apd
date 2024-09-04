@@ -176,7 +176,7 @@ def test_piecewise_lp_simple_bias_false() -> None:
     piecewise_decomposition_optimize_test(config)
 
 
-def test_piecewise_batch_topk_simple_bias_false_loss_stable() -> None:
+def test_piecewise_batch_topk_rank_one_simple_bias_false_loss_stable() -> None:
     """After training for a few steps, the topk_recon_loss and param_match_loss should stay at 0."""
     set_seed(0)
     device = "cpu"
@@ -235,7 +235,8 @@ def test_piecewise_batch_topk_simple_bias_false_loss_stable() -> None:
         model=piecewise_model_spd,
     )
 
-    attribution_scores = calc_attributions(out, inner_acts)
+    # Rank 1 so layer_acts is None
+    attribution_scores = calc_attributions(out=out, inner_acts=inner_acts, layer_acts=None)
     initial_topk_recon_loss = get_topk_recon_on_batch(
         batch, labels, attribution_scores, piecewise_model_spd
     )
@@ -261,7 +262,7 @@ def test_piecewise_batch_topk_simple_bias_false_loss_stable() -> None:
     )
 
     out, _, inner_acts = piecewise_model_spd(batch)
-    attribution_scores = calc_attributions(out, inner_acts)
+    attribution_scores = calc_attributions(out=out, inner_acts=inner_acts, layer_acts=None)
     final_topk_recon_loss = get_topk_recon_on_batch(
         batch, labels, attribution_scores, piecewise_model_spd
     )

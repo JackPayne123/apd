@@ -22,6 +22,7 @@ from spd.experiments.piecewise.models import (
 from spd.experiments.piecewise.piecewise_dataset import PiecewiseDataset
 from spd.experiments.piecewise.trig_functions import generate_trig_functions
 from spd.log import logger
+from spd.models.base import SPDModel
 from spd.run_spd import Config, PiecewiseConfig, calc_recon_mse, optimize
 from spd.utils import (
     BatchedDataLoader,
@@ -52,7 +53,11 @@ def plot_components(
     # Forward pass to get the output and inner activations
     out, layer_acts, inner_acts = model(x)
     # Calculate attribution scores
-    attribution_scores = calc_attributions(out, inner_acts)
+    attribution_scores = calc_attributions(
+        out=out,
+        inner_acts=inner_acts,
+        layer_acts=None if isinstance(model, SPDModel) else layer_acts,
+    )
     attribution_scores_normed = attribution_scores / attribution_scores.std(dim=1, keepdim=True)
     # Get As and Bs and ABs
     n_layers = model.n_layers

@@ -15,6 +15,7 @@ from tqdm import tqdm
 from spd.experiments.linear.linear_dataset import DeepLinearDataset
 from spd.experiments.linear.models import DeepLinearComponentModel, DeepLinearModel
 from spd.log import logger
+from spd.models.base import SPDModel
 from spd.run_spd import Config, DeepLinearConfig, optimize
 from spd.utils import (
     DatasetGeneratedDataLoader,
@@ -139,9 +140,13 @@ def collect_inner_act_data(
         i=model.n_instances,
     )
 
-    out, _, test_inner_acts = model(test_batch)
+    out, test_layer_acts, test_inner_acts = model(test_batch)
     if topk is not None:
-        attribution_scores = calc_attributions(out, test_inner_acts)
+        attribution_scores = calc_attributions(
+            out=out,
+            inner_acts=test_inner_acts,
+            layer_acts=None if isinstance(model, SPDModel) else test_layer_acts,
+        )
         topk_mask = calc_topk_mask(attribution_scores, topk, batch_topk=batch_topk)
 
         test_inner_acts = model.forward_topk(test_batch, topk_mask=topk_mask)[-1]

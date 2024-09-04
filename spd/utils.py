@@ -237,8 +237,8 @@ class BatchedDataLoader(DataLoader[Q], Generic[Q]):
             yield batch[0], label[0]
 
 
-def calc_attributions(
-    out: Float[Tensor, "... out_dim"],
+def calc_attributions_rank_one(
+    out: Float[Tensor, "... d_out"],
     inner_acts: list[Float[Tensor, "... k"]],
 ) -> Float[Tensor, "... k"]:
     """Calculate the sum of the (squared) attributions from each output dimension.
@@ -273,6 +273,18 @@ def calc_attributions(
         attribution_scores += feature_attributions**2
 
     return attribution_scores
+
+
+def calc_attributions(
+    out: Float[Tensor, "... d_out"],
+    inner_acts: list[Float[Tensor, "... k"]] | list[Float[Tensor, "... k d_out"]],
+    layer_acts: list[Float[Tensor, "... d_out"]] | None,
+) -> Float[Tensor, "... k"]:
+    """Calculate the sum of the (squared) attributions from each output dimension."""
+    if layer_acts is None:
+        return calc_attributions_rank_one(out, inner_acts)
+    else:
+        raise NotImplementedError("Not yet implemented full-rank attributions")
 
 
 def calc_topk_mask(
