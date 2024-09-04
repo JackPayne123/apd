@@ -2,17 +2,23 @@ import torch
 from jaxtyping import Float
 from torch import Tensor
 
-from spd.run_spd import calc_lp_sparsity_loss_rank_one, calc_param_match_loss_rank_one, calc_topk_l2
+from spd.run_spd import (
+    calc_lp_sparsity_loss_rank_one,
+    calc_param_match_loss_rank_one,
+    calc_topk_l2_rank_one,
+)
 
 
 class TestCalcTopkL2:
-    def test_calc_topk_l2_single_instance_single_param_true_and_false(self):
+    def test_calc_topk_l2_rank_one_single_instance_single_param_true_and_false(self):
         A = torch.ones(2, 3)
         B = torch.ones(3, 2)
         topk_mask: Float[Tensor, "batch=1 k=2"] = torch.tensor(
             [[True, False, False]], dtype=torch.bool
         )
-        result = calc_topk_l2(layer_in_params=[A], layer_out_params=[B], topk_mask=topk_mask)
+        result = calc_topk_l2_rank_one(
+            layer_in_params=[A], layer_out_params=[B], topk_mask=topk_mask
+        )
 
         # Below we write what the intermediate values are
         # A_topk = torch.tensor([[[1, 0, 0], [1, 0, 0]]])
@@ -20,11 +26,13 @@ class TestCalcTopkL2:
         expected = torch.tensor(1.0)
         assert torch.allclose(result, expected), f"Expected {expected}, but got {result}"
 
-    def test_calc_topk_l2_single_instance_single_param_true_and_true(self):
+    def test_calc_topk_l2_rank_one_single_instance_single_param_true_and_true(self):
         A = torch.ones(2, 3)
         B = torch.ones(3, 2)
         topk_mask = torch.tensor([[True, True, True]], dtype=torch.bool)
-        result = calc_topk_l2(layer_in_params=[A], layer_out_params=[B], topk_mask=topk_mask)
+        result = calc_topk_l2_rank_one(
+            layer_in_params=[A], layer_out_params=[B], topk_mask=topk_mask
+        )
 
         # Below we write what the intermediate values are
         # A_topk = torch.tensor([[[1, 1, 1], [1, 1, 1]]])
@@ -32,12 +40,14 @@ class TestCalcTopkL2:
         expected = torch.tensor(9.0)
         assert torch.allclose(result, expected), f"Expected {expected}, but got {result}"
 
-    def test_calc_topk_l2_multiple_instances(self):
+    def test_calc_topk_l2_rank_one_multiple_instances(self):
         A = torch.ones(2, 1, 2)
         B = torch.ones(2, 2, 1)
         # topk_mask: [batch=2, n_instances=2, k=2]
         topk_mask = torch.tensor([[[1, 0], [0, 1]], [[0, 1], [1, 1]]], dtype=torch.bool)
-        result = calc_topk_l2(layer_in_params=[A], layer_out_params=[B], topk_mask=topk_mask)
+        result = calc_topk_l2_rank_one(
+            layer_in_params=[A], layer_out_params=[B], topk_mask=topk_mask
+        )
 
         # Below we write what the intermediate values are
         # A: [n_instances=2, d_in=1, k=2] = torch.tensor(

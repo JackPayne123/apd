@@ -225,7 +225,7 @@ def calc_recon_mse(
     return recon_loss
 
 
-def calc_topk_l2(
+def calc_topk_l2_rank_one(
     layer_in_params: list[Float[Tensor, " ... d_in k"]],
     layer_out_params: list[Float[Tensor, " ... k d_out"]],
     topk_mask: Bool[Tensor, "batch ... k"],
@@ -259,6 +259,19 @@ def calc_topk_l2(
         topk_l2_penalty = topk_l2_penalty + ((AB_topk) ** 2).mean(dim=(-2, -1))
     # Mean over batch_dim and divide by number of parameter matrices we iterated over
     return topk_l2_penalty.mean(dim=0) / len(layer_in_params)
+
+
+def calc_topk_l2(
+    model: SPDModel | SPDFullRankModel,
+    topk_mask: Bool[Tensor, "batch ... k"],
+) -> Float[Tensor, ""] | Float[Tensor, " n_instances"]:
+    """Calculate the L2 of the sum of the topk subnetworks."""
+    if isinstance(model, SPDModel):
+        return calc_topk_l2_rank_one(
+            layer_in_params=model.all_As(), layer_out_params=model.all_Bs(), topk_mask=topk_mask
+        )
+    else:
+        raise NotImplementedError("Not yet implemented for full-rank models")
 
 
 def calc_param_match_loss_rank_one(
@@ -496,11 +509,7 @@ def optimize(
             assert len(inner_acts_topk) == model.n_param_matrices
 
             if config.topk_l2_coeff is not None:
-                topk_l2_loss = calc_topk_l2(
-                    layer_in_params=model.all_As(),
-                    layer_out_params=model.all_Bs(),
-                    topk_mask=topk_mask,
-                )
+                topk_l2_loss = calc_topk_l2(model, topk_mask)
 
             if config.topk_recon_coeff is not None:
                 assert out_topk is not None
