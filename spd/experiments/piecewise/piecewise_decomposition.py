@@ -36,6 +36,61 @@ from spd.utils import (
 wandb.require("core")
 
 
+def plot_matrix(
+    ax: plt.Axes,
+    matrix: torch.Tensor,
+    title: str,
+    xlabel: str,
+    ylabel: str,
+    colorbar_format: str = "%.0f",
+) -> None:
+    im = ax.matshow(matrix.detach().cpu().numpy(), cmap="coolwarm", norm=CenteredNorm())
+    for (j, i), label in np.ndenumerate(matrix.detach().cpu().numpy()):
+        ax.text(i, j, f"{label:.2f}", ha="center", va="center", fontsize=4)
+    ax.set_xlabel(xlabel)
+    if ylabel != "":
+        ax.set_ylabel(ylabel)
+    else:
+        ax.set_yticklabels([])
+    ax.set_title(title)
+    divider = make_axes_locatable(ax)
+    cax = divider.append_axes("right", size="1%", pad=0.05)
+    fig = ax.get_figure()
+    assert fig is not None
+    fig.colorbar(im, cax=cax, format=tkr.FormatStrFormatter(colorbar_format))
+    if ylabel == "Function index":
+        n_functions = matrix.shape[0]
+        ax.set_yticks(range(n_functions))
+        ax.set_yticklabels([f"{L:.0f}" for L in range(1, n_functions + 1)])
+
+
+def plot_components_fullrank(
+    model: PiecewiseFunctionSPDTransformer,
+    step: int,
+    out_dir: Path | None,
+    device: str,
+    slow_images: bool,
+    **_,
+) -> dict[str, plt.Figure]:
+    # Not implemented attribution score plots, or multi-layer plots, yet.
+    assert model.n_layers == 1
+    ncols = 2
+    nrows = model.k
+    fig, axs = plt.subplots(nrows, ncols, figsize=(16 * ncols, 3 * nrows), constrained_layout=True)
+    for k in range(model.k):
+        mlp = model.mlps[0]
+        W_in_k = mlp.linear1.subnetwork_params[k]
+        ax = axs[k, 0]  # type: ignore
+        plot_matrix(ax, W_in_k, f"W_in_k, k={k}", "Neuron index", "Embedding index")
+        W_out_k = mlp.linear2.subnetwork_params[k].T
+        ax = axs[k, 1]  # type: ignore
+        plot_matrix(ax, W_out_k, f"W_out_k.T, k={k}", "Neuron index", "")
+    if out_dir is not None:
+        fig.savefig(out_dir / f"matrices_l0_s{step}.png", dpi=300)
+        print(f"saved to {out_dir / f'matrices_l0_s{step}.png'}")
+    return {"matrices_l0_s{step}": fig}
+
+
 def plot_components(
     model: PiecewiseFunctionSPDTransformer,
     step: int,
@@ -64,33 +119,6 @@ def plot_components(
     Bs = model.all_Bs()
     ABs = [torch.einsum("...fk,...kg->...fg", As[i], Bs[i]) for i in range(len(As))]
     ABs_by_k = [torch.einsum("...fk,...kg->...kfg", As[i], Bs[i]) for i in range(len(As))]
-
-    def plot_matrix(
-        ax: plt.Axes,
-        matrix: torch.Tensor,
-        title: str,
-        xlabel: str,
-        ylabel: str,
-        colorbar_format: str = "%.0f",
-    ) -> None:
-        im = ax.matshow(matrix.detach().cpu().numpy(), cmap="coolwarm", norm=CenteredNorm())
-        for (j, i), label in np.ndenumerate(matrix.detach().cpu().numpy()):
-            ax.text(i, j, f"{label:.2f}", ha="center", va="center", fontsize=4)
-        ax.set_xlabel(xlabel)
-        if ylabel != "":
-            ax.set_ylabel(ylabel)
-        else:
-            ax.set_yticklabels([])
-        ax.set_title(title)
-        divider = make_axes_locatable(ax)
-        cax = divider.append_axes("right", size="1%", pad=0.05)
-        fig = ax.get_figure()
-        assert fig is not None
-        fig.colorbar(im, cax=cax, format=tkr.FormatStrFormatter(colorbar_format))
-        if ylabel == "Function index":
-            n_functions = matrix.shape[0]
-            ax.set_yticks(range(n_functions))
-            ax.set_yticklabels([f"{L:.0f}" for L in range(1, n_functions + 1)])
 
     # Figure for attribution scores
     fig_a, ax = plt.subplots(1, 1, figsize=(4, 4), constrained_layout=True)
@@ -347,7 +375,7 @@ def main(
         device=device,
         pretrained_model=piecewise_model,
         dataloader=dataloader,
-        plot_results_fn=plot_components,
+        plot_results_fn=plot_components_fullrank if config.full_rank else plot_components,
     )
 
     if config.wandb_project:
