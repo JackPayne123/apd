@@ -2,7 +2,7 @@ import torch
 from jaxtyping import Float
 from torch import Tensor
 
-from spd.run_spd import calc_lp_sparsity_loss, calc_param_match_loss_rank_one, calc_topk_l2
+from spd.run_spd import calc_lp_sparsity_loss_rank_one, calc_param_match_loss_rank_one, calc_topk_l2
 
 
 class TestCalcTopkL2:
@@ -134,7 +134,7 @@ class TestCalcParamMatchLoss:
 
 
 class TestCalcLpSparsityLoss:
-    def test_calc_lp_sparsity_loss_single_instance(self):
+    def test_calc_lp_sparsity_loss_rank_one_single_instance(self):
         inner_acts: list[Float[Tensor, "batch=1 k=3"]] = [torch.tensor([[1.0, 1.0, 1.0]])]
         layer_out_params: list[Float[Tensor, "k=3 d_out=2"]] = [
             torch.tensor([[1.0, 2.0], [3.0, 4.0], [5.0, 6.0]], requires_grad=True)
@@ -150,7 +150,7 @@ class TestCalcLpSparsityLoss:
 
         step_pnorm = 0.9
 
-        result = calc_lp_sparsity_loss(
+        result = calc_lp_sparsity_loss_rank_one(
             out=out,
             layer_acts=layer_acts,
             inner_acts=inner_acts,

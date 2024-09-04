@@ -301,7 +301,7 @@ def calc_param_match_loss(
         return param_match_loss
 
 
-def calc_lp_sparsity_loss(
+def calc_lp_sparsity_loss_rank_one(
     out: Float[Tensor, "... d_model_out"],
     layer_acts: list[Float[Tensor, "... d_in"]],
     inner_acts: list[Float[Tensor, "... d_in"]],
@@ -363,8 +363,29 @@ def calc_lp_sparsity_loss(
     return lp_sparsity_loss
 
 
+def calc_lp_sparsity_loss(
+    out: Float[Tensor, "... d_model_out"],
+    layer_acts: list[Float[Tensor, "... d_in"]],
+    inner_acts: list[Float[Tensor, "... d_in"]],
+    layer_out_params: list[Float[Tensor, "... k d_out"]] | None,
+    step_pnorm: float,
+) -> Float[Tensor, ""] | Float[Tensor, " n_instances"]:
+    """Calculate the Lp sparsity loss."""
+    if layer_out_params is not None:
+        return calc_lp_sparsity_loss_rank_one(
+            out=out,
+            layer_acts=layer_acts,
+            inner_acts=inner_acts,
+            layer_out_params=layer_out_params,
+            step_pnorm=step_pnorm,
+        )
+    else:
+        # Must be a full-rank model
+        raise NotImplementedError("Not yet implemented for full-rank models")
+
+
 def optimize(
-    model: SPDModel,
+    model: SPDModel | SPDFullRankModel,
     config: Config,
     device: str,
     dataloader: DataLoader[tuple[Float[Tensor, "... n_features"], Float[Tensor, "... n_features"]]],
@@ -458,7 +479,7 @@ def optimize(
                 out=out,
                 layer_acts=layer_acts,
                 inner_acts=inner_acts,
-                layer_out_params=model.all_Bs(),
+                layer_out_params=model.all_Bs() if isinstance(model, SPDModel) else None,
                 step_pnorm=step_pnorm,
             )
 
