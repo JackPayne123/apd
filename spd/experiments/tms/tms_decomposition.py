@@ -10,6 +10,7 @@ import fire
 import matplotlib.pyplot as plt
 import torch
 import wandb
+from matplotlib.colors import CenteredNorm
 from tqdm import tqdm
 
 from spd.experiments.tms.models import TMSModel, TMSSPDFullRankModel, TMSSPDModel
@@ -59,6 +60,39 @@ def plot_permuted_A(model: TMSSPDModel, step: int, out_dir: Path, **_) -> dict[s
     plt.close(fig)
     tqdm.write(f"Saved A matrix to {out_dir / f'A_{step}.png'}")
     return {"A": fig}
+
+
+def plot_subnetwork_params(
+    model: TMSSPDFullRankModel, step: int, out_dir: Path, **_
+) -> dict[str, plt.Figure]:
+    """Plot each subnetwork parameter matrix."""
+    # model.subnetwork_params: [n_instances, k, n_features, n_hidden]
+    fig, axs = plt.subplots(
+        model.k,
+        model.n_instances,
+        figsize=(2 * model.n_instances, 2 * model.k),
+        gridspec_kw={"wspace": 0.05, "hspace": 0.05},
+    )
+
+    for i in range(model.n_instances):
+        for j in range(model.k):
+            ax = axs[j, i]  # type: ignore
+            param = model.subnetwork_params[i, j].detach().cpu().numpy()
+            ax.matshow(param, cmap="RdBu", norm=CenteredNorm())
+            ax.set_xticks([])
+            ax.set_yticks([])
+
+            if i == 0:
+                ax.set_ylabel(f"k={j}", rotation=0, ha="right", va="center")
+            if j == model.k - 1:
+                ax.set_xlabel(f"Inst {i}", rotation=45, ha="right")
+
+    fig.suptitle(f"Subnetwork Parameters (Step {step})")
+    fig.tight_layout()
+    fig.savefig(out_dir / f"subnetwork_params_{step}.png", dpi=300, bbox_inches="tight")
+    plt.close(fig)
+    tqdm.write(f"Saved subnetwork params to {out_dir / f'subnetwork_params_{step}.png'}")
+    return {"subnetwork_params": fig}
 
 
 def main(
@@ -131,7 +165,9 @@ def main(
         device=device,
         dataloader=dataloader,
         pretrained_model=pretrained_model,
-        plot_results_fn=plot_permuted_A if isinstance(model, TMSSPDModel) else None,
+        plot_results_fn=plot_permuted_A
+        if isinstance(model, TMSSPDModel)
+        else plot_subnetwork_params,
     )
 
     if config.wandb_project:
