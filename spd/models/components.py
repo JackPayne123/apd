@@ -123,6 +123,8 @@ class MLPComponents(nn.Module):
     """
     A module that contains two linear layers with a ReLU activation in between.
 
+    Handles both full rank and rank one versions.
+
     Note that the first linear layer has a bias that is not decomposed, and the second linear layer
     has no bias.
     """
