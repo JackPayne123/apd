@@ -30,4 +30,4 @@ task_config:
   range_max: 5
   k: 10
   simple_bias: false
-  handcoded_AB: true
+  handcoded_AB: false
