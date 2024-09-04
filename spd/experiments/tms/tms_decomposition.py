@@ -12,8 +12,7 @@ import torch
 import wandb
 from tqdm import tqdm
 
-from spd.experiments.tms.models import TMSSPDModel
-from spd.experiments.tms.train_tms import TMSModel
+from spd.experiments.tms.models import TMSModel, TMSSPDFullRankModel, TMSSPDModel
 from spd.experiments.tms.utils import TMSDataset, plot_A_matrix
 from spd.log import logger
 from spd.run_spd import Config, TMSConfig, optimize
@@ -48,7 +47,7 @@ def get_run_name(config: Config, task_config: TMSConfig) -> str:
     return config.wandb_run_name_prefix + run_suffix
 
 
-def plot_perumated_A(model: TMSSPDModel, step: int, out_dir: Path, **_) -> plt.Figure:
+def plot_permuted_A(model: TMSSPDModel, step: int, out_dir: Path, **_) -> plt.Figure:
     permuted_A_T_list: list[torch.Tensor] = []
     for i in range(model.n_instances):
         permuted_matrix = permute_to_identity(model.A[i].T.abs())
@@ -83,15 +82,26 @@ def main(
     out_dir.mkdir(parents=True, exist_ok=True)
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    model = TMSSPDModel(
-        n_instances=task_config.n_instances,
-        n_features=task_config.n_features,
-        n_hidden=task_config.n_hidden,
-        k=task_config.k,
-        train_bias=task_config.train_bias,
-        bias_val=task_config.bias_val,
-        device=device,
-    )
+    if config.full_rank:
+        model = TMSSPDFullRankModel(
+            n_instances=task_config.n_instances,
+            n_features=task_config.n_features,
+            n_hidden=task_config.n_hidden,
+            k=task_config.k,
+            train_bias=task_config.train_bias,
+            bias_val=task_config.bias_val,
+            device=device,
+        )
+    else:
+        model = TMSSPDModel(
+            n_instances=task_config.n_instances,
+            n_features=task_config.n_features,
+            n_hidden=task_config.n_hidden,
+            k=task_config.k,
+            train_bias=task_config.train_bias,
+            bias_val=task_config.bias_val,
+            device=device,
+        )
 
     pretrained_model = None
     if task_config.pretrained_model_path:
@@ -121,7 +131,7 @@ def main(
         device=device,
         dataloader=dataloader,
         pretrained_model=pretrained_model,
-        plot_results_fn=plot_perumated_A,
+        plot_results_fn=plot_permuted_A if isinstance(model, TMSSPDModel) else None,
     )
 
     if config.wandb_project:
