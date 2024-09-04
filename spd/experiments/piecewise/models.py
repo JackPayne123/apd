@@ -9,7 +9,7 @@ import torch.nn as nn
 from jaxtyping import Bool, Float
 from torch import Tensor
 
-from spd.models.base import Model, SPDModel
+from spd.models.base import Model, SPDFullRankModel, SPDModel
 from spd.models.components import MLPComponents
 from spd.utils import calc_neuron_indices, remove_grad_parallel_to_subnetwork_vecs
 
@@ -695,6 +695,7 @@ class PiecewiseFunctionSPDTransformer(SPDModel):
                     input_bias=input_biases[i] if input_biases is not None else None,
                     input_component=self.input_component,  # type: ignore
                     output_component=self.output_component,  # type: ignore
+                    full_rank=False,
                 )
                 for i in range(n_layers)
             ]
@@ -858,6 +859,163 @@ class PiecewiseFunctionSPDTransformer(SPDModel):
 
     @classmethod
     def from_pretrained(cls, path: str | Path) -> "PiecewiseFunctionSPDTransformer":
+        path = Path(path)
+        with open(path.parent / "config.json") as f:
+            config = json.load(f)
+
+        params = torch.load(path, weights_only=True, map_location="cpu")
+
+        model = cls(
+            n_inputs=config["n_inputs"],
+            d_mlp=config["d_mlp"],
+            n_layers=config["n_layers"],
+            k=config["k"],
+            d_embed=config["d_embed"],
+        )
+        model.load_state_dict(params)
+        return model
+
+    def set_matrices_to_unit_norm(self):
+        for mlp in self.mlps:
+            mlp.linear1.A.data /= mlp.linear1.A.data.norm(p=2, dim=-2, keepdim=True)
+            mlp.linear2.A.data /= mlp.linear2.A.data.norm(p=2, dim=-2, keepdim=True)
+
+    def fix_normalized_adam_gradients(self):
+        for mlp in self.mlps:
+            remove_grad_parallel_to_subnetwork_vecs(mlp.linear1.A.data, mlp.linear1.A.grad)
+            remove_grad_parallel_to_subnetwork_vecs(mlp.linear2.A.data, mlp.linear2.A.grad)
+
+
+class PiecewiseFunctionSPDFullRankTransformer(SPDFullRankModel):
+    """An full rank SPD model for piecewise functions.
+
+    Args:
+        n_inputs: The number of input features
+        d_mlp: The number of neurons in each MLP layer
+        n_layers: The number of MLP layers
+        k: The number of components to keep
+        input_biases: The biases for the first linear layer of each MLP
+        d_embed: The dimension of the embedding space
+    """
+
+    def __init__(
+        self,
+        n_inputs: int,
+        d_mlp: int,
+        n_layers: int,
+        k: int,
+        input_biases: list[Float[Tensor, " d_mlp"]] | None = None,
+        d_embed: int | None = None,
+    ):
+        super().__init__()
+        self.n_inputs = n_inputs
+        self.n_layers = n_layers
+        self.k = k
+        self.d_embed = self.n_inputs + 1 if d_embed is None else d_embed
+        self.d_control = self.d_embed - 2
+        self.n_param_matrices = n_layers * 2
+
+        self.num_functions = n_inputs - 1
+        self.n_outputs = 1  # this is hardcoded. This class isn't defined for multiple outputs
+
+        self.superposition = self.num_functions > self.d_control
+        if not self.superposition:
+            assert self.num_functions == self.d_control
+
+        self.W_E = nn.Linear(n_inputs, self.d_embed, bias=False)
+        self.W_U = nn.Linear(self.d_embed, self.n_outputs, bias=False)
+        initialize_embeds(self.W_E, self.W_U, n_inputs, self.d_embed, self.superposition)
+
+        # The input_component is used for all A matrices in the first linear layer of each MLP
+        self.input_component = nn.Parameter(torch.empty(self.d_embed, self.k))
+        # The output_component is used for all B matrices in the second linear layer of each MLP
+        self.output_component = nn.Parameter(torch.empty(self.k, self.d_embed))
+
+        self.mlps = nn.ModuleList(
+            [
+                MLPComponents(
+                    d_embed=self.d_embed,
+                    d_mlp=d_mlp,
+                    k=k,
+                    input_bias=input_biases[i] if input_biases is not None else None,
+                    input_component=self.input_component,  # type: ignore
+                    output_component=self.output_component,  # type: ignore
+                    full_rank=True,
+                )
+                for i in range(n_layers)
+            ]
+        )
+
+    def all_subnetwork_params(self) -> list[Float[Tensor, "k d_in d_out"]]:
+        all_subnetwork_pairs = [
+            (self.mlps[i].linear1.subnetwork_params, self.mlps[i].linear2.subnetwork_params)
+            for i in range(self.n_layers)
+        ]
+        all_subnetworks = [
+            subnetwork for subnetwork_pair in all_subnetwork_pairs for subnetwork in subnetwork_pair
+        ]
+        assert len(all_subnetworks) == self.n_param_matrices
+        return all_subnetworks
+
+    def forward(
+        self, x: Float[Tensor, "... inputs"]
+    ) -> tuple[
+        Float[Tensor, "... outputs"],
+        list[Float[Tensor, "... d_embed"] | Float[Tensor, "... d_mlp"]],
+        list[Float[Tensor, "... k"]],
+    ]:
+        """
+        Returns:
+            x: The output of the model
+            layer_acts: A list of activations for each layer in each MLP.
+            inner_acts: A list of component activations for each layer in each MLP.
+        """
+        layer_acts = []
+        inner_acts = []
+        residual = self.W_E(x)
+        for layer in self.mlps:
+            layer_out, layer_acts_i, inner_acts_i = layer(residual)
+            residual = residual + layer_out
+            layer_acts.extend(layer_acts_i)
+            inner_acts.extend(inner_acts_i)
+        return self.W_U(residual), layer_acts, inner_acts
+
+    def forward_topk(
+        self,
+        x: Float[Tensor, "... inputs"],
+        topk_mask: Bool[Tensor, "... k"],
+    ) -> tuple[
+        Float[Tensor, "... outputs"],
+        list[Float[Tensor, "... d_embed"] | Float[Tensor, "... d_mlp"]],
+        list[Float[Tensor, "... k"]],
+    ]:
+        """
+        Performs a forward pass using only the top-k subnetwork activations.
+
+        Args:
+            x: Input tensor
+            topk_mask: A boolean mask indicating which subnetwork activations to keep.
+
+        Returns:
+            output: The output of the transformer
+            layer_acts: A list of activations for each layer in each MLP
+            inner_acts: A list of component activations for each layer in each MLP
+        """
+        layer_acts = []
+        inner_acts = []
+        residual = self.W_E(x)
+
+        for layer in self.mlps:
+            assert isinstance(layer, MLPComponents)
+            layer_out, layer_acts_i, inner_acts_i = layer.forward_topk(residual, topk_mask)
+            residual = residual + layer_out
+            layer_acts.extend(layer_acts_i)
+            inner_acts.extend(inner_acts_i)
+
+        return self.W_U(residual), layer_acts, inner_acts
+
+    @classmethod
+    def from_pretrained(cls, path: str | Path) -> "PiecewiseFunctionSPDFullRankTransformer":
         path = Path(path)
         with open(path.parent / "config.json") as f:
             config = json.load(f)

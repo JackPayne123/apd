@@ -181,6 +181,7 @@ def test_piecewise_batch_topk_rank_one_simple_bias_false_loss_stable() -> None:
     set_seed(0)
     device = "cpu"
     config = Config(
+        full_rank=False,
         topk=2,
         batch_topk=True,
         batch_size=256,
@@ -201,6 +202,8 @@ def test_piecewise_batch_topk_rank_one_simple_bias_false_loss_stable() -> None:
     assert isinstance(config.task_config, PiecewiseConfig)
 
     piecewise_model, piecewise_model_spd, dataloader = get_model_and_dataloader(config, device)[:3]
+    # Rank 1 case
+    assert isinstance(piecewise_model_spd, PiecewiseFunctionSPDTransformer)
     piecewise_model.requires_grad_(False)
     piecewise_model.to(device=device)
 

@@ -74,7 +74,7 @@ class SPDFullRankModel(ABC, nn.Module):
 
     @classmethod
     @abstractmethod
-    def from_pretrained(cls, path: str | Path) -> "SPDModel":
+    def from_pretrained(cls, path: str | Path) -> "SPDFullRankModel":
         pass
 
     @abstractmethod

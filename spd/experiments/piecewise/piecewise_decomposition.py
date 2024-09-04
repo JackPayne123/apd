@@ -16,6 +16,7 @@ from torch import Tensor
 from tqdm import tqdm
 
 from spd.experiments.piecewise.models import (
+    PiecewiseFunctionSPDFullRankTransformer,
     PiecewiseFunctionSPDTransformer,
     PiecewiseFunctionTransformer,
 )
@@ -223,7 +224,7 @@ def get_model_and_dataloader(
     out_dir: Path | None = None,
 ) -> tuple[
     PiecewiseFunctionTransformer,
-    PiecewiseFunctionSPDTransformer,
+    PiecewiseFunctionSPDTransformer | PiecewiseFunctionSPDFullRankTransformer,
     BatchedDataLoader[tuple[Float[Tensor, " n_inputs"], Float[Tensor, ""]]],
     BatchedDataLoader[tuple[Float[Tensor, " n_inputs"], Float[Tensor, ""]]],
 ]:
@@ -251,13 +252,22 @@ def get_model_and_dataloader(
         piecewise_model.mlps[i].input_layer.bias.detach().clone()
         for i in range(piecewise_model.n_layers)
     ]
-    piecewise_model_spd = PiecewiseFunctionSPDTransformer(
-        n_inputs=piecewise_model.n_inputs,
-        d_mlp=piecewise_model.d_mlp,
-        n_layers=piecewise_model.n_layers,
-        k=config.task_config.k,
-        input_biases=input_biases,
-    )
+    if config.full_rank:
+        piecewise_model_spd = PiecewiseFunctionSPDFullRankTransformer(
+            n_inputs=piecewise_model.n_inputs,
+            d_mlp=piecewise_model.d_mlp,
+            n_layers=piecewise_model.n_layers,
+            k=config.task_config.k,
+            input_biases=input_biases,
+        )
+    else:
+        piecewise_model_spd = PiecewiseFunctionSPDTransformer(
+            n_inputs=piecewise_model.n_inputs,
+            d_mlp=piecewise_model.d_mlp,
+            n_layers=piecewise_model.n_layers,
+            k=config.task_config.k,
+            input_biases=input_biases,
+        )
     if config.task_config.handcoded_AB:
         logger.info("Setting handcoded A and B matrices (!)")
         piecewise_model_spd.set_handcoded_AB(piecewise_model)
