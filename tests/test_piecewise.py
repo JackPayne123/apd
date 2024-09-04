@@ -6,7 +6,13 @@ from spd.experiments.piecewise.models import (
 )
 from spd.experiments.piecewise.piecewise_dataset import PiecewiseDataset
 from spd.experiments.piecewise.piecewise_decomposition import get_model_and_dataloader
-from spd.run_spd import Config, PiecewiseConfig, calc_param_match_loss, calc_recon_mse, optimize
+from spd.run_spd import (
+    Config,
+    PiecewiseConfig,
+    calc_param_match_loss,
+    calc_recon_mse,
+    optimize,
+)
 from spd.utils import (
     BatchedDataLoader,
     calc_attributions,
@@ -226,8 +232,7 @@ def test_piecewise_batch_topk_simple_bias_false_loss_stable() -> None:
     pretrained_weights = piecewise_model.all_decomposable_params()
     initial_param_match_loss = calc_param_match_loss(
         pretrained_weights=pretrained_weights,
-        layer_in_params=piecewise_model_spd.all_As(),
-        layer_out_params=piecewise_model_spd.all_Bs(),
+        model=piecewise_model_spd,
     )
 
     attribution_scores = calc_attributions(out, inner_acts)
@@ -252,9 +257,7 @@ def test_piecewise_batch_topk_simple_bias_false_loss_stable() -> None:
 
     # Check that the losses have not reduced
     final_param_match_loss = calc_param_match_loss(
-        pretrained_weights=pretrained_weights,
-        layer_in_params=piecewise_model_spd.all_As(),
-        layer_out_params=piecewise_model_spd.all_Bs(),
+        pretrained_weights=pretrained_weights, model=piecewise_model_spd
     )
 
     out, _, inner_acts = piecewise_model_spd(batch)

@@ -2,7 +2,7 @@ import torch
 from jaxtyping import Float
 from torch import Tensor
 
-from spd.run_spd import calc_lp_sparsity_loss, calc_param_match_loss, calc_topk_l2
+from spd.run_spd import calc_lp_sparsity_loss, calc_param_match_loss_rank_one, calc_topk_l2
 
 
 class TestCalcTopkL2:
@@ -90,7 +90,7 @@ class TestCalcParamMatchLoss:
         A = torch.ones(2, 3)
         B = torch.ones(3, 2)
         pretrained_weights = [torch.tensor([[1.0, 1.0], [1.0, 1.0]])]
-        result = calc_param_match_loss(
+        result = calc_param_match_loss_rank_one(
             pretrained_weights=pretrained_weights, layer_in_params=[A], layer_out_params=[B]
         )
 
@@ -108,7 +108,7 @@ class TestCalcParamMatchLoss:
             torch.tensor([[2.0, 2.0, 2.0], [2.0, 2.0, 2.0]]),
             torch.tensor([[1.0, 1.0], [1.0, 1.0], [1.0, 1.0]]),
         ]
-        result = calc_param_match_loss(
+        result = calc_param_match_loss_rank_one(
             pretrained_weights=pretrained_weights, layer_in_params=As, layer_out_params=Bs
         )
 
@@ -122,7 +122,7 @@ class TestCalcParamMatchLoss:
         As = [torch.ones(2, 2, 3)]
         Bs = [torch.ones(2, 3, 2)]
         pretrained_weights = [torch.tensor([[[2.0, 2.0], [2.0, 2.0]], [[1.0, 1.0], [1.0, 1.0]]])]
-        result = calc_param_match_loss(
+        result = calc_param_match_loss_rank_one(
             pretrained_weights=pretrained_weights, layer_in_params=As, layer_out_params=Bs
         )
 

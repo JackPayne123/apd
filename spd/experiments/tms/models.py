@@ -84,11 +84,11 @@ class TMSSPDModel(SPDModel):
         return [self.B, einops.rearrange(self.A, "i f k -> i k f")]
 
     def forward(
-        self, features: Float[Tensor, "... i f"]
+        self, x: Float[Tensor, "... i f"]
     ) -> tuple[
         Float[Tensor, "... i f"], list[Float[Tensor, "... i f"]], list[Float[Tensor, "... i k"]]
     ]:
-        inner_act_0 = torch.einsum("...if,ifk->...ik", features, self.A)
+        inner_act_0 = torch.einsum("...if,ifk->...ik", x, self.A)
         layer_act_0 = torch.einsum("...ik,ikh->...ih", inner_act_0, self.B)
 
         inner_act_1 = torch.einsum("...ih,ikh->...ik", layer_act_0, self.B)

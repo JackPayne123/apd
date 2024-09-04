@@ -25,7 +25,7 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 from spd.log import logger
-from spd.models.base import Model, SPDModel
+from spd.models.base import Model, SPDFullRankModel, SPDModel
 from spd.types import Probability, RootPath
 from spd.utils import calc_attributions, calc_topk_mask
 
@@ -261,7 +261,7 @@ def calc_topk_l2(
     return topk_l2_penalty.mean(dim=0) / len(layer_in_params)
 
 
-def calc_param_match_loss(
+def calc_param_match_loss_rank_one(
     pretrained_weights: list[Float[Tensor, " ... d_in d_out"]],
     layer_in_params: list[Float[Tensor, " ... d_in k"]],
     layer_out_params: list[Float[Tensor, " ... k d_out"]],
@@ -285,6 +285,20 @@ def calc_param_match_loss(
         AB = torch.einsum("...fk,...kg->...fg", A, B)
         param_match_loss = param_match_loss + ((AB - pretrained_weights[i]) ** 2).mean(dim=(-2, -1))
     return param_match_loss / len(layer_in_params)
+
+
+def calc_param_match_loss(
+    pretrained_weights: list[Float[Tensor, " ... d_in d_out"]], model: SPDModel | SPDFullRankModel
+) -> Float[Tensor, ""] | Float[Tensor, " n_instances"]:
+    """Calculate the parameter match loss."""
+    if isinstance(model, SPDFullRankModel):
+        raise NotImplementedError("Not yet implemented for full-rank models")
+    else:
+        assert isinstance(model, SPDModel)
+        param_match_loss = calc_param_match_loss_rank_one(
+            pretrained_weights, model.all_As(), model.all_Bs()
+        )
+        return param_match_loss
 
 
 def calc_lp_sparsity_loss(
@@ -374,6 +388,7 @@ def optimize(
     data_iter = iter(dataloader)
     for step in tqdm(range(config.steps + 1), ncols=0):
         if config.unit_norm_matrices:
+            assert isinstance(model, SPDModel), "Can only norm matrices in SPDModel instances"
             model.set_matrices_to_unit_norm()
 
         step_lr = get_lr_with_warmup(
@@ -434,11 +449,7 @@ def optimize(
         if config.param_match_coeff is not None:
             assert pretrained_model is not None, "Need a pretrained model for param_match loss"
             pretrained_weights = pretrained_model.all_decomposable_params()
-            param_match_loss = calc_param_match_loss(
-                pretrained_weights=pretrained_weights,
-                layer_in_params=model.all_As(),
-                layer_out_params=model.all_Bs(),
-            )
+            param_match_loss = calc_param_match_loss(pretrained_weights, model)
 
         lp_sparsity_loss = None
         if config.lp_sparsity_coeff is not None:
@@ -571,5 +582,6 @@ def optimize(
         if step != config.steps:
             loss.backward()
             if config.unit_norm_matrices:
+                assert isinstance(model, SPDModel), "Can only norm matrices in SPDModel instances"
                 model.fix_normalized_adam_gradients()
             opt.step()
