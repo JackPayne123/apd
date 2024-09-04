@@ -19,11 +19,10 @@ from spd.experiments.linear.models import (
     DeepLinearModel,
 )
 from spd.log import logger
-from spd.models.base import SPDModel
 from spd.run_spd import Config, DeepLinearConfig, optimize
 from spd.utils import (
     DatasetGeneratedDataLoader,
-    calc_attributions,
+    calc_attributions_rank_one,
     calc_topk_mask,
     init_wandb,
     load_config,
@@ -144,13 +143,9 @@ def collect_inner_act_data(
         i=model.n_instances,
     )
 
-    out, test_layer_acts, test_inner_acts = model(test_batch)
+    out, _, test_inner_acts = model(test_batch)
     if topk is not None:
-        attribution_scores = calc_attributions(
-            out=out,
-            inner_acts=test_inner_acts,
-            layer_acts=None if isinstance(model, SPDModel) else test_layer_acts,
-        )
+        attribution_scores = calc_attributions_rank_one(out=out, inner_acts=test_inner_acts)
         topk_mask = calc_topk_mask(attribution_scores, topk, batch_topk=batch_topk)
 
         test_inner_acts = model.forward_topk(test_batch, topk_mask=topk_mask)[-1]

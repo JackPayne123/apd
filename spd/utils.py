@@ -324,19 +324,6 @@ def calc_attributions_full_rank(
     return attribution_scores
 
 
-def calc_attributions(
-    out: Float[Tensor, "... d_out"],
-    inner_acts: list[Float[Tensor, "... k"]] | list[Float[Tensor, "... k d_out"]],
-    layer_acts: list[Float[Tensor, "... d_out"]] | None,
-) -> Float[Tensor, "... k"]:
-    """Calculate the sum of the (squared) attributions from each output dimension."""
-    if layer_acts is None:
-        attributions = calc_attributions_rank_one(out, inner_acts)
-    else:
-        attributions = calc_attributions_full_rank(out, inner_acts, layer_acts)
-    return attributions
-
-
 def calc_topk_mask(
     attribution_scores: Float[Tensor, "batch ... k"], topk: float, batch_topk: bool
 ) -> Float[Tensor, "batch ... k"]:

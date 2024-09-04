@@ -27,7 +27,7 @@ from tqdm import tqdm
 from spd.log import logger
 from spd.models.base import Model, SPDFullRankModel, SPDModel
 from spd.types import Probability, RootPath
-from spd.utils import calc_attributions, calc_topk_mask
+from spd.utils import calc_attributions_full_rank, calc_attributions_rank_one, calc_topk_mask
 
 
 class TMSConfig(BaseModel):
@@ -158,7 +158,6 @@ class Config(BaseModel):
                 self.lr_exponential_halflife is not None
             ), "lr_exponential_halflife must be set if lr_schedule is exponential"
 
-        # Can't unit norm matrices if full rank
         if self.full_rank:
             assert not self.unit_norm_matrices, "Can't unit norm matrices if full rank"
         return self
@@ -373,23 +372,6 @@ def calc_param_match_loss_full_rank(
     return param_match_loss / len(subnetwork_params)
 
 
-def calc_param_match_loss(
-    pretrained_weights: list[Float[Tensor, " ... d_in d_out"]], model: SPDModel | SPDFullRankModel
-) -> Float[Tensor, ""] | Float[Tensor, " n_instances"]:
-    """Calculate the parameter match loss."""
-    if isinstance(model, SPDModel):
-        assert isinstance(model, SPDModel)
-        param_match_loss = calc_param_match_loss_rank_one(
-            pretrained_weights, model.all_As(), model.all_Bs()
-        )
-    else:
-        assert isinstance(model, SPDFullRankModel)
-        param_match_loss = calc_param_match_loss_full_rank(
-            pretrained_weights, model.all_subnetwork_params()
-        )
-    return param_match_loss
-
-
 def calc_lp_sparsity_loss_rank_one(
     out: Float[Tensor, "... d_model_out"],
     layer_acts: list[Float[Tensor, "... d_in"]],
@@ -501,31 +483,6 @@ def calc_lp_sparsity_loss_full_rank(
     return lp_sparsity_loss
 
 
-def calc_lp_sparsity_loss(
-    out: Float[Tensor, "... d_model_out"],
-    layer_acts: list[Float[Tensor, "... d_in"]],
-    inner_acts: list[Float[Tensor, "... d_in"]],
-    layer_out_params: list[Float[Tensor, "... k d_out"]] | None,
-    step_pnorm: float,
-) -> Float[Tensor, ""] | Float[Tensor, " n_instances"]:
-    """Calculate the Lp sparsity loss."""
-    if layer_out_params is not None:
-        return calc_lp_sparsity_loss_rank_one(
-            out=out,
-            layer_acts=layer_acts,
-            inner_acts=inner_acts,
-            layer_out_params=layer_out_params,
-            step_pnorm=step_pnorm,
-        )
-    else:
-        return calc_lp_sparsity_loss_full_rank(
-            out=out,
-            layer_acts=layer_acts,
-            inner_acts=inner_acts,
-            step_pnorm=step_pnorm,
-        )
-
-
 def optimize(
     model: SPDModel | SPDFullRankModel,
     config: Config,
@@ -612,26 +569,43 @@ def optimize(
         if config.param_match_coeff is not None:
             assert pretrained_model is not None, "Need a pretrained model for param_match loss"
             pretrained_weights = pretrained_model.all_decomposable_params()
-            param_match_loss = calc_param_match_loss(pretrained_weights, model)
+            if config.full_rank:
+                assert isinstance(model, SPDFullRankModel)
+                param_match_loss = calc_param_match_loss_full_rank(
+                    pretrained_weights, model.all_subnetwork_params()
+                )
+            else:
+                assert isinstance(model, SPDModel)
+                param_match_loss = calc_param_match_loss_rank_one(
+                    pretrained_weights, model.all_As(), model.all_Bs()
+                )
 
         lp_sparsity_loss = None
         if config.lp_sparsity_coeff is not None:
             step_pnorm = config.pnorm or get_step_pnorm(step, config.steps, config.pnorm_end)
-            lp_sparsity_loss = calc_lp_sparsity_loss(
-                out=out,
-                layer_acts=layer_acts,
-                inner_acts=inner_acts,
-                layer_out_params=model.all_Bs() if isinstance(model, SPDModel) else None,
-                step_pnorm=step_pnorm,
-            )
+            if config.full_rank:
+                lp_sparsity_loss = calc_lp_sparsity_loss_full_rank(
+                    out=out, layer_acts=layer_acts, inner_acts=inner_acts, step_pnorm=step_pnorm
+                )
+            else:
+                lp_sparsity_loss = calc_lp_sparsity_loss_rank_one(
+                    out=out,
+                    layer_acts=layer_acts,
+                    inner_acts=inner_acts,
+                    layer_out_params=model.all_Bs(),
+                    step_pnorm=step_pnorm,
+                )
 
         out_topk, topk_l2_loss, topk_recon_loss = None, None, None
         if config.topk is not None:
-            attribution_scores = calc_attributions(
-                out=out,
-                inner_acts=inner_acts,
-                layer_acts=None if isinstance(model, SPDModel) else layer_acts,
-            )
+            if config.full_rank:
+                attribution_scores = calc_attributions_full_rank(
+                    out=out,
+                    inner_acts=inner_acts,
+                    layer_acts=layer_acts,
+                )
+            else:
+                attribution_scores = calc_attributions_rank_one(out=out, inner_acts=inner_acts)
 
             topk_mask = calc_topk_mask(
                 attribution_scores, config.topk, batch_topk=config.batch_topk
