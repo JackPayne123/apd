@@ -962,7 +962,7 @@ class PiecewiseFunctionSPDFullRankTransformer(SPDFullRankModel):
     ) -> tuple[
         Float[Tensor, "... outputs"],
         list[Float[Tensor, "... d_embed"] | Float[Tensor, "... d_mlp"]],
-        list[Float[Tensor, "... k"]],
+        list[Float[Tensor, "... k d_embed"]],
     ]:
         """
         Returns:
@@ -987,7 +987,7 @@ class PiecewiseFunctionSPDFullRankTransformer(SPDFullRankModel):
     ) -> tuple[
         Float[Tensor, "... outputs"],
         list[Float[Tensor, "... d_embed"] | Float[Tensor, "... d_mlp"]],
-        list[Float[Tensor, "... k"]],
+        list[Float[Tensor, "... k d_embed"]],
     ]:
         """
         Performs a forward pass using only the top-k subnetwork activations.

@@ -13,7 +13,11 @@ from torch import Tensor
 from tqdm import tqdm
 
 from spd.experiments.linear.linear_dataset import DeepLinearDataset
-from spd.experiments.linear.models import DeepLinearComponentModel, DeepLinearModel
+from spd.experiments.linear.models import (
+    DeepLinearComponentFullRankModel,
+    DeepLinearComponentModel,
+    DeepLinearModel,
+)
 from spd.log import logger
 from spd.models.base import SPDModel
 from spd.run_spd import Config, DeepLinearConfig, optimize
@@ -229,9 +233,20 @@ def main(
             n_features is not None and n_layers is not None and n_instances is not None
         ), "n_features, n_layers, and n_instances must be set"
 
-    dlc_model = DeepLinearComponentModel(
-        n_features=n_features, n_layers=n_layers, n_instances=n_instances, k=config.task_config.k
-    ).to(device)
+    if config.full_rank:
+        dlc_model = DeepLinearComponentFullRankModel(
+            n_features=n_features,
+            n_layers=n_layers,
+            n_instances=n_instances,
+            k=config.task_config.k,
+        ).to(device)
+    else:
+        dlc_model = DeepLinearComponentModel(
+            n_features=n_features,
+            n_layers=n_layers,
+            n_instances=n_instances,
+            k=config.task_config.k,
+        ).to(device)
 
     dataset = DeepLinearDataset(n_features, n_instances)
     dataloader = DatasetGeneratedDataLoader(dataset, batch_size=config.batch_size, shuffle=True)
@@ -243,7 +258,9 @@ def main(
         device=device,
         dataloader=dataloader,
         pretrained_model=dl_model,
-        plot_results_fn=plot_subnetwork_activations,
+        plot_results_fn=plot_subnetwork_activations
+        if isinstance(dlc_model, DeepLinearComponentModel)
+        else None,
     )
 
     if config.wandb_project:

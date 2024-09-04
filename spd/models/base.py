@@ -8,11 +8,11 @@ from torch import Tensor, nn
 class SPDModel(ABC, nn.Module):
     @abstractmethod
     def forward(
-        self, x: Float[Tensor, "... i d_model_in"]
+        self, x: Float[Tensor, "... d_model_in"]
     ) -> tuple[
-        Float[Tensor, "... i d_model_out"],  # output
-        list[Float[Tensor, "... i d_layer_out"]],  # layer activations
-        list[Float[Tensor, "... i k"]],  # inner activations
+        Float[Tensor, "... d_model_out"],  # output
+        list[Float[Tensor, "... d_layer_out"]],  # layer activations
+        list[Float[Tensor, "... k"]],  # inner activations
     ]:
         pass
 
@@ -54,11 +54,11 @@ class SPDModel(ABC, nn.Module):
 class SPDFullRankModel(ABC, nn.Module):
     @abstractmethod
     def forward(
-        self, x: Float[Tensor, "... i d_model_in"]
+        self, x: Float[Tensor, "... d_model_in"]
     ) -> tuple[
-        Float[Tensor, "... i d_model_out"],  # output
-        list[Float[Tensor, "... i d_layer_out"]],  # layer activations
-        list[Float[Tensor, "... i k d_layer_out"]],  # inner activations
+        Float[Tensor, "... d_model_out"],  # output
+        list[Float[Tensor, "... d_layer_out"]],  # layer activations
+        list[Float[Tensor, "... k d_layer_out"]],  # inner activations
     ]:
         pass
 

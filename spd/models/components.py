@@ -158,7 +158,7 @@ class MLPComponents(nn.Module):
     ) -> tuple[
         Float[Tensor, "... d_embed"],
         list[Float[Tensor, "... d_embed"] | Float[Tensor, "... d_mlp"]],
-        list[Float[Tensor, "... k"]],
+        list[Float[Tensor, "... k"]] | list[Float[Tensor, "... k d_embed"]],
     ]:
         """
         Returns:
@@ -185,7 +185,7 @@ class MLPComponents(nn.Module):
     ) -> tuple[
         Float[Tensor, "... d_embed"],
         list[Float[Tensor, "... d_embed"] | Float[Tensor, "... d_mlp"]],
-        list[Float[Tensor, "... k"]],
+        list[Float[Tensor, "... k"]] | list[Float[Tensor, "... k d_embed"]],
     ]:
         """
         Performs a forward pass using only the top-k components for each linear layer.
