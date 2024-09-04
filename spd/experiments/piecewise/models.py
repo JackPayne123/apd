@@ -2,6 +2,7 @@ import json
 from collections.abc import Callable, Iterable, Sequence
 from pathlib import Path
 
+import einops
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
@@ -945,6 +946,27 @@ class PiecewiseFunctionSPDFullRankTransformer(SPDFullRankModel):
                 for i in range(n_layers)
             ]
         )
+
+    def set_handcoded_AB(self, target_transformer: PiecewiseFunctionSPDTransformer):
+        assert self.n_inputs == target_transformer.n_inputs
+        assert self.n_layers == target_transformer.n_layers
+        assert self.d_embed == target_transformer.d_embed
+        assert self.d_control == target_transformer.d_control
+        self.to(target_transformer.W_E.weight.device)
+        for i, mlp in enumerate(self.mlps):
+            mlp.linear1.subnetwork_params.data[:, :] = einops.einsum(
+                target_transformer.mlps[i].linear1.A,
+                target_transformer.mlps[i].linear1.B,
+                "d_embed k, k d_mlp -> k d_embed d_mlp",
+            )
+            print(f"{target_transformer.mlps[i].linear2.A.shape=}")
+            print(f"{target_transformer.mlps[i].linear2.B.shape=}")
+            print(f"{mlp.linear2.subnetwork_params.shape=}")
+            mlp.linear2.subnetwork_params.data[:, :] = einops.einsum(
+                target_transformer.mlps[i].linear2.A,
+                target_transformer.mlps[i].linear2.B,
+                "d_mlp k, k d_embed -> k d_mlp d_embed",
+            )
 
     def all_subnetwork_params(self) -> list[Float[Tensor, "k d_in d_out"]]:
         all_subnetwork_pairs = [
