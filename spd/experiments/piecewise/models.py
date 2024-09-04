@@ -959,9 +959,6 @@ class PiecewiseFunctionSPDFullRankTransformer(SPDFullRankModel):
                 target_transformer.mlps[i].linear1.B,
                 "d_embed k, k d_mlp -> k d_embed d_mlp",
             )
-            print(f"{target_transformer.mlps[i].linear2.A.shape=}")
-            print(f"{target_transformer.mlps[i].linear2.B.shape=}")
-            print(f"{mlp.linear2.subnetwork_params.shape=}")
             mlp.linear2.subnetwork_params.data[:, :] = einops.einsum(
                 target_transformer.mlps[i].linear2.A,
                 target_transformer.mlps[i].linear2.B,
