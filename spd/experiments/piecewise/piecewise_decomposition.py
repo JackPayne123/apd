@@ -300,6 +300,17 @@ def get_model_and_dataloader(
             k=config.task_config.k,
             input_biases=input_biases,
         )
+        if config.task_config.handcoded_AB:
+            logger.info("Setting handcoded A and B matrices (!)")
+            non_full_rank_spd_model = PiecewiseFunctionSPDTransformer(
+                n_inputs=piecewise_model.n_inputs,
+                d_mlp=piecewise_model.d_mlp,
+                n_layers=piecewise_model.n_layers,
+                k=config.task_config.k,
+                input_biases=input_biases,
+            )
+            non_full_rank_spd_model.set_handcoded_AB(piecewise_model)
+            piecewise_model_spd.set_handcoded_AB(non_full_rank_spd_model)
     else:
         piecewise_model_spd = PiecewiseFunctionSPDTransformer(
             n_inputs=piecewise_model.n_inputs,
@@ -308,23 +319,9 @@ def get_model_and_dataloader(
             k=config.task_config.k,
             input_biases=input_biases,
         )
-    if config.task_config.handcoded_AB and not config.full_rank:
-        logger.info("Setting handcoded A and B matrices (!)")
-        assert isinstance(piecewise_model_spd, PiecewiseFunctionSPDTransformer)
-        piecewise_model_spd.set_handcoded_AB(piecewise_model)
-    elif config.task_config.handcoded_AB and config.full_rank:
-        logger.info("Setting handcoded A and B matrices (!)")
-        assert isinstance(piecewise_model_spd, PiecewiseFunctionSPDFullRankTransformer)
-        non_fr_model = PiecewiseFunctionSPDTransformer(
-            n_inputs=piecewise_model.n_inputs,
-            d_mlp=piecewise_model.d_mlp,
-            n_layers=piecewise_model.n_layers,
-            k=config.task_config.k,
-            input_biases=input_biases,
-        )
-        non_fr_model.set_handcoded_AB(piecewise_model)
-        assert isinstance(non_fr_model, PiecewiseFunctionSPDTransformer)
-        piecewise_model_spd.set_handcoded_AB(non_fr_model)
+        if config.task_config.handcoded_AB:
+            logger.info("Setting handcoded A and B matrices (!)")
+            piecewise_model_spd.set_handcoded_AB(piecewise_model)
 
     piecewise_model_spd.to(device)
 
