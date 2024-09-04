@@ -279,7 +279,13 @@ def calc_param_match_loss(
         The parameter match loss of shape [n_instances] if the model has an n_instances dimension,
         otherwise of shape [].
     """
-    param_match_loss = torch.tensor(0.0, device=subnetwork_params[0].device)
+    has_instances = subnetwork_params[0].ndim == 4
+    if has_instances:
+        param_match_loss = torch.zeros(
+            subnetwork_params[0].shape[0], device=subnetwork_params[0].device
+        )
+    else:
+        param_match_loss = torch.tensor(0.0, device=subnetwork_params[0].device)
     for pretrained_weight, subnetwork_param in zip(
         pretrained_weights, subnetwork_params, strict=False
     ):

@@ -48,7 +48,7 @@ def get_run_name(config: Config, task_config: TMSConfig) -> str:
     return config.wandb_run_name_prefix + run_suffix
 
 
-def plot_perumated_A(model: TMSSPDModel, step: int, out_dir: Path, **_) -> plt.Figure:
+def plot_permuted_A(model: TMSSPDModel, step: int, out_dir: Path, **_) -> plt.Figure:
     permuted_A_T_list: list[torch.Tensor] = []
     for i in range(model.n_instances):
         permuted_matrix = permute_to_identity(model.A[i].T.abs())
@@ -121,8 +121,9 @@ def main(
         device=device,
         dataloader=dataloader,
         pretrained_model=pretrained_model,
-        plot_results_fn=plot_perumated_A,
     )
+    # no plot function because plot_permuted_A doesn't work on this branch, and I don't know what
+    # the right visualisation is anyway
 
     if config.wandb_project:
         wandb.finish()

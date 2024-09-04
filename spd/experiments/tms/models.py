@@ -1,12 +1,11 @@
-import einops
 import torch
+from einops import einsum, rearrange
 from jaxtyping import Bool, Float
 from torch import Tensor, nn
 from torch.nn import functional as F
 
 from spd.models.base import Model, SPDModel
 from spd.types import RootPath
-from spd.utils import remove_grad_parallel_to_subnetwork_vecs
 
 
 class TMSModel(Model):
@@ -36,7 +35,7 @@ class TMSModel(Model):
 
     def all_decomposable_params(self) -> list[Float[Tensor, "..."]]:
         """List of all parameters which will be decomposed with SPD."""
-        return [self.W, einops.rearrange(self.W, "i f h -> i h f")]
+        return [self.W, rearrange(self.W, "i f h -> i h f")]
 
 
 class TMSSPDModel(SPDModel):
@@ -58,41 +57,41 @@ class TMSSPDModel(SPDModel):
         self.bias_val = bias_val
         self.train_bias = train_bias
 
-        self.A = nn.Parameter(torch.empty((n_instances, n_features, self.k), device=device))
-        self.B = nn.Parameter(torch.empty((n_instances, self.k, n_hidden), device=device))
+        self.subnetworks = nn.Parameter(
+            torch.empty((n_instances, self.k, n_features, n_hidden), device=device)
+        )
 
         bias_data = torch.zeros((n_instances, n_features), device=device) + bias_val
         self.b_final = nn.Parameter(bias_data) if train_bias else bias_data
 
-        nn.init.xavier_normal_(self.A)
-        # Fix the first instance to the identity to compare losses
-        assert (
-            n_features == self.k
-        ), "Currently only supports n_features == k if fixing first instance to identity"
-        self.A.data[0] = torch.eye(n_features, device=device)
-        nn.init.xavier_normal_(self.B)
+        nn.init.xavier_normal_(self.subnetworks)
 
         self.n_param_matrices = 2  # Two W matrices (even though they're tied)
 
-    def all_As(self) -> list[Float[Tensor, "dim k"]]:
-        # Note that A is defined as the matrix which mutliplies the activations
-        # to get the inner_acts. In TMS, because we tie the W matrices, our second A matrix
-        # is actually the B matrix
-        return [self.A, einops.rearrange(self.B, "i k h -> i h k")]
-
-    def all_Bs(self) -> list[Float[Tensor, "k dim"]]:
-        return [self.B, einops.rearrange(self.A, "i f k -> i k f")]
+    def all_subnetworks(self) -> list[Float[Tensor, "n_instances k n_features n_hidden"]]:
+        return [self.subnetworks, rearrange(self.subnetworks, "i k f h -> i k h f")]
 
     def forward(
-        self, features: Float[Tensor, "... i f"]
+        self, x: Float[Tensor, "... n_inst n_feat"]
     ) -> tuple[
-        Float[Tensor, "... i f"], list[Float[Tensor, "... i f"]], list[Float[Tensor, "... i k"]]
+        Float[Tensor, "... n_inst n_feat"],
+        list[Float[Tensor, "... n_inst n_feat"]],
+        list[Float[Tensor, "... n_inst k"]],
     ]:
-        inner_act_0 = torch.einsum("...if,ifk->...ik", features, self.A)
-        layer_act_0 = torch.einsum("...ik,ikh->...ih", inner_act_0, self.B)
+        inner_act_0 = einsum(
+            x,
+            self.subnetworks,
+            "... n_inst n_feat, n_inst k n_feat n_hidden -> ... n_inst k n_hidden",
+        )
+        layer_act_0 = einsum(inner_act_0, "... n_inst k n_hidden -> ... n_inst n_hidden")
 
-        inner_act_1 = torch.einsum("...ih,ikh->...ik", layer_act_0, self.B)
-        layer_act_1 = torch.einsum("...ik,ifk->...if", inner_act_1, self.A)
+        inner_act_1 = einsum(
+            layer_act_0,
+            self.subnetworks,
+            "... n_inst n_hidden, n_inst k n_feat n_hidden -> ... n_inst k n_feat",
+        )
+        layer_act_1 = einsum(inner_act_1, "... n_inst k n_feat -> ... n_inst n_feat")
+
         pre_relu = layer_act_1 + self.b_final
 
         out = F.relu(pre_relu)
@@ -103,22 +102,35 @@ class TMSSPDModel(SPDModel):
     def forward_topk(
         self,
         x: Float[Tensor, "... i f"],
-        topk_mask: Bool[Tensor, "... n_instances k"],
+        topk_mask: Bool[Tensor, "... n_inst k"],
     ) -> tuple[
         Float[Tensor, "... i f"],
         list[Float[Tensor, "... i f"]],
         list[Float[Tensor, "... i k"]],
     ]:
         """Performs a forward pass using only the top-k subnetwork activations."""
-        inner_act_0 = torch.einsum("...if,ifk->...ik", x, self.A)
-        assert topk_mask.shape == inner_act_0.shape
-        inner_act_0_topk = inner_act_0 * topk_mask
-        layer_act_0 = torch.einsum("...ik,ikh->...ih", inner_act_0_topk, self.B)
+        inner_act_0 = einsum(
+            x,
+            self.subnetworks,
+            "... n_inst n_feat, n_inst k n_feat n_hidden -> ... n_inst k n_hidden",
+        )
+        assert topk_mask.shape == inner_act_0.shape[:-1]
+        inner_act_0_topk = einsum(
+            inner_act_0, topk_mask, "... n_inst k n_hidden, ... n_inst k -> ... n_inst k n_hidden"
+        )
+        layer_act_0 = einsum(inner_act_0_topk, "... n_inst k n_hidden -> ... n_inst n_hidden")
 
-        inner_act_1 = torch.einsum("...ih,ikh->...ik", layer_act_0, self.B)
-        assert topk_mask.shape == inner_act_1.shape
-        inner_act_1_topk = inner_act_1 * topk_mask
-        layer_act_1 = torch.einsum("...ik,ifk->...if", inner_act_1_topk, self.A)
+        inner_act_1 = einsum(
+            layer_act_0,
+            self.subnetworks,
+            "... n_inst n_hidden, n_inst k n_feat n_hidden -> ... n_inst k n_feat",
+        )
+
+        assert topk_mask.shape == inner_act_1.shape[:-1]
+        inner_act_1_topk = einsum(
+            inner_act_1, topk_mask, "... n_inst k n_feat, ... n_inst k -> ... n_inst k n_feat"
+        )
+        layer_act_1 = einsum(inner_act_1_topk, "... n_inst k n_feat -> ... n_inst n_feat")
 
         pre_relu = layer_act_1 + self.b_final
         out = F.relu(pre_relu)
@@ -127,10 +139,3 @@ class TMSSPDModel(SPDModel):
     @classmethod
     def from_pretrained(cls, path: str | RootPath) -> "TMSSPDModel":  # type: ignore
         pass
-
-    def set_matrices_to_unit_norm(self):
-        self.A.data /= self.A.data.norm(p=2, dim=-2, keepdim=True)
-
-    def fix_normalized_adam_gradients(self):
-        assert self.A.grad is not None
-        remove_grad_parallel_to_subnetwork_vecs(self.A.data, self.A.grad)
