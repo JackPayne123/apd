@@ -3,6 +3,7 @@
 import json
 from pathlib import Path
 
+import einops
 import fire
 import matplotlib.pyplot as plt
 import matplotlib.ticker as tkr
@@ -75,15 +76,31 @@ def plot_components_fullrank(
     # Not implemented attribution score plots, or multi-layer plots, yet.
     assert model.n_layers == 1
     ncols = 2
-    nrows = model.k
+    nrows = model.k + 1
     fig, axs = plt.subplots(nrows, ncols, figsize=(16 * ncols, 3 * nrows), constrained_layout=True)
+    assert isinstance(axs, np.ndarray)
+    plot_matrix(
+        axs[0, 0],
+        einops.einsum(model.mlps[0].linear1.subnetwork_params, "k ... -> ..."),
+        "W_in, sum over k",
+        "Neuron index",
+        "Embedding index",
+    )
+    plot_matrix(
+        axs[0, 1],
+        einops.einsum(model.mlps[0].linear2.subnetwork_params, "k ... -> ...").T,
+        "W_out.T, sum over k",
+        "Neuron index",
+        "",
+    )
+
     for k in range(model.k):
         mlp = model.mlps[0]
         W_in_k = mlp.linear1.subnetwork_params[k]
-        ax = axs[k, 0]  # type: ignore
+        ax = axs[k + 1, 0]  # type: ignore
         plot_matrix(ax, W_in_k, f"W_in_k, k={k}", "Neuron index", "Embedding index")
         W_out_k = mlp.linear2.subnetwork_params[k].T
-        ax = axs[k, 1]  # type: ignore
+        ax = axs[k + 1, 1]  # type: ignore
         plot_matrix(ax, W_out_k, f"W_out_k.T, k={k}", "Neuron index", "")
     if out_dir is not None:
         fig.savefig(out_dir / f"matrices_l0_s{step}.png", dpi=300)
@@ -283,6 +300,17 @@ def get_model_and_dataloader(
             k=config.task_config.k,
             input_biases=input_biases,
         )
+        if config.task_config.handcoded_AB:
+            logger.info("Setting handcoded A and B matrices (!)")
+            non_full_rank_spd_model = PiecewiseFunctionSPDTransformer(
+                n_inputs=piecewise_model.n_inputs,
+                d_mlp=piecewise_model.d_mlp,
+                n_layers=piecewise_model.n_layers,
+                k=config.task_config.k,
+                input_biases=input_biases,
+            )
+            non_full_rank_spd_model.set_handcoded_AB(piecewise_model)
+            piecewise_model_spd.set_handcoded_AB(non_full_rank_spd_model)
     else:
         piecewise_model_spd = PiecewiseFunctionSPDTransformer(
             n_inputs=piecewise_model.n_inputs,
@@ -291,9 +319,10 @@ def get_model_and_dataloader(
             k=config.task_config.k,
             input_biases=input_biases,
         )
-    if config.task_config.handcoded_AB:
-        logger.info("Setting handcoded A and B matrices (!)")
-        piecewise_model_spd.set_handcoded_AB(piecewise_model)
+        if config.task_config.handcoded_AB:
+            logger.info("Setting handcoded A and B matrices (!)")
+            piecewise_model_spd.set_handcoded_AB(piecewise_model)
+
     piecewise_model_spd.to(device)
 
     # Set requires_grad to False for all embeddings and all input biases
