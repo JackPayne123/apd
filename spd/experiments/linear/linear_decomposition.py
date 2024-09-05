@@ -20,10 +20,10 @@ from spd.experiments.linear.models import (
     DeepLinearModel,
 )
 from spd.log import logger
-from spd.models.base import SPDFullRankModel
 from spd.run_spd import Config, DeepLinearConfig, optimize
 from spd.utils import (
     DatasetGeneratedDataLoader,
+    calc_attributions_full_rank,
     calc_attributions_rank_one,
     calc_topk_mask,
     init_wandb,
@@ -53,9 +53,9 @@ def get_run_name(config: Config) -> str:
     return config.wandb_run_name_prefix + run_suffix
 
 
-def plot_multiple_subnetwork_params(
-    model: SPDFullRankModel, step: int, out_dir: Path, **_
-) -> dict[str, plt.Figure]:
+def _plot_multiple_subnetwork_params(
+    model: DeepLinearComponentModel | DeepLinearComponentFullRankModel, step: int
+) -> plt.Figure:
     """Plot each subnetwork parameter matrix."""
     all_params = model.all_subnetwork_params()
     # Each param (of which there are n_layers): [n_instances, k, n_features, n_features]
@@ -90,13 +90,10 @@ def plot_multiple_subnetwork_params(
 
     fig.suptitle(f"Subnetwork Parameters (Step {step})")
     fig.tight_layout()
-    fig.savefig(out_dir / f"subnetwork_params_{step}.png", dpi=300, bbox_inches="tight")
-    plt.close(fig)
-    tqdm.write(f"Saved subnetwork params to {out_dir / f'subnetwork_params_{step}.png'}")
-    return {"subnetwork_params": fig}
+    return fig
 
 
-def plot_inner_acts(
+def _plot_subnetwork_activations_fn(
     batch: Float[Tensor, "batch n_instances n_features"],
     inner_acts: list[Float[Tensor, "batch n_instances k"]],
 ) -> plt.Figure:
@@ -158,8 +155,8 @@ def plot_inner_acts(
     return fig
 
 
-def collect_inner_act_data(
-    model: DeepLinearComponentModel,
+def _collect_permuted_subnetwork_activations(
+    model: DeepLinearComponentModel | DeepLinearComponentFullRankModel,
     device: str,
     topk: float | None = None,
     batch_topk: bool = True,
@@ -167,34 +164,47 @@ def collect_inner_act_data(
     Float[Tensor, "batch n_instances n_features"], list[Float[Tensor, "batch n_instances k"]]
 ]:
     """
-    Collect inner activation data for visualization.
+    Collect subnetwork activations and permute them for visualization.
 
     This function creates a test batch using an identity matrix, passes it through the model,
-    and collects the inner activations. It then permutes the activations to align with the identity.
+    and collects the attributions, and then permutes them to align with the identity.
 
     Args:
-        model (DeepLinearComponentModel): The model to collect data from.
+        model (DeepLinearComponentModel | DeepLinearComponentFullRankModel): The model to collect
+            attributions on.
         device (str): The device to run computations on.
         topk (int): The number of topk indices to use for the forward pass.
 
     Returns:
         - The input test batch (identity matrix expanded over instance dimension).
-        - A list of permuted inner activations for each layer.
+        - A list of permuted attributions for each layer.
 
     """
     test_batch = einops.repeat(
         torch.eye(model.n_features, device=device),
-        "b f -> b i f",
-        i=model.n_instances,
+        "batch n_features -> batch n_instances n_features",
+        n_instances=model.n_instances,
     )
 
-    out, _, test_inner_acts = model(test_batch)
+    out, test_layer_acts, test_inner_acts = model(test_batch)
     if topk is not None:
-        attribution_scores = calc_attributions_rank_one(out=out, inner_acts=test_inner_acts)
+        if isinstance(model, DeepLinearComponentModel):
+            attribution_scores = calc_attributions_rank_one(out=out, inner_acts=test_inner_acts)
+        else:
+            assert isinstance(model, DeepLinearComponentFullRankModel)
+            attribution_scores = calc_attributions_full_rank(
+                out=out, inner_acts=test_inner_acts, layer_acts=test_layer_acts
+            )
         topk_mask = calc_topk_mask(attribution_scores, topk, batch_topk=batch_topk)
 
         test_inner_acts = model.forward_topk(test_batch, topk_mask=topk_mask)[-1]
-        assert len(test_inner_acts) == model.n_param_matrices
+
+    # Full rank has an extra n_features dimension which we sum over
+    if isinstance(model, DeepLinearComponentFullRankModel):
+        for i in range(len(test_inner_acts)):
+            test_inner_acts[i] = einops.einsum(
+                test_inner_acts[i], "batch n_instances k n_features -> batch n_instances k"
+            )
 
     test_inner_acts_permuted = []
     for layer in range(model.n_layers):
@@ -208,7 +218,7 @@ def collect_inner_act_data(
     return test_batch, test_inner_acts_permuted
 
 
-def plot_subnetwork_activations(
+def make_linear_plots(
     model: DeepLinearComponentModel,
     step: int,
     out_dir: Path | None,
@@ -217,15 +227,24 @@ def plot_subnetwork_activations(
     batch_topk: bool,
     **_,
 ) -> dict[str, plt.Figure]:
-    test_batch, test_inner_acts = collect_inner_act_data(model, device, topk, batch_topk=batch_topk)
+    test_batch, test_inner_acts = _collect_permuted_subnetwork_activations(
+        model, device, topk, batch_topk=batch_topk
+    )
 
-    fig = plot_inner_acts(batch=test_batch, inner_acts=test_inner_acts)
+    act_fig = _plot_subnetwork_activations_fn(batch=test_batch, inner_acts=test_inner_acts)
     if out_dir is not None:
-        fig.savefig(out_dir / f"inner_acts_{step}.png")
-    plt.close(fig)
+        act_fig.savefig(out_dir / f"inner_acts_{step}.png")
+    plt.close(act_fig)
+
+    param_fig = _plot_multiple_subnetwork_params(model, step)
+    if out_dir is not None:
+        param_fig.savefig(out_dir / f"subnetwork_params_{step}.png", dpi=300, bbox_inches="tight")
+    plt.close(param_fig)
+
     if out_dir is not None:
         tqdm.write(f"Saved inner_acts to {out_dir / f'inner_acts_{step}.png'}")
-    return {"inner_acts": fig}
+        tqdm.write(f"Saved subnetwork_params to {out_dir / f'subnetwork_params_{step}.png'}")
+    return {"inner_acts": act_fig, "subnetwork_params": param_fig}
 
 
 def main(
@@ -298,9 +317,7 @@ def main(
         device=device,
         dataloader=dataloader,
         pretrained_model=dl_model,
-        plot_results_fn=plot_subnetwork_activations
-        if isinstance(dlc_model, DeepLinearComponentModel)
-        else plot_multiple_subnetwork_params,
+        plot_results_fn=make_linear_plots,
     )
 
     if config.wandb_project:
