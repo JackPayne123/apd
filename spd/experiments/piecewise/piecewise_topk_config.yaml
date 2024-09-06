@@ -1,17 +1,18 @@
 wandb_project: spd-piecewise
 wandb_run_name: null
-wandb_run_name_prefix: ""
+wandb_run_name_prefix: "ml_"
 seed: 0
-topk: 0.625
+topk: 0.27
 batch_topk: true
-param_match_coeff: 5.0
-topk_recon_coeff: 0.1
-topk_l2_coeff: 1.0
+param_match_coeff: 2.0
+topk_recon_coeff: 0.5
+topk_l2_coeff: 0.2
 lp_sparsity_coeff: null
 out_recon_coeff: null
-pnorm: 0.9
+pnorm: null
+full_rank: false
 lr: 0.01
-batch_size: 2048
+batch_size: 2000
 steps: 50_000
 print_freq: 500
 image_freq: 50_000
@@ -22,12 +23,12 @@ unit_norm_matrices: false
 lr_schedule: cosine
 task_config:
   task_name: piecewise
-  n_functions: 10
-  neurons_per_function: 10 #todo
-  n_layers: 1
+  n_functions: 4
+  neurons_per_function: 10
+  n_layers: 2
   feature_probability: 0.05
   range_min: 0
   range_max: 5
-  k: 10
+  k: 4
   simple_bias: false
   handcoded_AB: false
