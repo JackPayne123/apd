@@ -31,20 +31,24 @@ wandb.require("core")
 
 def get_run_name(config: Config, task_config: TMSConfig) -> str:
     """Generate a run name based on the config."""
+    run_suffix = ""
     if config.wandb_run_name:
         run_suffix = config.wandb_run_name
     else:
-        run_suffix = (
-            f"lr{config.lr}_"
-            f"p{config.pnorm}_"
-            f"topk{config.topk}_"
-            f"topkrecon{config.topk_recon_coeff}_"
-            f"lpsp{config.lp_sparsity_coeff}_"
-            f"topkl2_{config.topk_l2_coeff}_"
-            f"bs{config.batch_size}_"
-            f"ft{task_config.n_features}_"
-            f"hid{task_config.n_hidden}"
-        )
+        if config.pnorm is not None:
+            run_suffix += f"p{config.pnorm}_"
+        if config.lp_sparsity_coeff is not None:
+            run_suffix += f"lpsp{config.lp_sparsity_coeff}_"
+        if config.topk is not None:
+            run_suffix += f"topk{config.topk}_"
+        if config.topk_recon_coeff is not None:
+            run_suffix += f"topkrecon{config.topk_recon_coeff}_"
+        if config.topk_l2_coeff is not None:
+            run_suffix += f"topkl2_{config.topk_l2_coeff}_"
+        run_suffix += f"lr{config.lr}_"
+        run_suffix += f"bs{config.batch_size}_"
+        run_suffix += f"ft{task_config.n_features}_"
+        run_suffix += f"hid{task_config.n_hidden}"
     return config.wandb_run_name_prefix + run_suffix
 
 
@@ -98,7 +102,6 @@ def plot_subnetwork_params(
                 ax.set_xlabel(f"Inst {i}", rotation=45, ha="right")
 
     fig.suptitle(f"Subnetwork Parameters (Step {step})")
-    fig.tight_layout()
     fig.savefig(out_dir / f"subnetwork_params_{step}.png", dpi=300, bbox_inches="tight")
     plt.close(fig)
     tqdm.write(f"Saved subnetwork params to {out_dir / f'subnetwork_params_{step}.png'}")
