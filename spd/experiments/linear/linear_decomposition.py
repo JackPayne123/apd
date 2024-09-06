@@ -89,7 +89,6 @@ def _plot_multiple_subnetwork_params(
                     ax.set_xlabel(f"Inst {inst_idx} Param {param_idx}", rotation=0, ha="center")
 
     fig.suptitle(f"Subnetwork Parameters (Step {step})")
-    fig.tight_layout()
     return fig
 
 
