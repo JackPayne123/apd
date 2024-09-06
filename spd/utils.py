@@ -308,7 +308,7 @@ def calc_attributions_rank_one_per_layer(
         for param_matrix_idx in range(len(inner_acts)):
             layer_attribution_scores[param_matrix_idx] += (
                 feature_grads[param_matrix_idx] * inner_acts[param_matrix_idx]
-            )
+            ).pow(2)
 
     return layer_attribution_scores
 
@@ -400,7 +400,7 @@ def calc_attributions_full_rank_per_layer(
                 grad_layer_acts[param_matrix_idx].detach(),
                 inner_acts[param_matrix_idx],
                 "... d_out ,... k d_out -> ... k",
-            )
+            ).pow(2)
 
     return layer_attribution_scores
 
