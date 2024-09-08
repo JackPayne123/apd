@@ -9,7 +9,6 @@ topk_recon_coeff: 0.1
 topk_l2_coeff: 1.0
 lp_sparsity_coeff: null
 out_recon_coeff: null
-pnorm: 0.9
 lr: 0.01
 batch_size: 2048
 steps: 50_000

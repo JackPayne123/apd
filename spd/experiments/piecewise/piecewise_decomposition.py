@@ -244,21 +244,22 @@ def get_run_name(config: Config) -> str:
         run_suffix = config.wandb_run_name
     else:
         assert isinstance(config.task_config, PiecewiseConfig)
+        run_suffix += f"seed{config.seed}_"
         if config.pnorm is not None:
-            run_suffix += f"p{config.pnorm}_"
+            run_suffix += f"p{config.pnorm:.4f}_"
         if config.lp_sparsity_coeff is not None:
-            run_suffix += f"lpsp{config.lp_sparsity_coeff}_"
+            run_suffix += f"lpsp{config.lp_sparsity_coeff:.4f}_"
         if config.topk is not None:
-            run_suffix += f"topk{config.topk}_"
+            run_suffix += f"topk{config.topk:.4f}_"
         if config.topk_recon_coeff is not None:
-            run_suffix += f"topkrecon{config.topk_recon_coeff}_"
+            run_suffix += f"topkrecon{config.topk_recon_coeff:.4f}_"
         if config.topk_l2_coeff is not None:
-            run_suffix += f"topkl2_{config.topk_l2_coeff}_"
-        run_suffix += f"lr{config.lr}_"
-        run_suffix += f"bs{config.batch_size}"
-        run_suffix += f"lay{config.task_config.n_layers}_"
+            run_suffix += f"topkl2_{config.topk_l2_coeff:.4f}_"
         if config.task_config.handcoded_AB:
-            run_suffix += "_hAB"
+            run_suffix += "hAB_"
+        run_suffix += f"lr{config.lr:.4f}_"
+        run_suffix += f"bs{config.batch_size}"
+        run_suffix += f"lay{config.task_config.n_layers}"
 
     return config.wandb_run_name_prefix + run_suffix
 
