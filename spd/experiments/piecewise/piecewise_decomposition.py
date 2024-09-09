@@ -245,6 +245,8 @@ def get_run_name(config: Config) -> str:
     else:
         assert isinstance(config.task_config, PiecewiseConfig)
         run_suffix += f"seed{config.seed}_"
+        if config.task_config.handcoded_seed is not None:
+            run_suffix += f"hc-seed{config.task_config.handcoded_seed}_"
         if config.pnorm is not None:
             run_suffix += f"p{config.pnorm:.4f}_"
         if config.lp_sparsity_coeff is not None:
