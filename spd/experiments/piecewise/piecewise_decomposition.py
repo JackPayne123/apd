@@ -245,21 +245,21 @@ def get_run_name(config: Config) -> str:
     else:
         assert isinstance(config.task_config, PiecewiseConfig)
         run_suffix += f"seed{config.seed}_"
-        if config.task_config.handcoded_seed is not None:
-            run_suffix += f"hc-seed{config.task_config.handcoded_seed}_"
+        if config.task_config.target_seed is not None:
+            run_suffix += f"target-seed{config.task_config.target_seed}_"
         if config.pnorm is not None:
-            run_suffix += f"p{config.pnorm:.4f}_"
+            run_suffix += f"p{config.pnorm:.2e}_"
         if config.lp_sparsity_coeff is not None:
-            run_suffix += f"lpsp{config.lp_sparsity_coeff:.4f}_"
+            run_suffix += f"lpsp{config.lp_sparsity_coeff:.2e}_"
         if config.topk is not None:
-            run_suffix += f"topk{config.topk:.4f}_"
+            run_suffix += f"topk{config.topk:.2e}_"
         if config.topk_recon_coeff is not None:
-            run_suffix += f"topkrecon{config.topk_recon_coeff:.4f}_"
+            run_suffix += f"topkrecon{config.topk_recon_coeff:.2e}_"
         if config.topk_l2_coeff is not None:
-            run_suffix += f"topkl2_{config.topk_l2_coeff:.4f}_"
+            run_suffix += f"topkl2_{config.topk_l2_coeff:.2e}_"
         if config.task_config.handcoded_AB:
             run_suffix += "hAB_"
-        run_suffix += f"lr{config.lr:.4f}_"
+        run_suffix += f"lr{config.lr:.2e}_"
         run_suffix += f"bs{config.batch_size}"
         run_suffix += f"lay{config.task_config.n_layers}"
 
@@ -278,13 +278,13 @@ def get_model_and_dataloader(
 ]:
     """Set up the piecewise models and dataset."""
     assert isinstance(config.task_config, PiecewiseConfig)
-    handcoded_seed = (
-        config.task_config.handcoded_seed
-        if config.task_config.handcoded_seed is not None
+    target_seed = (
+        config.task_config.target_seed
+        if config.task_config.target_seed is not None
         else config.seed
     )
     # Set seed for function generation and handcoded parameter setting
-    set_seed(handcoded_seed)
+    set_seed(target_seed)
     functions, function_params = generate_trig_functions(config.task_config.n_functions)
 
     if out_dir:

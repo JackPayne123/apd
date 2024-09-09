@@ -63,7 +63,7 @@ class PiecewiseConfig(BaseModel):
     range_min: float
     range_max: float
     k: PositiveInt
-    handcoded_seed: int | None = None
+    target_seed: int | None = None
     simple_bias: bool = False
     handcoded_AB: bool = False
 
