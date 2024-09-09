@@ -481,6 +481,7 @@ class PiecewiseFunctionTransformer(Model):
         d_mlp: int,
         n_layers: int,
         d_embed: int | None = None,
+        handcoded: bool = True,
     ):
         super().__init__()
         self.n_inputs = n_inputs
@@ -501,9 +502,17 @@ class PiecewiseFunctionTransformer(Model):
         self.W_E = nn.Linear(n_inputs, self.d_embed, bias=False)
         self.W_U = nn.Linear(self.d_embed, self.n_outputs, bias=False)
 
-        initialize_embeds(self.W_E, self.W_U, n_inputs, self.d_embed, self.superposition)
+        self.handcoded = handcoded
 
-        self.mlps = nn.ModuleList([MLP(d_model=self.d_embed, d_mlp=d_mlp) for _ in range(n_layers)])
+        if self.handcoded:
+            initialize_embeds(self.W_E, self.W_U, n_inputs, self.d_embed, self.superposition)
+
+        self.mlps = nn.ModuleList(
+            [
+                MLP(d_model=self.d_embed, d_mlp=d_mlp, initialise_zero=self.handcoded)
+                for _ in range(n_layers)
+            ]
+        )
 
     def forward(self, x: Tensor) -> Tensor:
         residual = self.W_E(x)
@@ -543,7 +552,7 @@ class PiecewiseFunctionTransformer(Model):
         neurons_per_function = neurons_per_function
         d_mlp = neurons_per_function * len(functions) // n_layers
         d_embed = n_inputs + 1
-        model = cls(n_inputs=n_inputs, d_mlp=d_mlp, n_layers=n_layers)
+        model = cls(n_inputs=n_inputs, d_mlp=d_mlp, n_layers=n_layers, handcoded=True)
 
         assert len(functions) == d_embed - 2
         assert len(functions) == n_inputs - 1
