@@ -276,6 +276,13 @@ def get_model_and_dataloader(
 ]:
     """Set up the piecewise models and dataset."""
     assert isinstance(config.task_config, PiecewiseConfig)
+    handcoded_seed = (
+        config.task_config.handcoded_seed
+        if config.task_config.handcoded_seed is not None
+        else config.seed
+    )
+    # Set seed for function generation and handcoded parameter setting
+    set_seed(handcoded_seed)
     functions, function_params = generate_trig_functions(config.task_config.n_functions)
 
     if out_dir:
@@ -298,6 +305,8 @@ def get_model_and_dataloader(
         piecewise_model.mlps[i].input_layer.bias.detach().clone()
         for i in range(piecewise_model.n_layers)
     ]
+
+    set_seed(config.seed)
     if config.full_rank:
         piecewise_model_spd = PiecewiseFunctionSPDFullRankTransformer(
             n_inputs=piecewise_model.n_inputs,
