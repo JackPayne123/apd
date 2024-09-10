@@ -25,7 +25,8 @@ def initialize_embeds(
 ):
     if torch_gen is None:
         torch_gen = torch.Generator()
-    W_E.weight.data = torch.zeros(d_embed, n_inputs)
+    assert W_E.weight.shape == (d_embed, n_inputs), f"Shape of W_E: {W_E.weight.shape}"
+    W_E.weight.data[:, :] = torch.zeros(d_embed, n_inputs)
     W_E.weight.data[0, 0] = 1.0
     num_functions = n_inputs - 1
     d_control = d_embed - 2
@@ -101,13 +102,16 @@ class PiecewiseLinear(nn.Module):
         return x
 
     def plot(self, ax: plt.Axes, start: float, end: float, num_points: int):
-        x = np.linspace(start, end, num_points)
-        y = np.array([self.f(x) for x in x])
-        ax.plot(x, y, label="f(x)")
+        xs = torch.linspace(start, end, num_points)
+        ys = np.array([self.f(x).item() for x in xs])
+        ax.plot(xs.numpy(), ys, label="f(x)")
         # print("input shape", torch.tensor(x, dtype=torch.float32).unsqueeze(1).shape)
         ax.plot(
-            x,
-            self.forward(torch.tensor(x, dtype=torch.float32).unsqueeze(1)).detach().numpy(),
+            xs,
+            self.forward(torch.tensor(xs, dtype=torch.float32).unsqueeze(1))
+            .clone()
+            .detach()
+            .numpy(),
             label="NN(x)",
         )
         ax.legend()
@@ -133,7 +137,7 @@ class ControlledPiecewiseLinear(nn.Module):
         functions: Sequence[Callable[[Float[Tensor, " n_inputs"]], Float[Tensor, " n_inputs"]]],
         start: float,
         end: float,
-        num_neurons: int,
+        neurons_per_function: int,
         d_control: int,
         simple_bias: bool,
         control_W_E: torch.Tensor | None = None,
@@ -146,16 +150,16 @@ class ControlledPiecewiseLinear(nn.Module):
         self.num_functions = len(functions)
         self.start = start
         self.end = end
-        self.num_neurons = num_neurons
+        self.neurons_per_function = neurons_per_function
         self.suppression_size = suppression_size
         self.d_control = d_control
         self.control_W_E = control_W_E
         self.input_layer = nn.Linear(
-            self.d_control + 1, self.num_functions * self.num_neurons, bias=True
+            self.d_control + 1, self.num_functions * self.neurons_per_function, bias=True
         )
         self.relu = nn.ReLU()
         self.output_layer = nn.Linear(
-            self.num_functions * self.num_neurons, self.num_functions, bias=True
+            self.num_functions * self.neurons_per_function, self.num_functions, bias=True
         )
         self.initialise_params(rng, torch_gen, simple_bias)
 
@@ -178,43 +182,44 @@ class ControlledPiecewiseLinear(nn.Module):
         ), "control_W_E should have at most num_functions rows"
         assert self.d_control == self.control_W_E.shape[1], "control_W_E should have d_control cols"
         self.piecewise_linears = [
-            PiecewiseLinear(f, self.start, self.end, self.num_neurons) for f in self.functions
+            PiecewiseLinear(f, self.start, self.end, self.neurons_per_function)
+            for f in self.functions
         ]
 
         # initialise all weights to 0
         self.input_layer.weight.data = torch.zeros(
-            self.num_functions * self.num_neurons, self.d_control + 1
+            self.num_functions * self.neurons_per_function, self.d_control + 1
         )
         self.output_layer.weight.data = torch.zeros(
-            self.num_functions, self.num_functions * self.num_neurons
+            self.num_functions, self.num_functions * self.neurons_per_function
         )
 
         for i in range(self.num_functions):
             piecewise_linear = self.piecewise_linears[i]
-            self.input_layer.weight.data[i * self.num_neurons : (i + 1) * self.num_neurons, 0] = (
-                piecewise_linear.input_layer.weight.data.squeeze()
-            )
+            self.input_layer.weight.data[
+                i * self.neurons_per_function : (i + 1) * self.neurons_per_function, 0
+            ] = piecewise_linear.input_layer.weight.data.squeeze()
             if simple_bias:
                 self.input_layer.bias.data[
-                    i * self.num_neurons : (i + 1) * self.num_neurons
+                    i * self.neurons_per_function : (i + 1) * self.neurons_per_function
                 ] = -self.suppression_size
                 self.input_layer.weight.data[
-                    i * self.num_neurons : (i + 1) * self.num_neurons, 1:
+                    i * self.neurons_per_function : (i + 1) * self.neurons_per_function, 1:
                 ] += self.control_W_E[i] * (
                     self.suppression_size + piecewise_linear.input_layer.bias.data.unsqueeze(1)
                 )
             else:
-                self.input_layer.bias.data[i * self.num_neurons : (i + 1) * self.num_neurons] = (
-                    piecewise_linear.input_layer.bias.data - self.suppression_size
-                )
+                self.input_layer.bias.data[
+                    i * self.neurons_per_function : (i + 1) * self.neurons_per_function
+                ] = piecewise_linear.input_layer.bias.data - self.suppression_size
                 self.input_layer.weight.data[
-                    i * self.num_neurons : (i + 1) * self.num_neurons, 1:
+                    i * self.neurons_per_function : (i + 1) * self.neurons_per_function, 1:
                 ] = self.control_W_E[i] * self.suppression_size
 
             self.output_layer.bias.data[i] = piecewise_linear.output_layer.bias.data
-            self.output_layer.weight.data[i, i * self.num_neurons : (i + 1) * self.num_neurons] = (
-                piecewise_linear.output_layer.weight.data.squeeze()
-            )
+            self.output_layer.weight.data[
+                i, i * self.neurons_per_function : (i + 1) * self.neurons_per_function
+            ] = piecewise_linear.output_layer.weight.data.squeeze()
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         control_bits = x[:, 1:]
@@ -237,21 +242,21 @@ class ControlledPiecewiseLinear(nn.Module):
         # make a figure with self.num_functions subplots
         fig, axs = plt.subplots(self.num_functions, 1, figsize=(10, 5 * self.num_functions))
         assert isinstance(axs, Iterable)
-        x = np.linspace(start, end, num_points)
+        xs = np.linspace(start, end, num_points)
         if control_bits is None:
-            control_bits = torch.zeros(len(x), self.num_functions)
+            control_bits = torch.ones(len(xs), self.num_functions)
         if control_bits.dim() == 1:
-            control_bits = control_bits.unsqueeze(0).repeat(len(x), 1)
+            control_bits = control_bits.unsqueeze(0).repeat(len(xs), 1)
         assert control_bits.shape[1] == self.num_functions
-        assert control_bits.shape[0] == len(x)
-        input = torch.tensor(x, dtype=torch.float32).unsqueeze(1)
+        assert control_bits.shape[0] == len(xs)
+        input = torch.tensor(xs, dtype=torch.float32).unsqueeze(1)
         input_with_control = torch.cat([input, control_bits], dim=1)
         outputs = self.forward(input_with_control).detach().numpy()
         for i in range(self.num_functions):
-            target = np.array([self.functions[i](x) for x in x])
-            axs[i].plot(x, target, label="f(x)")
+            target = np.array([self.functions[i](torch.tensor(x)) for x in xs])
+            axs[i].plot(xs, target, label="f(x)")
             # print("input shape", torch.tensor(x, dtype=torch.float32).unsqueeze(1).shape)
-            axs[i].plot(x, outputs[:, i], label="NN(x)")
+            axs[i].plot(xs, outputs[:, i], label="NN(x)")
             axs[i].legend()
             axs[i].set_title(f"Piecewise Linear Approximation of function {i}")
             axs[i].set_xlabel("x")
@@ -338,6 +343,7 @@ class ControlledResNet(nn.Module):
         if self.d_control == self.num_functions:
             self.control_W_E = torch.eye(self.d_control)
         else:
+            print("WARNING: generating random W_E")
             random_matrix = torch.randn(self.d_control, self.num_functions, generator=torch_gen)
             # normalise rows
             self.control_W_E = random_matrix / random_matrix.norm(dim=1).unsqueeze(1)
@@ -422,7 +428,7 @@ class ControlledResNet(nn.Module):
             x = x + self.mlps[i](x)
         return x
 
-    def plot(
+    def plot_summed(
         self,
         start: float,
         end: float,
@@ -432,19 +438,19 @@ class ControlledResNet(nn.Module):
     ):
         # make a figure
         fig, ax = plt.subplots(figsize=(10, 10))
-        x = np.linspace(start, end, num_points)
+        xs = np.linspace(start, end, num_points)
         if control_bits is None:
-            control_bits = torch.zeros(self.num_functions)
+            control_bits = torch.ones(self.num_functions)
         assert control_bits.shape == (
             self.num_functions,
         ), "control_bits should be a 1D tensor for the plot function"
-        input_control_bits = control_bits.unsqueeze(0).repeat(len(x), 1)
+        input_control_bits = control_bits.unsqueeze(0).repeat(len(xs), 1)
 
-        target = np.zeros((self.num_functions, len(x)))
+        target = np.zeros((self.num_functions, len(xs)))
         for i in range(self.num_functions):
-            target[i] = np.array([self.functions[i](x) for x in x])
+            target[i] = np.array([self.functions[i](torch.tensor(x)) for x in xs])
         target = torch.einsum("fb,f -> b", torch.tensor(target, dtype=torch.float32), control_bits)
-        ax.plot(x, target, label="f(x)", linewidth=8)
+        ax.plot(xs, target, label="f(x)", linewidth=8)
 
         if layers is None:
             layers = list(range(self.n_layers + 1))
@@ -453,14 +459,14 @@ class ControlledResNet(nn.Module):
         for layer in layers:
             outputs = (
                 self.partial_forward(
-                    torch.tensor(x, dtype=torch.float32).unsqueeze(1),
+                    torch.tensor(xs, dtype=torch.float32).unsqueeze(1),
                     layer=layer,
                     control_bits=input_control_bits,
                 )
                 .detach()
                 .numpy()
             )
-            ax.plot(x, outputs[:, -1], label=f"layer {layer} NN(x)")
+            ax.plot(xs, outputs[:, -1], label=f"layer {layer} NN(x)")
 
         ax.legend()
 
@@ -471,6 +477,36 @@ class ControlledResNet(nn.Module):
         ax.axvline(x=self.end, color="r", linestyle="--")
         # set ylim between min and max value of target
         ax.set_ylim([target.min().item() - 2, target.max().item() + 2])  # type: ignore
+        plt.show()
+
+    def plot(
+        self,
+        start: float,
+        end: float,
+        num_points: int,
+        functions: list[Callable[[Float[Tensor, " n_inputs"]], Float[Tensor, " n_inputs"]]]
+        | None = None,
+    ):
+        fig, axs = plt.subplots(self.num_functions, 1, figsize=(10, 5 * self.num_functions))
+        assert isinstance(axs, Iterable)
+        xs = torch.linspace(start, end, num_points)
+
+        for i in range(self.num_functions):
+            input_with_control = torch.zeros(num_points, self.num_functions + 1)
+            input_with_control[:, 0] = xs
+            input_with_control[:, i + 1] = 1.0
+            outputs = self.forward(input_with_control).detach().numpy()
+            print(outputs.shape, input_with_control.shape)
+            if functions is not None:
+                target = [functions[i](x) for x in xs]
+                axs[i].plot(xs, target, label="f(x)")
+            axs[i].plot(xs, outputs[:, -1], label="NN(x)")
+            axs[i].legend()
+            axs[i].set_title(f"Piecewise Linear Approximation of function {i}")
+            axs[i].set_xlabel("x")
+            axs[i].set_ylabel("y")
+            axs[i].axvline(x=start, color="r", linestyle="--")
+            axs[i].axvline(x=end, color="r", linestyle="--")
         plt.show()
 
 
@@ -527,6 +563,7 @@ class PiecewiseFunctionTransformer(Model):
         n_layers: int = 4,
         range_min: float = 0,
         range_max: float = 5,
+        suppression_size: int = 100,
         seed: int | None = None,
         simple_bias: bool = False,
     ) -> "PiecewiseFunctionTransformer":
@@ -555,7 +592,7 @@ class PiecewiseFunctionTransformer(Model):
             n_layers=n_layers,
             d_control=d_embed - 2,  # no superposition
             simple_bias=simple_bias,
-            suppression_size=int(range_max + 1),
+            suppression_size=suppression_size,
             rng=rng,
             torch_gen=torch_gen,
         )
@@ -565,14 +602,13 @@ class PiecewiseFunctionTransformer(Model):
         # the control_W_E of the ControlledResNet class is just a part of the W_E of this class. In
         # particular it is the part that is sliced in by the random matrix (or identity)
         initialize_embeds(model.W_E, model.W_U, n_inputs, d_embed, model.superposition)
-
+        print(model.W_E.weight, model.W_U.weight)
         for i, mlp in enumerate(handcoded_model.mlps):
-            model.mlps[i].input_layer.weight.data = mlp.input_layer.weight
-            model.mlps[i].output_layer.weight.data = mlp.output_layer.weight
-
-            model.mlps[i].input_layer.bias.data = mlp.input_layer.bias
+            model.mlps[i].input_layer.weight.data[:, :] = mlp.input_layer.weight
+            model.mlps[i].output_layer.weight.data[:, :] = mlp.output_layer.weight
+            model.mlps[i].input_layer.bias.data[:] = mlp.input_layer.bias
             assert torch.all(mlp.output_layer.bias.data == 0), "Output layer bias should be zero"
-            model.mlps[i].output_layer.bias.data = mlp.output_layer.bias
+            model.mlps[i].output_layer.bias.data[:] = mlp.output_layer.bias
 
         return model
 
@@ -586,17 +622,17 @@ class PiecewiseFunctionTransformer(Model):
     ):
         fig, axs = plt.subplots(self.num_functions, 1, figsize=(10, 5 * self.num_functions))
         assert isinstance(axs, Iterable)
-        x = torch.linspace(start, end, num_points)
+        xs = torch.linspace(start, end, num_points)
 
         for i in range(self.num_functions):
             input_with_control = torch.zeros(num_points, self.n_inputs)
-            input_with_control[:, 0] = x
+            input_with_control[:, 0] = xs
             input_with_control[:, i + 1] = 1.0
             outputs = self.forward(input_with_control).detach().numpy()
             if functions is not None:
-                target = [functions[i](xi) for xi in x]
-                axs[i].plot(x, target, label="f(x)")
-            axs[i].plot(x, outputs[:, 0], label="NN(x)")
+                target = [functions[i](x) for x in xs]
+                axs[i].plot(xs, target, label="f(x)")
+            axs[i].plot(xs, outputs[:, 0], label="NN(x)")
             axs[i].legend()
             axs[i].set_title(f"Piecewise Linear Approximation of function {i}")
             axs[i].set_xlabel("x")
@@ -884,6 +920,36 @@ class PiecewiseFunctionSPDTransformer(SPDModel):
         for mlp in self.mlps:
             remove_grad_parallel_to_subnetwork_vecs(mlp.linear1.A.data, mlp.linear1.A.grad)
             remove_grad_parallel_to_subnetwork_vecs(mlp.linear2.A.data, mlp.linear2.A.grad)
+
+
+def plot_SPD_transformer(
+    model: PiecewiseFunctionSPDTransformer,
+    start: float,
+    end: float,
+    num_points: int,
+    functions: list[Callable[[Float[Tensor, " n_inputs"]], Float[Tensor, " n_inputs"]]]
+    | None = None,
+):
+    fig, axs = plt.subplots(model.num_functions, 1, figsize=(10, 5 * model.num_functions))
+    assert isinstance(axs, Iterable)
+    xs = torch.linspace(start, end, num_points)
+
+    for i in range(model.num_functions):
+        input_with_control = torch.zeros(num_points, model.n_inputs)
+        input_with_control[:, 0] = xs
+        input_with_control[:, i + 1] = 1.0
+        outputs = model.forward(input_with_control)[0].detach().numpy()
+        if functions is not None:
+            target = [functions[i](x) for x in xs]
+            axs[i].plot(xs, target, label="f(x)")
+        axs[i].plot(xs, outputs[:, 0], label="NN(x)")
+        axs[i].legend()
+        axs[i].set_title(f"Piecewise Linear Approximation of function {i}")
+        axs[i].set_xlabel("x")
+        axs[i].set_ylabel("y")
+        axs[i].axvline(x=start, color="r", linestyle="--")
+        axs[i].axvline(x=end, color="r", linestyle="--")
+    plt.show()
 
 
 class PiecewiseFunctionSPDFullRankTransformer(SPDFullRankModel):
