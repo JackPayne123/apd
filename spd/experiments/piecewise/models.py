@@ -141,7 +141,7 @@ class ControlledPiecewiseLinear(nn.Module):
         d_control: int,
         simple_bias: bool,
         control_W_E: torch.Tensor | None = None,
-        suppression_size: int = 100,
+        suppression_size: float = 100,
         rng: np.random.Generator | None = None,
         torch_gen: torch.Generator | None = None,
     ):
@@ -308,7 +308,7 @@ class ControlledResNet(nn.Module):
         n_layers: int,
         d_control: int,
         simple_bias: bool = True,
-        suppression_size: int = 100,
+        suppression_size: float = 100,
         rng: np.random.Generator | None = None,
         torch_gen: torch.Generator | None = None,
     ):
@@ -563,7 +563,7 @@ class PiecewiseFunctionTransformer(Model):
         n_layers: int = 4,
         range_min: float = 0,
         range_max: float = 5,
-        suppression_size: int = 100,
+        suppression_size: float | None = 100,
         seed: int | None = None,
         simple_bias: bool = False,
     ) -> "PiecewiseFunctionTransformer":
@@ -584,6 +584,10 @@ class PiecewiseFunctionTransformer(Model):
 
         assert len(functions) == d_embed - 2
         assert len(functions) == n_inputs - 1
+
+        suppression_size = (
+            suppression_size if suppression_size is not None else 2 * (range_max - range_min)
+        )
         handcoded_model = ControlledResNet(
             functions,
             start=range_min,
