@@ -105,7 +105,6 @@ class PiecewiseLinear(nn.Module):
         xs = torch.linspace(start, end, num_points)
         ys = np.array([self.f(x).item() for x in xs])
         ax.plot(xs.numpy(), ys, label="f(x)")
-        # print("input shape", torch.tensor(x, dtype=torch.float32).unsqueeze(1).shape)
         ax.plot(
             xs,
             self.forward(torch.tensor(xs, dtype=torch.float32).unsqueeze(1))
