@@ -271,16 +271,14 @@ def plot_model_functions(
     else:
         attribution_scores = calc_attributions_rank_one(out=model_output_spd, inner_acts=inner_acts)
     topk_mask = calc_topk_mask(attribution_scores, topk, batch_topk=batch_topk)
-    topk_mask = topk_mask.cpu().detach().numpy()
-    out_topk, _, inner_acts_topk = spd_model.forward_topk(
-        input_array, topk_mask=torch.tensor(topk_mask, device=device)
-    )
+    out_topk, _, inner_acts_topk = spd_model.forward_topk(input_array, topk_mask=topk_mask)
     assert len(inner_acts_topk) == spd_model.n_param_matrices
 
     if print_info:
         # Check if, ever, there are cases where the control bit is 1 but the topk_mask is False.
         # We check this by calculating whether topk_mask is True OR control bit is 0.
         control_bits = input_array[:, 1:].cpu().detach().numpy()
+        topk_mask = topk_mask.cpu().detach().numpy()
         topk_mask_control_bits = topk_mask | (control_bits == 0)
         print(
             f"How often is topk_mask True or control_bits == 0: {topk_mask_control_bits.mean():.3%}"
