@@ -81,6 +81,9 @@ def plot_vectors(subnet: Float[Tensor, "n_instances n_subnets n_features n_hidde
             for spine in ["bottom", "left"]:
                 ax.spines[spine].set_position("center")
 
+            if j == n_subnets:
+                ax.set_xlabel(f"Instance {i}", rotation=0, ha="center", labelpad=60)
+
     return fig
 
 
