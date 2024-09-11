@@ -55,7 +55,6 @@ def plot_components_fullrank(
     step: int,
     out_dir: Path | None,
     slow_images: bool,
-    **_,
 ) -> dict[str, plt.Figure]:
     # Not implemented attribution score plots, or multi-layer plots, yet.
     assert model.n_layers == 1
@@ -109,7 +108,6 @@ def plot_components(
     out_dir: Path | None,
     device: str,
     slow_images: bool,
-    **_,
 ) -> dict[str, plt.Figure]:
     # Create a batch of inputs with different control bits active
     x_val = torch.tensor(2.5, device=device)

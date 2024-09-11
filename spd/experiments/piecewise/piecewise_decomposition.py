@@ -43,6 +43,7 @@ def piecewise_plot_results_fn(
     topk: float,
     batch_topk: bool,
     slow_images: bool,
+    **_,
 ):
     # Plot functions
     fig_dict_1 = plot_model_functions(
