@@ -20,8 +20,9 @@ from spd.run_spd import (
     Config,
     PiecewiseConfig,
 )
+from spd.utils import REPO_ROOT
 
-pretrained_path = Path("demo_spd_model/model_50000.pth")
+pretrained_path = REPO_ROOT / "spd/experiments/piecewise/demo_spd_model/model_50000.pth"
 with open(pretrained_path.parent / "config.json") as f:
     config_dict = json.load(f)
     # For these tests we run with unusual data where there's always 1 control bit active, which
