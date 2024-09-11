@@ -292,11 +292,11 @@ def calc_topk_l2_full_rank(
     n_instances = topk_mask.shape[1] if topk_mask.ndim == 3 else None
     accumulate_shape = (batch_size,) if n_instances is None else (batch_size, n_instances)
 
+    topk_mask = topk_mask.to(subnetwork_params[0].dtype)
     topk_l2_penalty = torch.zeros(accumulate_shape, device=subnetwork_params[0].device)
     for subnetwork_param in subnetwork_params:
         # subnetwork_param: [k, d_in, d_out] or [n_instances, k, d_in, d_out]
         # topk_mask: [batch, k] or [batch, n_instances, k]
-        topk_mask = topk_mask.float()
         topk_params = einops.einsum(
             subnetwork_param, topk_mask, "... k d_in d_out, batch ... k -> batch ... d_in d_out"
         )
@@ -445,7 +445,7 @@ def calc_lp_sparsity_loss_full_rank(
     assert n_param_matrices == len(inner_acts)
     batch = out.shape[0]
     assert batch == layer_acts[0].shape[0] == inner_acts[0].shape[0]
-    attributions = torch.zeros(inner_acts[0].shape[:-1], requires_grad=True)
+    attributions = torch.zeros(inner_acts[0].shape[:-1], requires_grad=True, device=out.device)
     for feature_idx in range(out.shape[-1]):
         grad_layer_acts = torch.autograd.grad(
             out[..., feature_idx].sum(),
@@ -455,7 +455,7 @@ def calc_lp_sparsity_loss_full_rank(
         sparsity_inner = torch.zeros_like(attributions, requires_grad=True)
         for param_matrix_idx in range(n_param_matrices):
             # h_i * grad_h_i
-            sparsity_inner += einops.einsum(
+            sparsity_inner = sparsity_inner + einops.einsum(
                 grad_layer_acts[param_matrix_idx].detach(),
                 inner_acts[param_matrix_idx],
                 "... d_out ,... k d_out -> ... k",
@@ -684,12 +684,11 @@ def optimize(
         ):
             fig_dict = plot_results_fn(
                 model=model,
+                target_model=pretrained_model,
                 step=step,
                 out_dir=out_dir,
                 device=device,
-                topk=config.topk,
-                batch_topk=config.batch_topk,
-                slow_images=config.slow_images,
+                config=config,
             )
             if config.wandb_project:
                 wandb.log(
