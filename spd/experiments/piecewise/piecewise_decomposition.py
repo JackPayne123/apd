@@ -63,7 +63,8 @@ def piecewise_plot_results_fn(
         fig_dict_2 = plot_components(
             model=model, step=step, out_dir=out_dir, device=device, slow_images=slow_images
         )
-    return {**fig_dict_1, **fig_dict_2}
+    # Adjust order of plots on wandb
+    return {**fig_dict_2, **fig_dict_1}
 
 
 def get_run_name(config: Config) -> str:
