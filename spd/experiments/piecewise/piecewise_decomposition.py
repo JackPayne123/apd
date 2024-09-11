@@ -70,6 +70,13 @@ def piecewise_plot_results_fn(
             model=model, step=step, out_dir=out_dir, device=device, slow_images=slow_images
         )
     # Adjust order of plots on wandb
+    fig_dict = {**fig_dict_2, **fig_dict_1}
+    # Save plots to files
+    if out_dir:
+        for k, v in fig_dict.items():
+            out_file = out_dir / f"{k}.png"
+            v.savefig(out_file)
+            print(f"Saved plot to {out_file}")
     return {**fig_dict_2, **fig_dict_1}
 
 

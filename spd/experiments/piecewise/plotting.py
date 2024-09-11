@@ -96,9 +96,6 @@ def plot_components_fullrank(
             W_out_k = mlp.linear2.subnetwork_params[k].T
             ax = axs[k + 1, 1]  # type: ignore
             plot_matrix(ax, W_out_k, f"W_out_k.T, k={k}", "Neuron index", "")
-    if out_dir is not None:
-        fig.savefig(out_dir / f"matrices_layer0_s{step}.png", dpi=300)
-        print(f"saved to {out_dir / f'matrices_layer0_s{step}.png'}")
     return {"matrices_layer0": fig}
 
 
@@ -140,10 +137,6 @@ def plot_components(
         "Subnetwork index",
         "Function index",
     )
-    if out_dir:
-        fig_a.savefig(out_dir / f"attribution_scores_s{step}.png", dpi=300)
-        plt.close(fig_a)
-        tqdm.write(f"Saved attribution scores to {out_dir / f'attribution_scores_s{step}.png'}")
 
     # Figures for A, B, AB of each layer
     n_rows = 3 + model.k if slow_images else 3
