@@ -563,7 +563,7 @@ class PiecewiseFunctionTransformer(Model):
         n_layers: int = 4,
         range_min: float = 0,
         range_max: float = 5,
-        suppression_size: float | None = 100,
+        suppression_size: float | None = None,
         seed: int | None = None,
         simple_bias: bool = False,
     ) -> "PiecewiseFunctionTransformer":
