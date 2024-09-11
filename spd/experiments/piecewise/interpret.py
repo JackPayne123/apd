@@ -49,8 +49,8 @@ assert isinstance(hardcoded_model, PiecewiseFunctionTransformer)
 assert isinstance(
     spd_model, PiecewiseFunctionSPDTransformer | PiecewiseFunctionSPDFullRankTransformer
 )
-# spd_model.set_handcoded_AB(hardcoded_model)
 spd_model.load_state_dict(torch.load(pretrained_path, weights_only=True, map_location="cpu"))
+# spd_model.set_handcoded_AB(hardcoded_model)
 
 
 topk = config.topk
@@ -70,8 +70,6 @@ if topk is not None:
     extra_fig_dict = plot_model_functions(
         spd_model=spd_model,
         target_model=hardcoded_model,
-        topk=topk,
-        batch_topk=batch_topk,
         full_rank=full_rank,
         device=device,
         start=config.task_config.range_min,

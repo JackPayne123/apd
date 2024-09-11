@@ -226,8 +226,6 @@ def plot_components(
 def plot_model_functions(
     spd_model: PiecewiseFunctionSPDTransformer | PiecewiseFunctionSPDFullRankTransformer,
     target_model: PiecewiseFunctionTransformer | None,
-    topk: float,
-    batch_topk: bool,
     full_rank: bool,
     device: str,
     start: float,
@@ -237,6 +235,8 @@ def plot_model_functions(
     fig, axes = plt.subplots(nrows=3, figsize=(12, 12), constrained_layout=True)
     assert isinstance(axes, np.ndarray)
     [ax, ax_attrib, ax_inner] = axes
+    topk = 1
+    batch_topk = False
     fig.suptitle(
         f"Model outputs for each control bit. (Plot with topk={topk} & batch_topk={batch_topk}.\n"
         "This should differ from the training settings, topk>=1 ought to work for plotting.)"
@@ -318,9 +318,9 @@ def plot_model_functions(
             ax.plot(input_xs[s], model_output_hardcoded[s], label=f"cb={cb}", color=color1)
         ax.plot(input_xs[s], model_output_spd[s], ls="-.", color=color2)
         ax.plot(input_xs[s], out_topk[s], ls="--", color=color3)
+        k_cb = attribution_scores[s].mean(dim=0).argmax()
         for k in range(n_functions):
             # Find permutation
-            k_cb = attribution_scores[s].mean(dim=0).argmax()
             if k == k_cb:
                 ax_attrib.plot(
                     input_xs[s], attribution_scores[s][:, k], color=color1, label=f"k={k}"
@@ -328,27 +328,29 @@ def plot_model_functions(
                 assert len(inner_acts) <= 3, "Didn't implement more than 3 SPD 'layers' yet"
                 for j in range(len(inner_acts)):
                     ls = ["-", "--"][j]
-                    ax_inner.plot(
-                        input_xs[s],
-                        inner_acts[j].cpu().detach()[s][:, k],
-                        color=color1,
-                        ls=ls,
-                        label=f"k={k}" if j == 0 else None,
-                    )
+                    if not isinstance(spd_model, PiecewiseFunctionSPDFullRankTransformer):
+                        ax_inner.plot(
+                            input_xs[s],
+                            inner_acts[j].cpu().detach()[s][:, k],
+                            color=color1,
+                            ls=ls,
+                            label=f"k={k}" if j == 0 else None,
+                        )
             else:
                 ax_attrib.plot(input_xs[s], attribution_scores[s][:, k], color=color1, alpha=0.2)
                 for j in range(len(inner_acts)):
                     ls = ["-", "--"][j]
-                    ax_inner.plot(
-                        input_xs[s],
-                        inner_acts[j].cpu().detach()[s][:, k],
-                        color="k",
-                        ls=ls,
-                        lw=0.2,
-                    )
+                    if not isinstance(spd_model, PiecewiseFunctionSPDFullRankTransformer):
+                        ax_inner.plot(
+                            input_xs[s],
+                            inner_acts[j].cpu().detach()[s][:, k],
+                            color="k",
+                            ls=ls,
+                            lw=0.2,
+                        )
     ax_inner.plot([], [], color="C0", label="W_in", ls="-")
     ax_inner.plot([], [], color="C0", label="W_out", ls="--")
-    ax_inner.plot([], [], color="k", label="k!=k_cb", ls="--")
+    ax_inner.plot([], [], color="k", label="k!=k_cb", ls="-", lw=0.2)
 
     # Add some additional (blue) legend lines explaining the different line styles
     if model_output_hardcoded is not None:
@@ -360,7 +362,9 @@ def plot_model_functions(
     ax_attrib.legend(ncol=3)
     ax_attrib.set_yscale("log")
     ax_attrib.set_ylabel("attribution_scores (log)")
-    ax_attrib.set_title("Attributions of each subnetwork for every control bit case")
+    ax_attrib.set_title(
+        "Attributions of each subnetwork for every control bit case (k=k_cb in bold)"
+    )
     ax_inner.legend(ncol=3, loc="upper right")
     ax_inner.set_yscale("symlog", linthresh=1e-3)
     ax_inner.set_ylabel("inner acts (symlog)")

@@ -50,8 +50,6 @@ def piecewise_plot_results_fn(
         fig_dict_1 = plot_model_functions(
             spd_model=model,
             target_model=target_model,
-            topk=1,  # note: the plotting function runs inputs with 1 active input always
-            batch_topk=config.batch_topk,
             full_rank=isinstance(model, PiecewiseFunctionSPDFullRankTransformer),
             device=device,
             start=config.task_config.range_min,
