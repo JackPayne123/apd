@@ -44,22 +44,18 @@ def piecewise_plot_results_fn(
     **_,
 ):
     assert isinstance(config.task_config, PiecewiseConfig)
-    topk = config.topk
-    batch_topk = config.batch_topk
     slow_images = config.slow_images
-    start = config.task_config.range_min
-    stop = config.task_config.range_max
     # Plot functions
-    if topk is not None:
+    if config.topk is not None:
         fig_dict_1 = plot_model_functions(
             spd_model=model,
             target_model=target_model,
-            topk=topk,
-            batch_topk=batch_topk,
+            topk=1,  # note: the plotting function runs inputs with 1 active input always
+            batch_topk=config.batch_topk,
             full_rank=isinstance(model, PiecewiseFunctionSPDFullRankTransformer),
             device=device,
-            start=start,
-            stop=stop,
+            start=config.task_config.range_min,
+            stop=config.task_config.range_max,
             print_info=False,
         )
     else:

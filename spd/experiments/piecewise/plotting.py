@@ -242,7 +242,10 @@ def plot_model_functions(
     print_info: bool = False,
 ) -> dict[str, plt.Figure]:
     fig, ax = plt.subplots(figsize=(10, 6))
-    fig.suptitle(f"Model functions (topk={topk}, batch_topk={batch_topk})")
+    fig.suptitle(
+        f"Model functions (Plot with topk={topk} & batch_topk={batch_topk}. This should)"
+        "differ from the training settings, topk>=1 ought to work for plotting.)"
+    )
     # Get model outputs for simple example data. Create input array with 10_000 rows, 1000
     # rows for each function. Set the 0th column to be linspace(0, 5, 1000) repeated. Set the
     # control bits to [0,1,0,0,...] for the first 1000 rows, [0,0,1,0,...] for the next 1000 rows,

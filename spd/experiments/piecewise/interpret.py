@@ -43,7 +43,9 @@ hardcoded_model, spd_model, dataloader, test_dataloader = get_model_and_dataload
     config, device, out_dir=None
 )
 assert isinstance(hardcoded_model, PiecewiseFunctionTransformer)
-assert isinstance(spd_model, PiecewiseFunctionSPDTransformer)
+assert isinstance(
+    spd_model, PiecewiseFunctionSPDTransformer | PiecewiseFunctionSPDFullRankTransformer
+)
 spd_model.load_state_dict(torch.load(pretrained_path, weights_only=True, map_location="cpu"))
 
 
@@ -65,7 +67,7 @@ if topk is not None:
         spd_model=spd_model,
         target_model=hardcoded_model,
         topk=topk,
-        batch_topk=False,
+        batch_topk=batch_topk,
         full_rank=full_rank,
         device=device,
         start=config.task_config.range_min,
