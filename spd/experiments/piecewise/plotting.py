@@ -100,7 +100,7 @@ def plot_components_fullrank(
     if out_dir is not None:
         fig.savefig(out_dir / f"matrices_l0_s{step}.png", dpi=300)
         print(f"saved to {out_dir / f'matrices_l0_s{step}.png'}")
-    return {"matrices_l0_s{step}": fig}
+    return {"matrices_l0": fig}
 
 
 def plot_components(
@@ -229,7 +229,7 @@ def plot_components(
             plt.close(fig_a)
             tqdm.write(f"Saved matrix analysis to {out_dir / f'matrices_l{n}_s{step}.png'}")
 
-    return {"attrib_scores": fig_a, **{f"matrices_l{n}_s{step}": fig for n, fig in enumerate(figs)}}
+    return {"attrib_scores": fig_a, **{f"matrices_l{n}": fig for n, fig in enumerate(figs)}}
 
 
 def plot_model_functions(
