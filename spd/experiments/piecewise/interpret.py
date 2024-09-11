@@ -53,9 +53,7 @@ full_rank = config.full_rank
 
 if full_rank:
     assert isinstance(spd_model, PiecewiseFunctionSPDFullRankTransformer)
-    fig_dict = plot_components_fullrank(
-        model=spd_model, step=-1, out_dir=None, device=device, slow_images=True
-    )
+    fig_dict = plot_components_fullrank(model=spd_model, step=-1, out_dir=None, slow_images=True)
 else:
     assert isinstance(spd_model, PiecewiseFunctionSPDTransformer)
     fig_dict = plot_components(
