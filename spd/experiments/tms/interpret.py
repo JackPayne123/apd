@@ -31,13 +31,18 @@ subnet = torch.load(pretrained_path, map_location="cpu")["subnetwork_params"]
 
 
 # %%
-def plot_vectors(subnet: Float[Tensor, "n_instances n_subnets n_features n_hidden"]) -> plt.Figure:
+def plot_vectors(
+    subnet: Float[Tensor, "n_instances n_subnets n_features n_hidden"], n_instances: int = 5
+) -> plt.Figure:
     """2D polygon plot of each subnetwork.
 
     Adapted from
     https://colab.research.google.com/github/anthropics/toy-models-of-superposition/blob/main/toy_models.ipynb.
     """
-    n_instances, n_subnets, n_features, n_hidden = subnet.shape
+    n_data_instances, n_subnets, n_features, n_hidden = subnet.shape
+    assert (
+        n_instances <= n_data_instances
+    ), "n_instances must be less than or equal to n_data_instances"
     sel = range(n_instances)
     plt.rcParams["axes.prop_cycle"] = plt.cycler(
         "color",
