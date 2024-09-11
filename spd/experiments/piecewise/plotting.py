@@ -7,7 +7,6 @@ import numpy as np
 import torch
 from matplotlib.colors import CenteredNorm
 from mpl_toolkits.axes_grid1 import make_axes_locatable
-from tqdm import tqdm
 
 from spd.experiments.piecewise.models import (
     PiecewiseFunctionSPDFullRankTransformer,
@@ -214,12 +213,6 @@ def plot_components(
                     "Embedding index",
                     "%.2f",
                 )
-
-        if out_dir:
-            fig.savefig(out_dir / f"matrices_layer{n}_s{step}.png", dpi=300)
-            plt.close(fig_a)
-            tqdm.write(f"Saved matrix analysis to {out_dir / f'matrices_layer{n}_s{step}.png'}")
-
     return {"attrib_scores": fig_a, **{f"matrices_layer{n}": fig for n, fig in enumerate(figs)}}
 
 
