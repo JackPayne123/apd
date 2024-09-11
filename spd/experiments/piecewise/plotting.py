@@ -97,9 +97,9 @@ def plot_components_fullrank(
             ax = axs[k + 1, 1]  # type: ignore
             plot_matrix(ax, W_out_k, f"W_out_k.T, k={k}", "Neuron index", "")
     if out_dir is not None:
-        fig.savefig(out_dir / f"matrices_l0_s{step}.png", dpi=300)
-        print(f"saved to {out_dir / f'matrices_l0_s{step}.png'}")
-    return {"matrices_l0": fig}
+        fig.savefig(out_dir / f"matrices_layer0_s{step}.png", dpi=300)
+        print(f"saved to {out_dir / f'matrices_layer0_s{step}.png'}")
+    return {"matrices_layer0": fig}
 
 
 def plot_components(
@@ -223,11 +223,11 @@ def plot_components(
                 )
 
         if out_dir:
-            fig.savefig(out_dir / f"matrices_l{n}_s{step}.png", dpi=300)
+            fig.savefig(out_dir / f"matrices_layer{n}_s{step}.png", dpi=300)
             plt.close(fig_a)
-            tqdm.write(f"Saved matrix analysis to {out_dir / f'matrices_l{n}_s{step}.png'}")
+            tqdm.write(f"Saved matrix analysis to {out_dir / f'matrices_layer{n}_s{step}.png'}")
 
-    return {"attrib_scores": fig_a, **{f"matrices_l{n}": fig for n, fig in enumerate(figs)}}
+    return {"attrib_scores": fig_a, **{f"matrices_layer{n}": fig for n, fig in enumerate(figs)}}
 
 
 def plot_model_functions(
