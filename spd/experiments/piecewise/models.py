@@ -670,6 +670,10 @@ class PiecewiseFunctionSPDTransformer(SPDModel):
         self.d_embed = self.n_inputs + 1 if d_embed is None else d_embed
         self.d_control = self.d_embed - 2
         self.n_param_matrices = n_layers * 2
+        # The start and end are properties of the data, not the model. But when we load from
+        # handcoded then we know what start and end are so we set them here.
+        self.start = None
+        self.end = None
 
         self.num_functions = n_inputs - 1
         self.n_outputs = 1  # this is hardcoded. This class isn't defined for multiple outputs
@@ -726,6 +730,8 @@ class PiecewiseFunctionSPDTransformer(SPDModel):
         assert target_transformer.controlled_resnet is not None
 
         k = self.k
+        self.start = target_transformer.controlled_resnet.start
+        self.end = target_transformer.controlled_resnet.end
 
         self.to(target_transformer.W_E.weight.device)
         # set all weights and biases in self to zero
@@ -914,6 +920,8 @@ class PiecewiseFunctionSPDFullRankTransformer(SPDFullRankModel):
         self.d_embed = self.n_inputs + 1 if d_embed is None else d_embed
         self.d_control = self.d_embed - 2
         self.n_param_matrices = n_layers * 2
+        self.start = None
+        self.end = None
 
         self.num_functions = n_inputs - 1
         self.n_outputs = 1  # this is hardcoded. This class isn't defined for multiple outputs
@@ -956,6 +964,8 @@ class PiecewiseFunctionSPDFullRankTransformer(SPDFullRankModel):
                 target_transformer.mlps[i].linear2.B,
                 "d_mlp k, k d_embed -> k d_mlp d_embed",
             )
+        self.start = target_transformer.start
+        self.end = target_transformer.end
 
     def all_subnetwork_params(self) -> list[Float[Tensor, "k d_in d_out"]]:
         all_subnetworks = []
