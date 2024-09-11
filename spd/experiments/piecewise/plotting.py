@@ -237,6 +237,8 @@ def plot_model_functions(
     batch_topk: bool,
     full_rank: bool,
     device: str,
+    start: float,
+    stop: float,
     print_info: bool = False,
 ) -> dict[str, plt.Figure]:
     fig, ax = plt.subplots(figsize=(10, 6))
@@ -252,7 +254,7 @@ def plot_model_functions(
     input_array = input_array.repeat_interleave(n_samples, dim=0)
     input_array = input_array.to(device)
     # Set the 0th input to x_space
-    x_space = torch.linspace(0, 5, n_samples)
+    x_space = torch.linspace(start, stop, n_samples)
     input_array[:, 0] = x_space.repeat(n_functions)
 
     # non-SPD model, and SPD-model non-topk forward pass
