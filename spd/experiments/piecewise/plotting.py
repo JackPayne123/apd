@@ -269,7 +269,7 @@ def plot_model_functions(
         topk_recon_loss = calc_recon_mse(out_topk, model_output_hardcoded, has_instance_dim=False)
         print(f"Topk recon loss: {topk_recon_loss:.4f}")
         # Check if, ever, there are cases where the control bit is 1 but the topk_mask is False.
-        # We check this by calculating whether for each sample, topk_mask is True OR control bit is 0.
+        # We check this by calculating whether topk_mask is True OR control bit is 0.
         control_bits = input_array[:, 1:].cpu().detach().numpy()
         topk_mask_control_bits = topk_mask | (control_bits == 0)
         print(
