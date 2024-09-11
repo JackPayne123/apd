@@ -359,8 +359,7 @@ def plot_model_functions(
     ax_attrib.set_title(
         "Attributions of each subnetwork for every control bit case (k=k_cb in bold)"
     )
-    ax_inner.legend(ncol=3, loc="upper right")
-    ax_inner.set_yscale("symlog", linthresh=1e-3)
+    ax_inner.legend(ncol=3)
     ax_inner.set_ylabel("inner acts (symlog)")
     ax_inner.set_title("'inner acts', coloured for the top subnetwork, black for the others")
     ax_inner.set_xlabel("x (model input dim 0)")
