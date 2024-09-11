@@ -46,7 +46,7 @@ def plot_vectors(
     sel = range(n_instances)
     plt.rcParams["axes.prop_cycle"] = plt.cycler(
         "color",
-        plt.cm.viridis(np.array([1.0])),  # type: ignore
+        plt.cm.viridis(np.array([0.0])),  # type: ignore
     )
     plt.rcParams["figure.dpi"] = 200
     fig, axs = plt.subplots(
