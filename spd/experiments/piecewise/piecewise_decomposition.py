@@ -15,7 +15,11 @@ from spd.experiments.piecewise.models import (
     PiecewiseFunctionTransformer,
 )
 from spd.experiments.piecewise.piecewise_dataset import PiecewiseDataset
-from spd.experiments.piecewise.plotting import plot_components, plot_components_fullrank
+from spd.experiments.piecewise.plotting import (
+    plot_components,
+    plot_components_fullrank,
+    plot_model_functions,
+)
 from spd.experiments.piecewise.trig_functions import generate_trig_functions
 from spd.log import logger
 from spd.run_spd import Config, PiecewiseConfig, calc_recon_mse, optimize
@@ -28,6 +32,38 @@ from spd.utils import (
 )
 
 wandb.require("core")
+
+
+def piecewise_plot_results_fn(
+    model: PiecewiseFunctionSPDTransformer | PiecewiseFunctionSPDFullRankTransformer,
+    target_model: PiecewiseFunctionTransformer | None,
+    step: int,
+    out_dir: Path | None,
+    device: str,
+    topk: float,
+    batch_topk: bool,
+    slow_images: bool,
+):
+    # Plot functions
+    fig_dict_1 = plot_model_functions(
+        spd_model=model,
+        target_model=target_model,
+        topk=topk,
+        batch_topk=batch_topk,
+        full_rank=isinstance(model, PiecewiseFunctionSPDFullRankTransformer),
+        device=device,
+        print_info=False,
+    )
+    # Plot components
+    if isinstance(model, PiecewiseFunctionSPDFullRankTransformer):
+        fig_dict_2 = plot_components_fullrank(
+            model=model, step=step, out_dir=out_dir, slow_images=slow_images
+        )
+    else:
+        fig_dict_2 = plot_components(
+            model=model, step=step, out_dir=out_dir, device=device, slow_images=slow_images
+        )
+    return {**fig_dict_1, **fig_dict_2}
 
 
 def get_run_name(config: Config) -> str:
@@ -214,7 +250,7 @@ def main(
         device=device,
         pretrained_model=piecewise_model,
         dataloader=dataloader,
-        plot_results_fn=plot_components_fullrank if config.full_rank else plot_components,
+        plot_results_fn=piecewise_plot_results_fn,
     )
 
     if config.wandb_project:

@@ -5,6 +5,7 @@ from pathlib import Path
 import torch
 
 from spd.experiments.piecewise.models import (
+    PiecewiseFunctionSPDFullRankTransformer,
     PiecewiseFunctionSPDTransformer,
     PiecewiseFunctionTransformer,
 )
@@ -50,10 +51,12 @@ batch_topk = config.batch_topk
 full_rank = config.full_rank
 
 if full_rank:
+    assert isinstance(spd_model, PiecewiseFunctionSPDFullRankTransformer)
     fig_dict = plot_components_fullrank(
         model=spd_model, step=-1, out_dir=None, device=device, slow_images=True
     )
 else:
+    assert isinstance(spd_model, PiecewiseFunctionSPDTransformer)
     fig_dict = plot_components(
         model=spd_model, step=-1, out_dir=None, device=device, slow_images=True
     )
@@ -61,7 +64,7 @@ else:
 if topk is not None:
     extra_fig_dict = plot_model_functions(
         spd_model=spd_model,
-        hardcoded_model=hardcoded_model,
+        target_model=hardcoded_model,
         topk=topk,
         batch_topk=False,
         full_rank=full_rank,

@@ -684,6 +684,7 @@ def optimize(
         ):
             fig_dict = plot_results_fn(
                 model=model,
+                target_model=pretrained_model,
                 step=step,
                 out_dir=out_dir,
                 device=device,

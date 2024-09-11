@@ -10,6 +10,7 @@ from mpl_toolkits.axes_grid1 import make_axes_locatable
 from tqdm import tqdm
 
 from spd.experiments.piecewise.models import (
+    PiecewiseFunctionSPDFullRankTransformer,
     PiecewiseFunctionSPDTransformer,
     PiecewiseFunctionTransformer,
 )
@@ -50,16 +51,27 @@ def plot_matrix(
 
 
 def plot_components_fullrank(
-    model: PiecewiseFunctionSPDTransformer,
+    model: PiecewiseFunctionSPDFullRankTransformer,
     step: int,
     out_dir: Path | None,
+    slow_images: bool,
     **_,
 ) -> dict[str, plt.Figure]:
     # Not implemented attribution score plots, or multi-layer plots, yet.
     assert model.n_layers == 1
     ncols = 2
-    nrows = model.k + 1
-    fig, axs = plt.subplots(nrows, ncols, figsize=(16 * ncols, 3 * nrows), constrained_layout=True)
+    if slow_images:
+        nrows = model.k + 1
+        fig, axs = plt.subplots(
+            nrows, ncols, figsize=(16 * ncols, 3 * nrows), constrained_layout=True
+        )
+    else:
+        nrows = 1
+        fig, axs_row = plt.subplots(
+            nrows, ncols, figsize=(16 * ncols, 3 * nrows), constrained_layout=True
+        )
+        axs = np.array([axs_row])
+
     assert isinstance(axs, np.ndarray)
     plot_matrix(
         axs[0, 0],
@@ -76,14 +88,15 @@ def plot_components_fullrank(
         "",
     )
 
-    for k in range(model.k):
-        mlp = model.mlps[0]
-        W_in_k = mlp.linear1.subnetwork_params[k]
-        ax = axs[k + 1, 0]  # type: ignore
-        plot_matrix(ax, W_in_k, f"W_in_k, k={k}", "Neuron index", "Embedding index")
-        W_out_k = mlp.linear2.subnetwork_params[k].T
-        ax = axs[k + 1, 1]  # type: ignore
-        plot_matrix(ax, W_out_k, f"W_out_k.T, k={k}", "Neuron index", "")
+    if slow_images:
+        for k in range(model.k):
+            mlp = model.mlps[0]
+            W_in_k = mlp.linear1.subnetwork_params[k]
+            ax = axs[k + 1, 0]  # type: ignore
+            plot_matrix(ax, W_in_k, f"W_in_k, k={k}", "Neuron index", "Embedding index")
+            W_out_k = mlp.linear2.subnetwork_params[k].T
+            ax = axs[k + 1, 1]  # type: ignore
+            plot_matrix(ax, W_out_k, f"W_out_k.T, k={k}", "Neuron index", "")
     if out_dir is not None:
         fig.savefig(out_dir / f"matrices_l0_s{step}.png", dpi=300)
         print(f"saved to {out_dir / f'matrices_l0_s{step}.png'}")
@@ -220,8 +233,8 @@ def plot_components(
 
 
 def plot_model_functions(
-    spd_model: PiecewiseFunctionSPDTransformer,
-    hardcoded_model: PiecewiseFunctionTransformer,
+    spd_model: PiecewiseFunctionSPDTransformer | PiecewiseFunctionSPDFullRankTransformer,
+    target_model: PiecewiseFunctionTransformer | None,
     topk: float,
     batch_topk: bool,
     full_rank: bool,
@@ -235,9 +248,9 @@ def plot_model_functions(
     # control bits to [0,1,0,0,...] for the first 1000 rows, [0,0,1,0,...] for the next 1000 rows,
     # etc.
     n_samples = 1000
-    n_functions = hardcoded_model.num_functions
+    n_functions = spd_model.num_functions
     # Set the control bits
-    input_array = torch.eye(hardcoded_model.n_inputs, dtype=torch.float32)[-n_functions:, :]
+    input_array = torch.eye(spd_model.n_inputs, dtype=torch.float32)[-n_functions:, :]
     input_array = input_array.repeat_interleave(n_samples, dim=0)
     input_array = input_array.to(device)
     # Set the 0th input to x_space
@@ -245,7 +258,7 @@ def plot_model_functions(
     input_array[:, 0] = x_space.repeat(n_functions)
 
     # non-SPD model, and SPD-model non-topk forward pass
-    model_output_hardcoded = hardcoded_model(input_array)
+    model_output_hardcoded = target_model(input_array) if target_model is not None else None
     model_output_spd, layer_acts, inner_acts = spd_model(input_array)
 
     # SPD-model topk forward pass, copy-pasted from run_spd
@@ -265,9 +278,6 @@ def plot_model_functions(
     assert len(inner_acts_topk) == spd_model.n_param_matrices
 
     if print_info:
-        # Calculate recon loss
-        topk_recon_loss = calc_recon_mse(out_topk, model_output_hardcoded, has_instance_dim=False)
-        print(f"Topk recon loss: {topk_recon_loss:.4f}")
         # Check if, ever, there are cases where the control bit is 1 but the topk_mask is False.
         # We check this by calculating whether topk_mask is True OR control bit is 0.
         control_bits = input_array[:, 1:].cpu().detach().numpy()
@@ -275,10 +285,17 @@ def plot_model_functions(
         print(
             f"How often is topk_mask True or control_bits == 0: {topk_mask_control_bits.mean():.3%}"
         )
+        if model_output_hardcoded is not None:
+            # Calculate recon loss
+            topk_recon_loss = calc_recon_mse(
+                out_topk, model_output_hardcoded, has_instance_dim=False
+            )
+            print(f"Topk recon loss: {topk_recon_loss:.4f}")
 
     # Convert stuff to numpy
-    model_output_hardcoded = model_output_hardcoded[:, 0].cpu().detach().numpy()
     model_output_spd = model_output_spd[:, 0].cpu().detach().numpy()
+    if model_output_hardcoded is not None:
+        model_output_hardcoded = model_output_hardcoded[:, 0].cpu().detach().numpy()
     out_topk = out_topk.cpu().detach().numpy()
     input_xs = input_array[:, 0].cpu().detach().numpy()
 
@@ -291,19 +308,22 @@ def plot_model_functions(
         color2 = tab20(k / n_functions + 2 * d / 4)
         color3 = tab20(k / n_functions + 3 * d / 4)
         s = slice(k * n_samples, (k + 1) * n_samples)
-        assert hardcoded_model.controlled_resnet is not None
-        ax.plot(
-            x_space,
-            hardcoded_model.controlled_resnet.functions[k](torch.tensor(x_space)),
-            ls=":",
-            color=color0,
-        )
-        ax.plot(input_xs[s], model_output_hardcoded[s], label=f"k={k}", color=color1)
+        if model_output_hardcoded is not None:
+            assert target_model is not None
+            assert target_model.controlled_resnet is not None
+            ax.plot(
+                x_space,
+                target_model.controlled_resnet.functions[k](x_space),
+                ls=":",
+                color=color0,
+            )
+            ax.plot(input_xs[s], model_output_hardcoded[s], label=f"k={k}", color=color1)
         ax.plot(input_xs[s], model_output_spd[s], ls="-.", color=color2)
         ax.plot(input_xs[s], out_topk[s], ls="--", color=color3)
     # Add some additional (blue) legend lines explaining the different line styles
-    ax.plot([], [], ls=":", color="C0", label="True function")
-    ax.plot([], [], ls="-", color="C0", label="target model")
+    if model_output_hardcoded is not None:
+        ax.plot([], [], ls=":", color="C0", label="true function")
+        ax.plot([], [], ls="-", color="C0", label="target model")
     ax.plot([], [], ls="-.", color="C0", label="spd model")
     ax.plot([], [], ls="--", color="C0", label="spd model topk")
     ax.legend(ncol=3)
