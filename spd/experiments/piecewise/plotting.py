@@ -316,7 +316,10 @@ def plot_model_functions(
             # Find permutation
             if k == k_cb:
                 ax_attrib.plot(
-                    input_xs[s], attribution_scores[s][:, k], color=color1, label=f"k={k}"
+                    input_xs[s],
+                    attribution_scores[s][:, k],
+                    color=color1,
+                    label=f"cb={cb}, k_cb={k}",
                 )
                 assert len(inner_acts) <= 3, "Didn't implement more than 3 SPD 'layers' yet"
                 for j in range(len(inner_acts)):
@@ -327,7 +330,7 @@ def plot_model_functions(
                             inner_acts[j].cpu().detach()[s][:, k],
                             color=color1,
                             ls=ls,
-                            label=f"k={k}" if j == 0 else None,
+                            label=f"cb={cb}, k_cb={k}" if j == 0 else None,
                         )
             else:
                 ax_attrib.plot(input_xs[s], attribution_scores[s][:, k], color=color1, alpha=0.2)
