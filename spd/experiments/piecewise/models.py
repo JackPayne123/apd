@@ -255,7 +255,6 @@ class ControlledPiecewiseLinear(nn.Module):
         for i in range(self.num_functions):
             target = np.array([self.functions[i](torch.tensor(x)) for x in xs])
             axs[i].plot(xs, target, label="f(x)")
-            # print("input shape", torch.tensor(x, dtype=torch.float32).unsqueeze(1).shape)
             axs[i].plot(xs, outputs[:, i], label="NN(x)")
             axs[i].legend()
             axs[i].set_title(f"Piecewise Linear Approximation of function {i}")
@@ -496,7 +495,6 @@ class ControlledResNet(nn.Module):
             input_with_control[:, 0] = xs
             input_with_control[:, i + 1] = 1.0
             outputs = self.forward(input_with_control).detach().numpy()
-            print(outputs.shape, input_with_control.shape)
             if functions is not None:
                 target = [functions[i](x) for x in xs]
                 axs[i].plot(xs, target, label="f(x)")
@@ -606,7 +604,7 @@ class PiecewiseFunctionTransformer(Model):
         # the control_W_E of the ControlledResNet class is just a part of the W_E of this class. In
         # particular it is the part that is sliced in by the random matrix (or identity)
         initialize_embeds(model.W_E, model.W_U, n_inputs, d_embed, model.superposition)
-        print(model.W_E.weight, model.W_U.weight)
+
         for i, mlp in enumerate(handcoded_model.mlps):
             model.mlps[i].input_layer.weight.data[:, :] = mlp.input_layer.weight
             model.mlps[i].output_layer.weight.data[:, :] = mlp.output_layer.weight
