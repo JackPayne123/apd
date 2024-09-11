@@ -49,20 +49,10 @@ def plot_vectors(
         plt.cm.viridis(np.array([0.0])),  # type: ignore
     )
     plt.rcParams["figure.dpi"] = 200
-    fig, axs = plt.subplots(
-        n_subnets + 1, len(sel) + 1, figsize=(2 * (len(sel) + 1), 2 * (n_subnets + 1))
-    )
+    fig, axs = plt.subplots(len(sel), n_subnets + 1, figsize=(2 * (n_subnets + 1), 2 * (len(sel))))
     axs = np.array(axs)
     for j in range(n_subnets + 1):
-        # Add a new column for labels
-        label_ax = axs[j, 0]
-        label_ax.axis("off")
-        label = "Sum of subnets" if j == 0 else f"Subnet {j-1}"
-        label_ax.text(
-            0.5, 0.5, label, rotation=0, va="center", ha="center", transform=label_ax.transAxes
-        )
-
-        for i, ax in enumerate(axs[j, 1:]):
+        for i, ax in enumerate(axs[:, j]):
             if j == 0:
                 # First, plot the addition of the subnetworks
                 arr = subnet[i].sum(dim=0).cpu().detach().numpy()
@@ -86,8 +76,11 @@ def plot_vectors(
             for spine in ["bottom", "left"]:
                 ax.spines[spine].set_position("center")
 
-            if j == n_subnets:
-                ax.set_xlabel(f"Instance {i}", rotation=0, ha="center", labelpad=60)
+            if i == len(sel) - 1:
+                label = "Sum of subnets" if j == 0 else f"Subnet {j-1}"
+                ax.set_xlabel(label, rotation=0, ha="center", labelpad=60)
+            if j == 0:
+                ax.set_ylabel(f"Instance {i}", rotation=90, ha="center", labelpad=60)
 
     return fig
 
