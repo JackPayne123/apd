@@ -68,6 +68,8 @@ if topk is not None:
         batch_topk=False,
         full_rank=full_rank,
         device=device,
+        start=config.task_config.range_min,
+        stop=config.task_config.range_max,
         print_info=True,
     )
     fig_dict.update(extra_fig_dict)
