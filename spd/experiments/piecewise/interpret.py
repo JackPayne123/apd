@@ -49,16 +49,6 @@ topk = config.topk
 batch_topk = config.batch_topk
 full_rank = config.full_rank
 
-if topk is not None:
-    plot_model_functions(
-        spd_model=spd_model,
-        hardcoded_model=hardcoded_model,
-        topk=topk,
-        batch_topk=batch_topk,
-        full_rank=full_rank,
-        device=device,
-    )
-
 if full_rank:
     fig_dict = plot_components_fullrank(
         model=spd_model, step=-1, out_dir=None, device=device, slow_images=True
@@ -67,6 +57,18 @@ else:
     fig_dict = plot_components(
         model=spd_model, step=-1, out_dir=None, device=device, slow_images=True
     )
+
+if topk is not None:
+    extra_fig_dict = plot_model_functions(
+        spd_model=spd_model,
+        hardcoded_model=hardcoded_model,
+        topk=topk,
+        batch_topk=False,
+        full_rank=full_rank,
+        device=device,
+        print_info=True,
+    )
+    fig_dict.update(extra_fig_dict)
 
 out_path = Path(__file__).parent / "out/attribution_scores" / pretrained_path.parent.name
 out_path.mkdir(parents=True, exist_ok=True)

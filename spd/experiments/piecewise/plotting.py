@@ -226,7 +226,10 @@ def plot_model_functions(
     batch_topk: bool,
     full_rank: bool,
     device: str,
-):
+    print_info: bool = False,
+) -> dict[str, plt.Figure]:
+    fig, ax = plt.subplots(figsize=(10, 6))
+    fig.suptitle(f"Model functions (topk={topk}, batch_topk={batch_topk})")
     # Get model outputs for simple example data. Create input array with 10_000 rows, 1000
     # rows for each function. Set the 0th column to be linspace(0, 5, 1000) repeated. Set the
     # control bits to [0,1,0,0,...] for the first 1000 rows, [0,0,1,0,...] for the next 1000 rows,
@@ -261,15 +264,17 @@ def plot_model_functions(
     )
     assert len(inner_acts_topk) == spd_model.n_param_matrices
 
-    # Calculate recon loss
-    topk_recon_loss = calc_recon_mse(out_topk, model_output_hardcoded, has_instance_dim=False)
-    print(f"Topk recon loss: {topk_recon_loss:.4f}")
-
-    # Check if, ever, there are cases where the control bit is 1 but the topk_mask is False.
-    # We check this by calculating whether for each sample, topk_mask is True OR control bit is 0.
-    control_bits = input_array[:, 1:].cpu().detach().numpy()
-    topk_mask_control_bits = topk_mask | (control_bits == 0)
-    print(f"How often is topk_mask True or control_bits == 0: {topk_mask_control_bits.mean():.3%}")
+    if print_info:
+        # Calculate recon loss
+        topk_recon_loss = calc_recon_mse(out_topk, model_output_hardcoded, has_instance_dim=False)
+        print(f"Topk recon loss: {topk_recon_loss:.4f}")
+        # Check if, ever, there are cases where the control bit is 1 but the topk_mask is False.
+        # We check this by calculating whether for each sample, topk_mask is True OR control bit is 0.
+        control_bits = input_array[:, 1:].cpu().detach().numpy()
+        topk_mask_control_bits = topk_mask | (control_bits == 0)
+        print(
+            f"How often is topk_mask True or control_bits == 0: {topk_mask_control_bits.mean():.3%}"
+        )
 
     # Convert stuff to numpy
     model_output_hardcoded = model_output_hardcoded[:, 0].cpu().detach().numpy()
@@ -278,19 +283,30 @@ def plot_model_functions(
     input_xs = input_array[:, 0].cpu().detach().numpy()
 
     # Plot for every k
-    fig, ax = plt.subplots(figsize=(10, 6))
     tab20 = plt.get_cmap("tab20")
     for k in range(n_functions):
-        color = tab20(k / n_functions)
-        color2 = tab20(k / n_functions + 0.05)
+        d = 1 / n_functions
+        color0 = tab20(k / n_functions)
+        color1 = tab20(k / n_functions + d / 4)
+        color2 = tab20(k / n_functions + 2 * d / 4)
+        color3 = tab20(k / n_functions + 3 * d / 4)
         s = slice(k * n_samples, (k + 1) * n_samples)
         assert hardcoded_model.controlled_resnet is not None
         ax.plot(
             x_space,
             hardcoded_model.controlled_resnet.functions[k](torch.tensor(x_space)),
             ls=":",
-            color=color,
+            color=color0,
         )
-        ax.plot(input_xs[s], model_output_hardcoded[s], label=f"k={k}", color=color)
+        ax.plot(input_xs[s], model_output_hardcoded[s], label=f"k={k}", color=color1)
         ax.plot(input_xs[s], model_output_spd[s], ls="-.", color=color2)
-        ax.plot(input_xs[s], out_topk[s], ls="--", color=color2)
+        ax.plot(input_xs[s], out_topk[s], ls="--", color=color3)
+    # Add some additional (blue) legend lines explaining the different line styles
+    ax.plot([], [], ls=":", color="C0", label="True function")
+    ax.plot([], [], ls="-", color="C0", label="target model")
+    ax.plot([], [], ls="-.", color="C0", label="spd model")
+    ax.plot([], [], ls="--", color="C0", label="spd model topk")
+    ax.legend(ncol=3)
+    ax.set_xlabel("x (model input dim 0)")
+    ax.set_ylabel("f(x) (model output dim 0)")
+    return {"model_functions": fig}
