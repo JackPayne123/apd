@@ -86,6 +86,11 @@ def train(
 
 
 def plot_intro_diagram(model: TMSModel, filepath: Path) -> None:
+    """2D polygon plot of the TMS model.
+
+    Adapted from
+    https://colab.research.google.com/github/anthropics/toy-models-of-superposition/blob/main/toy_models.ipynb.
+    """
     WA = model.W.detach()
     N = len(WA[:, 0])
     sel = range(config.n_instances)  # can be used to highlight specific sparsity levels
