@@ -9,7 +9,11 @@ from spd.experiments.piecewise.models import (
     PiecewiseFunctionTransformer,
 )
 from spd.experiments.piecewise.piecewise_decomposition import get_model_and_dataloader
-from spd.experiments.piecewise.plotting import plot_components, plot_components_fullrank
+from spd.experiments.piecewise.plotting import (
+    plot_components,
+    plot_components_fullrank,
+    plot_model_functions,
+)
 from spd.experiments.piecewise.trig_functions import create_trig_function
 from spd.run_spd import (
     Config,
@@ -43,7 +47,19 @@ spd_model.load_state_dict(torch.load(pretrained_path, weights_only=True, map_loc
 
 topk = config.topk
 batch_topk = config.batch_topk
-if config.full_rank:
+full_rank = config.full_rank
+
+if topk is not None:
+    plot_model_functions(
+        spd_model=spd_model,
+        hardcoded_model=hardcoded_model,
+        topk=topk,
+        batch_topk=batch_topk,
+        full_rank=full_rank,
+        device=device,
+    )
+
+if full_rank:
     fig_dict = plot_components_fullrank(
         model=spd_model, step=-1, out_dir=None, device=device, slow_images=True
     )

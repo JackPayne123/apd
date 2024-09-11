@@ -9,8 +9,16 @@ from matplotlib.colors import CenteredNorm
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 from tqdm import tqdm
 
-from spd.experiments.piecewise.models import PiecewiseFunctionSPDTransformer
-from spd.utils import calc_attributions_rank_one
+from spd.experiments.piecewise.models import (
+    PiecewiseFunctionSPDTransformer,
+    PiecewiseFunctionTransformer,
+)
+from spd.run_spd import calc_recon_mse
+from spd.utils import (
+    calc_attributions_full_rank,
+    calc_attributions_rank_one,
+    calc_topk_mask,
+)
 
 
 def plot_matrix(
@@ -209,3 +217,80 @@ def plot_components(
             tqdm.write(f"Saved matrix analysis to {out_dir / f'matrices_l{n}_s{step}.png'}")
 
     return {"attrib_scores": fig_a, **{f"matrices_l{n}_s{step}": fig for n, fig in enumerate(figs)}}
+
+
+def plot_model_functions(
+    spd_model: PiecewiseFunctionSPDTransformer,
+    hardcoded_model: PiecewiseFunctionTransformer,
+    topk: float,
+    batch_topk: bool,
+    full_rank: bool,
+    device: str,
+):
+    # Get model outputs for simple example data. Create input array with 10_000 rows, 1000
+    # rows for each function. Set the 0th column to be linspace(0, 5, 1000) repeated. Set the
+    # control bits to [0,1,0,0,...] for the first 1000 rows, [0,0,1,0,...] for the next 1000 rows,
+    # etc.
+    n_samples = 1000
+    n_functions = hardcoded_model.num_functions
+    # Set the control bits
+    input_array = torch.eye(hardcoded_model.n_inputs, dtype=torch.float32)[-n_functions:, :]
+    input_array = input_array.repeat_interleave(n_samples, dim=0)
+    input_array = input_array.to(device)
+    # Set the 0th input to x_space
+    x_space = torch.linspace(0, 5, n_samples)
+    input_array[:, 0] = x_space.repeat(n_functions)
+
+    # non-SPD model, and SPD-model non-topk forward pass
+    model_output_hardcoded = hardcoded_model(input_array)
+    model_output_spd, layer_acts, inner_acts = spd_model(input_array)
+
+    # SPD-model topk forward pass, copy-pasted from run_spd
+    if full_rank:
+        attribution_scores = calc_attributions_full_rank(
+            out=model_output_spd,
+            inner_acts=inner_acts,
+            layer_acts=layer_acts,
+        )
+    else:
+        attribution_scores = calc_attributions_rank_one(out=model_output_spd, inner_acts=inner_acts)
+    topk_mask = calc_topk_mask(attribution_scores, topk, batch_topk=batch_topk)
+    topk_mask = topk_mask.cpu().detach().numpy()
+    out_topk, _, inner_acts_topk = spd_model.forward_topk(
+        input_array, topk_mask=torch.tensor(topk_mask, device=device)
+    )
+    assert len(inner_acts_topk) == spd_model.n_param_matrices
+
+    # Calculate recon loss
+    topk_recon_loss = calc_recon_mse(out_topk, model_output_hardcoded, has_instance_dim=False)
+    print(f"Topk recon loss: {topk_recon_loss:.4f}")
+
+    # Check if, ever, there are cases where the control bit is 1 but the topk_mask is False.
+    # We check this by calculating whether for each sample, topk_mask is True OR control bit is 0.
+    control_bits = input_array[:, 1:].cpu().detach().numpy()
+    topk_mask_control_bits = topk_mask | (control_bits == 0)
+    print(f"How often is topk_mask True or control_bits == 0: {topk_mask_control_bits.mean():.3%}")
+
+    # Convert stuff to numpy
+    model_output_hardcoded = model_output_hardcoded[:, 0].cpu().detach().numpy()
+    model_output_spd = model_output_spd[:, 0].cpu().detach().numpy()
+    out_topk = out_topk.cpu().detach().numpy()
+    input_xs = input_array[:, 0].cpu().detach().numpy()
+
+    # Plot for every k
+    fig, ax = plt.subplots(figsize=(10, 6))
+    tab20 = plt.get_cmap("tab20")
+    for k in range(n_functions):
+        color = tab20(k / n_functions)
+        color2 = tab20(k / n_functions + 0.05)
+        s = slice(k * n_samples, (k + 1) * n_samples)
+        assert hardcoded_model.controlled_resnet is not None
+        ax.plot(
+            x_space,
+            hardcoded_model.controlled_resnet.functions[k](torch.tensor(x_space)),
+            ls=":",
+            color=color,
+        )
+        ax.plot(input_xs[s], model_output_hardcoded[s], label=f"k={k}", color=color)
+        ax.plot(input_xs[s], model_output_spd[s], ls="-.", color=color2)
+        ax.plot(input_xs[s], out_topk[s], ls="--", color=color2)
