@@ -251,9 +251,8 @@ def plot_model_functions(
     input_array = torch.eye(spd_model.n_inputs, dtype=torch.float32)[-n_functions:, :]
     input_array = input_array.repeat_interleave(n_samples, dim=0)
     input_array = input_array.to(device)
-    # Set the 0th input to x_space, used controlled_resnet.start
-    assert spd_model.start is not None and spd_model.end is not None
-    x_space = torch.linspace(spd_model.start, spd_model.end, n_samples)
+    # Set the 0th input to x_space
+    x_space = torch.linspace(0, 5, n_samples)
     input_array[:, 0] = x_space.repeat(n_functions)
 
     # non-SPD model, and SPD-model non-topk forward pass
