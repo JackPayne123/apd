@@ -8,6 +8,7 @@ import torch
 import wandb
 from jaxtyping import Float
 from torch import Tensor
+from tqdm import tqdm
 
 from spd.experiments.piecewise.models import (
     PiecewiseFunctionSPDFullRankTransformer,
@@ -74,7 +75,7 @@ def piecewise_plot_results_fn(
         for k, v in fig_dict.items():
             out_file = out_dir / f"{k}_s{step}.png"
             v.savefig(out_file)
-            print(f"Saved plot to {out_file}")
+            tqdm.write(f"Saved plot to {out_file}")
     return {**fig_dict_2, **fig_dict_1}
 
 
