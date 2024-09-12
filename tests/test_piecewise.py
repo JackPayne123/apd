@@ -2,10 +2,20 @@ import torch
 from jaxtyping import Float
 
 from spd.experiments.piecewise.models import (
+    ControlledPiecewiseLinear,
+    ControlledResNet,
+    PiecewiseFunctionSPDFullRankTransformer,
     PiecewiseFunctionSPDTransformer,
+    PiecewiseFunctionTransformer,
+    PiecewiseLinear,
 )
 from spd.experiments.piecewise.piecewise_dataset import PiecewiseDataset
 from spd.experiments.piecewise.piecewise_decomposition import get_model_and_dataloader
+from spd.experiments.piecewise.plotting import (
+    PiecewiseModel,
+    plot_piecewise_model,
+)
+from spd.experiments.piecewise.trig_functions import generate_trig_functions
 from spd.run_spd import (
     Config,
     PiecewiseConfig,
@@ -349,3 +359,38 @@ def test_calc_neuron_indices():
     for i in range(2):
         for j in range(4):
             torch.testing.assert_close(indices[i][j], expected_indices[i][j])
+
+
+def test_plot_piecewise_model():
+    """test plot_piecewise_model on each of the 6 possible model types"""
+    functions, _ = generate_trig_functions(5)
+    start = 0
+    end = 5
+    neurons_per_function = 10
+    num_functions = len(functions)
+    d_control = num_functions
+    n_inputs = 1 + d_control
+    simple_bias = False
+    n_layers = 2
+    d_mlp = neurons_per_function * num_functions // n_layers
+    k = 10
+    models: list[PiecewiseModel | None] = [None for _ in range(6)]
+    models[0] = PiecewiseLinear(functions[0], start, end, neurons_per_function)
+    models[1] = ControlledPiecewiseLinear(
+        functions, start, end, neurons_per_function, d_control, simple_bias
+    )
+    models[2] = ControlledResNet(
+        functions, start, end, neurons_per_function, n_layers, d_control, simple_bias
+    )
+    models[3] = PiecewiseFunctionTransformer.from_handcoded(
+        functions, neurons_per_function, n_layers, start, end
+    )
+    models[4] = PiecewiseFunctionSPDTransformer(n_inputs, d_mlp, n_layers, k)
+    models[4].set_handcoded_AB(models[3])
+    models[5] = PiecewiseFunctionSPDFullRankTransformer(n_inputs, d_mlp, n_layers, k)
+    models[5].set_handcoded_AB(models[4])
+
+    for model in models:
+        assert model is not None
+        plot_piecewise_model(model, start - 1, end + 1)
+    return True

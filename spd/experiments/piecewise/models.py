@@ -1,5 +1,5 @@
 import json
-from collections.abc import Callable, Iterable, Sequence
+from collections.abc import Callable, Sequence
 from pathlib import Path
 
 import einops
@@ -51,46 +51,46 @@ class PiecewiseLinear(nn.Module):
 
     def __init__(
         self,
-        f: Callable[[Float[Tensor, " n_inputs"]], Float[Tensor, " n_inputs"]],
+        function: Callable[[Float[Tensor, " n_inputs"]], Float[Tensor, " n_inputs"]],
         start: float,
         end: float,
-        num_neurons: int,
+        neurons_per_function: int,
     ):
         super().__init__()
-        self.f = f
+        self.function = function
         self.start = start
         self.end = end
-        self.num_neurons = num_neurons
+        self.neurons_per_function = neurons_per_function
 
-        self.interval = (end - start) / (num_neurons - 1)
-        self.input_layer = nn.Linear(1, num_neurons, bias=True)
+        self.interval = (end - start) / (neurons_per_function - 1)
+        self.input_layer = nn.Linear(1, neurons_per_function, bias=True)
         self.relu = nn.ReLU()
-        self.output_layer = nn.Linear(self.num_neurons, 1, bias=True)
+        self.output_layer = nn.Linear(self.neurons_per_function, 1, bias=True)
 
         self.initialise_params()
 
     def initialise_params(self):
-        biases = -np.linspace(self.start, self.end, self.num_neurons) + self.interval
+        biases = -np.linspace(self.start, self.end, self.neurons_per_function) + self.interval
         assert (
-            len(biases) == self.num_neurons
-        ), f"len(biases) = {len(biases)}, num_neurons = {self.num_neurons}, biases = {biases}"
+            len(biases) == self.neurons_per_function
+        ), f"{len(biases)=}, num_neurons = {self.neurons_per_function}, {biases=}"
 
         self.input_layer.bias.data = torch.tensor(biases, dtype=torch.float32)
         # -torch.tensor(
         #     np.linspace(start-self.interval, end, num_neurons), dtype=torch.float32
         # )[:-1] + self.interval
         # print("neuron bias", self.neurons.bias.data)
-        self.input_layer.weight.data = torch.ones(self.num_neurons, 1, dtype=torch.float32)
+        self.input_layer.weight.data = torch.ones(self.neurons_per_function, 1, dtype=torch.float32)
 
         self.output_layer.bias.data = torch.tensor(0, dtype=torch.float32)
 
-        xs = torch.linspace(self.start, self.end, self.num_neurons)
-        self.function_values = torch.tensor([self.f(x) for x in xs], dtype=torch.float32)
+        xs = torch.linspace(self.start, self.end, self.neurons_per_function)
+        self.function_values = torch.tensor([self.function(x) for x in xs], dtype=torch.float32)
         self.function_values = torch.cat(
             [torch.tensor([0], dtype=torch.float32), self.function_values]
         )
         slopes = (self.function_values[1:] - self.function_values[:-1]) / self.interval
-        slope_diffs = torch.zeros(self.num_neurons, dtype=torch.float32)
+        slope_diffs = torch.zeros(self.neurons_per_function, dtype=torch.float32)
         slope_diffs[0] = slopes[0]
         slope_diffs[1:] = slopes[1:] - slopes[:-1]
         self.output_layer.weight.data = slope_diffs.view(-1, 1).T
@@ -100,26 +100,6 @@ class PiecewiseLinear(nn.Module):
         x = self.relu(x)
         x = self.output_layer(x)
         return x
-
-    def plot(self, ax: plt.Axes, start: float, end: float, num_points: int):
-        xs = torch.linspace(start, end, num_points)
-        ys = np.array([self.f(x).item() for x in xs])
-        ax.plot(xs.numpy(), ys, label="f(x)")
-        ax.plot(
-            xs,
-            self.forward(torch.tensor(xs, dtype=torch.float32).unsqueeze(1))
-            .clone()
-            .detach()
-            .numpy(),
-            label="NN(x)",
-        )
-        ax.legend()
-        ax.set_title("Piecewise Linear Approximation")
-        ax.set_xlabel("x")
-        ax.set_ylabel("y")
-        # add vertical lines to show start and end
-        ax.axvline(x=self.start, color="r", linestyle="--")
-        ax.axvline(x=self.end, color="r", linestyle="--")
 
 
 class ControlledPiecewiseLinear(nn.Module):
@@ -181,8 +161,8 @@ class ControlledPiecewiseLinear(nn.Module):
         ), "control_W_E should have at most num_functions rows"
         assert self.d_control == self.control_W_E.shape[1], "control_W_E should have d_control cols"
         self.piecewise_linears = [
-            PiecewiseLinear(f, self.start, self.end, self.neurons_per_function)
-            for f in self.functions
+            PiecewiseLinear(function, self.start, self.end, self.neurons_per_function)
+            for function in self.functions
         ]
 
         # initialise all weights to 0
@@ -234,35 +214,6 @@ class ControlledPiecewiseLinear(nn.Module):
         x = self.relu(x)
         x = self.output_layer(x)
         return x
-
-    def plot(
-        self, start: float, end: float, num_points: int, control_bits: torch.Tensor | None = None
-    ):
-        # make a figure with self.num_functions subplots
-        fig, axs = plt.subplots(self.num_functions, 1, figsize=(10, 5 * self.num_functions))
-        assert isinstance(axs, Iterable)
-        xs = np.linspace(start, end, num_points)
-        if control_bits is None:
-            control_bits = torch.ones(len(xs), self.num_functions)
-        if control_bits.dim() == 1:
-            control_bits = control_bits.unsqueeze(0).repeat(len(xs), 1)
-        assert control_bits.shape[1] == self.num_functions
-        assert control_bits.shape[0] == len(xs)
-        input = torch.tensor(xs, dtype=torch.float32).unsqueeze(1)
-        input_with_control = torch.cat([input, control_bits], dim=1)
-        outputs = self.forward(input_with_control).detach().numpy()
-        for i in range(self.num_functions):
-            target = np.array([self.functions[i](torch.tensor(x)) for x in xs])
-            axs[i].plot(xs, target, label="f(x)")
-            axs[i].plot(xs, outputs[:, i], label="NN(x)")
-            axs[i].legend()
-            axs[i].set_title(f"Piecewise Linear Approximation of function {i}")
-            axs[i].set_xlabel("x")
-            axs[i].set_ylabel("y")
-            # add vertical lines to show start and end
-            axs[i].axvline(x=self.start, color="r", linestyle="--")
-            axs[i].axvline(x=self.end, color="r", linestyle="--")
-        plt.show()
 
 
 class MLP(nn.Module):
@@ -477,35 +428,6 @@ class ControlledResNet(nn.Module):
         ax.set_ylim([target.min().item() - 2, target.max().item() + 2])  # type: ignore
         plt.show()
 
-    def plot(
-        self,
-        start: float,
-        end: float,
-        num_points: int,
-        functions: list[Callable[[Float[Tensor, " n_inputs"]], Float[Tensor, " n_inputs"]]]
-        | None = None,
-    ):
-        fig, axs = plt.subplots(self.num_functions, 1, figsize=(10, 5 * self.num_functions))
-        assert isinstance(axs, Iterable)
-        xs = torch.linspace(start, end, num_points)
-
-        for i in range(self.num_functions):
-            input_with_control = torch.zeros(num_points, self.num_functions + 1)
-            input_with_control[:, 0] = xs
-            input_with_control[:, i + 1] = 1.0
-            outputs = self.forward(input_with_control).detach().numpy()
-            if functions is not None:
-                target = [functions[i](x) for x in xs]
-                axs[i].plot(xs, target, label="f(x)")
-            axs[i].plot(xs, outputs[:, -1], label="NN(x)")
-            axs[i].legend()
-            axs[i].set_title(f"Piecewise Linear Approximation of function {i}")
-            axs[i].set_xlabel("x")
-            axs[i].set_ylabel("y")
-            axs[i].axvline(x=start, color="r", linestyle="--")
-            axs[i].axvline(x=end, color="r", linestyle="--")
-        plt.show()
-
 
 class PiecewiseFunctionTransformer(Model):
     def __init__(
@@ -612,35 +534,6 @@ class PiecewiseFunctionTransformer(Model):
             model.mlps[i].output_layer.bias.data[:] = mlp.output_layer.bias
 
         return model
-
-    def plot(
-        self,
-        start: float,
-        end: float,
-        num_points: int,
-        functions: list[Callable[[Float[Tensor, " n_inputs"]], Float[Tensor, " n_inputs"]]]
-        | None = None,
-    ):
-        fig, axs = plt.subplots(self.num_functions, 1, figsize=(10, 5 * self.num_functions))
-        assert isinstance(axs, Iterable)
-        xs = torch.linspace(start, end, num_points)
-
-        for i in range(self.num_functions):
-            input_with_control = torch.zeros(num_points, self.n_inputs)
-            input_with_control[:, 0] = xs
-            input_with_control[:, i + 1] = 1.0
-            outputs = self.forward(input_with_control).detach().numpy()
-            if functions is not None:
-                target = [functions[i](x) for x in xs]
-                axs[i].plot(xs, target, label="f(x)")
-            axs[i].plot(xs, outputs[:, 0], label="NN(x)")
-            axs[i].legend()
-            axs[i].set_title(f"Piecewise Linear Approximation of function {i}")
-            axs[i].set_xlabel("x")
-            axs[i].set_ylabel("y")
-            axs[i].axvline(x=start, color="r", linestyle="--")
-            axs[i].axvline(x=end, color="r", linestyle="--")
-        plt.show()
 
     def plot_multiple(
         self,
@@ -921,36 +814,6 @@ class PiecewiseFunctionSPDTransformer(SPDModel):
         for mlp in self.mlps:
             remove_grad_parallel_to_subnetwork_vecs(mlp.linear1.A.data, mlp.linear1.A.grad)
             remove_grad_parallel_to_subnetwork_vecs(mlp.linear2.A.data, mlp.linear2.A.grad)
-
-
-def plot_SPD_transformer(
-    model: PiecewiseFunctionSPDTransformer,
-    start: float,
-    end: float,
-    num_points: int,
-    functions: list[Callable[[Float[Tensor, " n_inputs"]], Float[Tensor, " n_inputs"]]]
-    | None = None,
-):
-    fig, axs = plt.subplots(model.num_functions, 1, figsize=(10, 5 * model.num_functions))
-    assert isinstance(axs, Iterable)
-    xs = torch.linspace(start, end, num_points)
-
-    for i in range(model.num_functions):
-        input_with_control = torch.zeros(num_points, model.n_inputs)
-        input_with_control[:, 0] = xs
-        input_with_control[:, i + 1] = 1.0
-        outputs = model.forward(input_with_control)[0].detach().numpy()
-        if functions is not None:
-            target = [functions[i](x) for x in xs]
-            axs[i].plot(xs, target, label="f(x)")
-        axs[i].plot(xs, outputs[:, 0], label="NN(x)")
-        axs[i].legend()
-        axs[i].set_title(f"Piecewise Linear Approximation of function {i}")
-        axs[i].set_xlabel("x")
-        axs[i].set_ylabel("y")
-        axs[i].axvline(x=start, color="r", linestyle="--")
-        axs[i].axvline(x=end, color="r", linestyle="--")
-    plt.show()
 
 
 class PiecewiseFunctionSPDFullRankTransformer(SPDFullRankModel):
