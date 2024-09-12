@@ -1,3 +1,4 @@
+from collections.abc import Iterable
 from pathlib import Path
 
 import einops
@@ -9,9 +10,12 @@ from matplotlib.colors import CenteredNorm
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 
 from spd.experiments.piecewise.models import (
+    ControlledPiecewiseLinear,
+    ControlledResNet,
     PiecewiseFunctionSPDFullRankTransformer,
     PiecewiseFunctionSPDTransformer,
     PiecewiseFunctionTransformer,
+    PiecewiseLinear,
 )
 from spd.run_spd import calc_recon_mse
 from spd.utils import (
@@ -369,3 +373,96 @@ def plot_model_functions(
     ax.set_xlabel("x (model input dim 0)")
     ax.set_ylabel("f(x) (model output dim 0)")
     return {"model_functions": fig}
+
+
+PiecewiseModel = (
+    PiecewiseFunctionTransformer
+    | PiecewiseFunctionSPDTransformer
+    | PiecewiseFunctionSPDFullRankTransformer
+    | ControlledResNet
+    | ControlledPiecewiseLinear
+    | PiecewiseLinear
+)
+PiecewiseSPDTransformer = PiecewiseFunctionSPDTransformer | PiecewiseFunctionSPDFullRankTransformer
+
+
+def plot_piecewise_model(
+    model: PiecewiseModel,
+    start: float,
+    end: float,
+    num_points: int = 1000,
+):
+    # make a figure with self.num_functions subplots
+    num_functions = 1 if isinstance(model, PiecewiseLinear) else model.num_functions
+    fig, axs = plt.subplots(num_functions, 1, figsize=(10, 5 * num_functions))
+    if not isinstance(axs, Iterable):
+        axs = [axs]
+
+    xs = torch.linspace(start, end, num_points)
+    input = xs.unsqueeze(1)
+
+    if isinstance(model, ControlledPiecewiseLinear):
+        control_bits = torch.ones(len(xs), num_functions)
+        input = torch.cat([input, control_bits], dim=1)
+
+    outputs = (
+        model.forward(input).clone().detach().numpy()
+        if isinstance(model, PiecewiseLinear | ControlledPiecewiseLinear)
+        else None
+    )
+
+    for i in range(num_functions):
+        if isinstance(
+            model, ControlledResNet | PiecewiseFunctionTransformer | PiecewiseSPDTransformer
+        ):
+            input = torch.zeros(num_points, num_functions + 1)
+            input[:, 0] = xs
+            input[:, i + 1] = 1.0
+            outputs = (
+                model.forward(input)[0].clone().detach().numpy()
+                if isinstance(model, PiecewiseSPDTransformer)
+                else model.forward(input).clone().detach().numpy()
+            )
+        assert outputs is not None
+        target = (
+            np.array([model.function(x) for x in xs])
+            if isinstance(model, PiecewiseLinear)
+            else np.array([model.functions[i](x) for x in xs])
+            if isinstance(model, ControlledResNet | ControlledPiecewiseLinear)
+            else None
+        )
+        if target is not None:
+            axs[i].plot(xs, target, label="f(x)")
+        ys = (
+            outputs[:, 0]
+            if isinstance(model, PiecewiseSPDTransformer)
+            else outputs[:, i]
+            if isinstance(model, ControlledResNet)
+            else outputs[:, -1]
+            if isinstance(model, ControlledPiecewiseLinear)
+            else outputs
+        )
+        axs[i].plot(xs, ys, label="NN(x)")
+        axs[i].legend()
+        axs[i].set_title(f"Piecewise Linear Approximation of function {i}")
+        axs[i].set_xlabel("x")
+        axs[i].set_ylabel("y")
+        # add vertical lines to show start and end
+        approximation_start = (
+            model.start
+            if hasattr(model, "start")
+            else model.range_min
+            if hasattr(model, "range_min")
+            else None
+        )
+        approximation_end = (
+            model.end
+            if hasattr(model, "end")
+            else model.range_max
+            if hasattr(model, "range_max")
+            else None
+        )
+        if approximation_start is not None and approximation_end is not None:
+            axs[i].axvline(x=approximation_start, color="r", linestyle="--")
+            axs[i].axvline(x=approximation_end, color="r", linestyle="--")
+    return fig
