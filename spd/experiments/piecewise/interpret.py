@@ -14,7 +14,10 @@ from spd.experiments.piecewise.plotting import (
     plot_components,
     plot_components_fullrank,
     plot_model_functions,
+    plot_subnetwork_correlations,
 )
+
+# plot_subnetwork_correlations,
 from spd.experiments.piecewise.trig_functions import create_trig_function
 from spd.run_spd import (
     Config,
@@ -43,11 +46,13 @@ assert isinstance(
     spd_model, PiecewiseFunctionSPDTransformer | PiecewiseFunctionSPDFullRankTransformer
 )
 spd_model.load_state_dict(torch.load(pretrained_path, weights_only=True, map_location="cpu"))
+
+# To test handcoded AB, uncomment the following line
 # spd_model.set_handcoded_AB(hardcoded_model)
 
-# Check correlations of subnetwork activations
-# for batch in dataloader:
 
+if config.topk is not None:
+    plot_subnetwork_correlations(dataloader, spd_model, config, device)
 
 if config.full_rank:
     assert isinstance(spd_model, PiecewiseFunctionSPDFullRankTransformer)

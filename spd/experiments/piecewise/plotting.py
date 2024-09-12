@@ -5,16 +5,19 @@ import matplotlib.pyplot as plt
 import matplotlib.ticker as tkr
 import numpy as np
 import torch
+from jaxtyping import Float
 from matplotlib.colors import CenteredNorm
 from mpl_toolkits.axes_grid1 import make_axes_locatable
+from torch import Tensor
 
 from spd.experiments.piecewise.models import (
     PiecewiseFunctionSPDFullRankTransformer,
     PiecewiseFunctionSPDTransformer,
     PiecewiseFunctionTransformer,
 )
-from spd.run_spd import calc_recon_mse
+from spd.run_spd import Config, calc_recon_mse
 from spd.utils import (
+    BatchedDataLoader,
     calc_attributions_full_rank,
     calc_attributions_rank_one,
     calc_topk_mask,
@@ -222,7 +225,7 @@ def run_spd_forward_pass(
     input_array: torch.Tensor,
     full_rank: bool,
     batch_topk: bool,
-    topk: int,
+    topk: float,
 ) -> tuple[
     torch.Tensor | None,
     torch.Tensor,
@@ -303,7 +306,6 @@ def plot_model_functions(
     x_space = torch.linspace(start, stop, n_samples)
     input_array[:, 0] = x_space.repeat(n_functions)
 
-    # run_spd_forward_pass
     (
         model_output_hardcoded,
         model_output_spd,
@@ -419,3 +421,50 @@ def plot_model_functions(
     ax.set_xlabel("x (model input dim 0)")
     ax.set_ylabel("f(x) (model output dim 0)")
     return {"model_functions": fig}
+
+
+def plot_subnetwork_correlations(
+    dataloader: BatchedDataLoader[tuple[Float[Tensor, " n_inputs"], Float[Tensor, ""]]],
+    spd_model: PiecewiseFunctionSPDTransformer | PiecewiseFunctionSPDFullRankTransformer,
+    config: Config,
+    device: str,
+):
+    topk_masks = []
+    for batch, _ in dataloader:
+        batch = batch.to(device=device)
+        assert config.topk is not None
+        _, _, _, _, _, _, _, _, topk_mask = run_spd_forward_pass(
+            spd_model=spd_model,
+            target_model=None,
+            input_array=batch,
+            full_rank=config.full_rank,
+            batch_topk=config.batch_topk,
+            topk=config.topk,
+        )
+        topk_masks.append(topk_mask)
+        if len(topk_masks) > 100:
+            break
+    topk_masks = torch.cat(topk_masks).float()
+    # Calculate correlation matrix
+    corr_matrix = torch.corrcoef(topk_masks.T).cpu()
+    fig, ax = plt.subplots(figsize=(5, 5), constrained_layout=True)
+    im = ax.matshow(corr_matrix)
+    ax.xaxis.set_ticks_position("bottom")
+    for i in range(corr_matrix.shape[0]):
+        for j in range(corr_matrix.shape[1]):
+            ax.text(
+                j,
+                i,
+                f"{corr_matrix[i, j]:.2f}",
+                ha="center",
+                va="center",
+                color="#EE7777",
+                fontsize=8,
+            )
+    divider = make_axes_locatable(plt.gca())
+    cax = divider.append_axes("right", size="5%", pad=0.1)
+    plt.colorbar(im, cax=cax)
+    ax.set_title("Subnetwork Correlation Matrix")
+    ax.set_xlabel("Subnetwork")
+    ax.set_ylabel("Subnetwork")
+    return {"subnetwork_correlation_matrix": fig}
