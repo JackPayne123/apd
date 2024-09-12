@@ -1,4 +1,4 @@
-from collections.abc import Callable, Iterable
+from collections.abc import Iterable
 from pathlib import Path
 
 import einops
@@ -6,10 +6,8 @@ import matplotlib.pyplot as plt
 import matplotlib.ticker as tkr
 import numpy as np
 import torch
-from jaxtyping import Float
 from matplotlib.colors import CenteredNorm
 from mpl_toolkits.axes_grid1 import make_axes_locatable
-from torch import Tensor
 
 from spd.experiments.piecewise.models import (
     ControlledPiecewiseLinear,
@@ -375,36 +373,6 @@ def plot_model_functions(
     ax.set_xlabel("x (model input dim 0)")
     ax.set_ylabel("f(x) (model output dim 0)")
     return {"model_functions": fig}
-
-
-def plot_SPD_transformer(
-    model: PiecewiseFunctionSPDTransformer,
-    start: float,
-    end: float,
-    num_points: int,
-    functions: list[Callable[[Float[Tensor, " n_inputs"]], Float[Tensor, " n_inputs"]]]
-    | None = None,
-):
-    fig, axs = plt.subplots(model.num_functions, 1, figsize=(10, 5 * model.num_functions))
-    assert isinstance(axs, Iterable)
-    xs = torch.linspace(start, end, num_points)
-
-    for i in range(model.num_functions):
-        input_with_control = torch.zeros(num_points, model.n_inputs)
-        input_with_control[:, 0] = xs
-        input_with_control[:, i + 1] = 1.0
-        outputs = model.forward(input_with_control)[0].detach().numpy()
-        if functions is not None:
-            target = [functions[i](x) for x in xs]
-            axs[i].plot(xs, target, label="f(x)")
-        axs[i].plot(xs, outputs[:, 0], label="NN(x)")
-        axs[i].legend()
-        axs[i].set_title(f"Piecewise Linear Approximation of function {i}")
-        axs[i].set_xlabel("x")
-        axs[i].set_ylabel("y")
-        axs[i].axvline(x=start, color="r", linestyle="--")
-        axs[i].axvline(x=end, color="r", linestyle="--")
-    plt.show()
 
 
 PiecewiseModel = (
