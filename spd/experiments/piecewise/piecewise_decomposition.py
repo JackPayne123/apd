@@ -53,7 +53,7 @@ def piecewise_plot_results_fn(
     fig_dict = {}
     # Plot functions
     if config.topk is not None:
-        fig_name, fig = plot_model_functions(
+        fig_dict_functions = plot_model_functions(
             spd_model=model,
             target_model=target_model,
             full_rank=isinstance(model, PiecewiseFunctionSPDFullRankTransformer),
@@ -62,26 +62,28 @@ def piecewise_plot_results_fn(
             stop=config.task_config.range_max,
             print_info=False,
         )
-        fig_dict[fig_name] = fig
+        fig_dict.update(fig_dict_functions)
     # Plot correlations
     if config.topk is not None and dataloader is not None:
-        fig_name, fig = plot_subnetwork_correlations(
+        fig_dict_correlations = plot_subnetwork_correlations(
             dataloader=dataloader,
             spd_model=model,
             config=config,
             device=device,
         )
-        fig_dict[fig_name] = fig
+        fig_dict.update(fig_dict_correlations)
     # Plot components
     if isinstance(model, PiecewiseFunctionSPDFullRankTransformer):
-        fig_name, fig = plot_components_fullrank(
+        fig_dict_components = plot_components_fullrank(
             model=model, step=step, out_dir=out_dir, slow_images=slow_images
         )
+        fig_dict.update(fig_dict_components)
     else:
-        fig_name, fig = plot_components(
+        fig_dict_components = plot_components(
             model=model, step=step, out_dir=out_dir, device=device, slow_images=slow_images
         )
-    fig_dict[fig_name] = fig
+        fig_dict.update(fig_dict_components)
+    # Save plots to files
     # Save plots to files
     if out_dir:
         for k, v in fig_dict.items():
