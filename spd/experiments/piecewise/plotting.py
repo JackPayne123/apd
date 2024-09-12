@@ -391,7 +391,7 @@ def plot_piecewise_model(
     start: float,
     end: float,
     num_points: int = 1000,
-):
+) -> plt.Figure:
     # make a figure with self.num_functions subplots
     num_functions = 1 if isinstance(model, PiecewiseLinear) else model.num_functions
     fig, axs = plt.subplots(num_functions, 1, figsize=(10, 5 * num_functions))
