@@ -260,6 +260,8 @@ def calc_attributions_rank_one(
     Returns:
         The sum of the (squared) attributions from each output dimension.
     """
+    grad_inner_acts_list: list[tuple[Float[Tensor, "... k"], ...]] = []
+    attribution_scores_list: list[tuple[Float[Tensor, "... k"], ...]] = []
     attribution_scores: Float[Tensor, "... k"] = torch.zeros_like(inner_acts[0])
     for feature_idx in range(out.shape[-1]):
         feature_attributions: Float[Tensor, "... k"] = torch.zeros_like(inner_acts[0])
@@ -267,12 +269,16 @@ def calc_attributions_rank_one(
             out[..., feature_idx].sum(), inner_acts, retain_graph=True
         )
         assert len(feature_grads) == len(inner_acts)
+        grad_inner_acts_list.append(feature_grads)
+        attribution_scores_list_tmp = []
         for param_matrix_idx in range(len(inner_acts)):
             feature_attributions += feature_grads[param_matrix_idx] * inner_acts[param_matrix_idx]
+            attribution_scores_list_tmp.append(feature_grads[param_matrix_idx] * inner_acts[param_matrix_idx])
+        attribution_scores_list.append(tuple(attribution_scores_list_tmp))
 
         attribution_scores += feature_attributions**2
 
-    return attribution_scores
+    return attribution_scores, (grad_inner_acts_list, attribution_scores_list)
 
 
 def calc_attributions_rank_one_per_layer(
@@ -314,7 +320,7 @@ def calc_attributions_rank_one_per_layer(
 
 
 def calc_attributions_full_rank(
-    out: Float[Tensor, "... out_dim"],
+    out: Float[Tensor, "... model_out_dim"],
     inner_acts: list[Float[Tensor, "... k d_out"]],
     layer_acts: list[Float[Tensor, "... d_out"]],
 ) -> Float[Tensor, "... k"]:
@@ -342,6 +348,7 @@ def calc_attributions_full_rank(
         inner_acts[0].shape[:-1], device=inner_acts[0].device
     )
     out_dim = out.shape[-1]
+    grad_layer_acts_list = []
     for feature_idx in range(out_dim):
         feature_attributions: Float[Tensor, "... k"] = torch.zeros(
             inner_acts[0].shape[:-1], device=inner_acts[0].device
@@ -356,10 +363,11 @@ def calc_attributions_full_rank(
                 inner_acts[param_matrix_idx],
                 "... d_out ,... k d_out -> ... k",
             )
+            grad_layer_acts_list.append(grad_layer_acts[param_matrix_idx])
 
         attribution_scores += feature_attributions**2
 
-    return attribution_scores
+    return attribution_scores, grad_layer_acts_list
 
 
 def calc_attributions_full_rank_per_layer(

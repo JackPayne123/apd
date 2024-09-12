@@ -45,24 +45,25 @@ assert isinstance(hardcoded_model, PiecewiseFunctionTransformer)
 assert isinstance(
     spd_model, PiecewiseFunctionSPDTransformer | PiecewiseFunctionSPDFullRankTransformer
 )
-spd_model.load_state_dict(torch.load(pretrained_path, weights_only=True, map_location="cpu"))
 
 # To test handcoded AB, uncomment the following line
-# spd_model.set_handcoded_AB(hardcoded_model)
+# spd_model.load_state_dict(torch.load(pretrained_path, weights_only=True, map_location="cpu"))
+spd_model.set_handcoded_AB(hardcoded_model)
 
 
-if config.topk is not None:
-    plot_subnetwork_correlations(dataloader, spd_model, config, device)
+# if config.topk is not None:
+#     plot_subnetwork_correlations(dataloader, spd_model, config, device)
 
-if config.full_rank:
-    assert isinstance(spd_model, PiecewiseFunctionSPDFullRankTransformer)
-    fig_dict = plot_components_fullrank(model=spd_model, step=-1, out_dir=None, slow_images=True)
-else:
-    assert isinstance(spd_model, PiecewiseFunctionSPDTransformer)
-    fig_dict = plot_components(
-        model=spd_model, step=-1, out_dir=None, device=device, slow_images=True
-    )
+# if config.full_rank:
+#     assert isinstance(spd_model, PiecewiseFunctionSPDFullRankTransformer)
+#     fig_dict = plot_components_fullrank(model=spd_model, step=-1, out_dir=None, slow_images=True)
+# else:
+#     assert isinstance(spd_model, PiecewiseFunctionSPDTransformer)
+#     fig_dict = plot_components(
+#         model=spd_model, step=-1, out_dir=None, device=device, slow_images=True
+#     )
 
+fig_dict = {}
 if config.topk is not None:
     extra_fig_dict = plot_model_functions(
         spd_model=spd_model,

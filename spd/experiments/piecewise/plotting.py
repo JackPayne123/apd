@@ -117,7 +117,7 @@ def plot_components(
     # Forward pass to get the output and inner activations
     out, layer_acts, inner_acts = model(x)
     # Calculate attribution scores
-    attribution_scores = calc_attributions_rank_one(out=out, inner_acts=inner_acts)
+    attribution_scores, _ = calc_attributions_rank_one(out=out, inner_acts=inner_acts)
     attribution_scores_normed = attribution_scores / attribution_scores.std(dim=1, keepdim=True)
     # Get As and Bs and ABs
     n_layers = model.n_layers
@@ -243,13 +243,15 @@ def run_spd_forward_pass(
 
     # SPD-model topk forward pass, copy-pasted from run_spd
     if full_rank:
-        attribution_scores = calc_attributions_full_rank(
+        attribution_scores, grad_layer_acts_list = calc_attributions_full_rank(
             out=model_output_spd,
             inner_acts=inner_acts,
             layer_acts=layer_acts,
         )
     else:
-        attribution_scores = calc_attributions_rank_one(out=model_output_spd, inner_acts=inner_acts)
+        attribution_scores, grad_layer_acts_list = calc_attributions_rank_one(
+            out=model_output_spd, inner_acts=inner_acts
+        )
     topk_mask = calc_topk_mask(attribution_scores, topk, batch_topk=batch_topk)
     model_output_spd_topk, layer_acts_topk, inner_acts_topk = spd_model.forward_topk(
         input_array, topk_mask=topk_mask
@@ -266,6 +268,7 @@ def run_spd_forward_pass(
         inner_acts_topk,
         attribution_scores,
         topk_mask,
+        grad_layer_acts_list,
     )
 
 
@@ -278,9 +281,9 @@ def plot_model_functions(
     stop: float,
     print_info: bool = False,
 ) -> dict[str, plt.Figure]:
-    fig, axes = plt.subplots(nrows=3, figsize=(12, 12), constrained_layout=True)
+    fig, axes = plt.subplots(nrows=5, figsize=(12, 20), constrained_layout=True)
     assert isinstance(axes, np.ndarray)
-    [ax, ax_attrib, ax_inner] = axes
+    [ax_f, ax_attrib, ax_attrib_each, ax_inner, ax_grads] = axes
     # For these tests we run with unusual data where there's always 1 control bit active, which
     # might differ from training. Thus we manually set topk to 1. Note that this should work for
     # both, batch and non-batch topk.
@@ -316,7 +319,15 @@ def plot_model_functions(
         inner_acts_topk,
         attribution_scores,
         topk_mask,
+        lists,
     ) = run_spd_forward_pass(spd_model, target_model, input_array, full_rank, batch_topk, topk)
+
+    grad_layer_acts_list, attribution_scores_list = lists
+    main_output_grads = grad_layer_acts_list[0]
+    main_attribution_scores_list = attribution_scores_list[0]
+    for x in grad_layer_acts_list:
+        for y in x:
+            print(f"{y.shape=}")
 
     if print_info:
         # Check if, ever, there are cases where the control bit is 1 but the topk_mask is False.
@@ -344,7 +355,7 @@ def plot_model_functions(
     # Plot for every k
     tab20 = plt.get_cmap("tab20")
     # cb stands for control bit which is active there; this differs from k due to permutation
-    for cb in range(n_functions):
+    for cb in [9]:
         d = 1 / n_functions
         color0 = tab20(cb / n_functions)
         color1 = tab20(cb / n_functions + d / 4)
@@ -354,15 +365,15 @@ def plot_model_functions(
         if model_output_hardcoded is not None:
             assert target_model is not None
             assert target_model.controlled_resnet is not None
-            ax.plot(
+            ax_f.plot(
                 x_space,
                 target_model.controlled_resnet.functions[cb](x_space),
                 ls=":",
                 color=color0,
             )
-            ax.plot(input_xs[s], model_output_hardcoded[s], label=f"cb={cb}", color=color1)
-        ax.plot(input_xs[s], model_output_spd[s], ls="-.", color=color2)
-        ax.plot(input_xs[s], out_topk[s], ls="--", color=color3)
+            ax_f.plot(input_xs[s], model_output_hardcoded[s], label=f"cb={cb}", color=color1)
+        ax_f.plot(input_xs[s], model_output_spd[s], ls="-.", color=color2)
+        ax_f.plot(input_xs[s], out_topk[s], ls="--", color=color3)
         k_cb = attribution_scores[s].mean(dim=0).argmax()
         for k in range(n_functions):
             # Find permutation
@@ -384,6 +395,21 @@ def plot_model_functions(
                             ls=ls,
                             label=f"cb={cb}, k_cb={k}" if j == 0 else None,
                         )
+                    ax_grads.plot(
+                        input_xs[s],
+                        main_output_grads[j].cpu().detach()[s][:, k],
+                        color=color1,
+                        ls=ls,
+                        label=f"cb={cb}, k_cb={k}" if j == 0 else None,
+                    )
+                    ax_grads.set_ylim(-5, 5)
+                    ax_attrib_each.plot(
+                        input_xs[s],
+                        main_attribution_scores_list[j].cpu().detach()[s][:, k],
+                        color=color1,
+                        ls=ls,
+                        label=f"cb={cb}, k_cb={k}" if j == 0 else None,
+                    )
             else:
                 ax_attrib.plot(input_xs[s], attribution_scores[s][:, k], color=color1, alpha=0.2)
                 for j in range(len(inner_acts)):
@@ -396,30 +422,59 @@ def plot_model_functions(
                             ls=ls,
                             lw=0.2,
                         )
-    ax_inner.plot([], [], color="C0", label="W_in", ls="-")
-    ax_inner.plot([], [], color="C0", label="W_out", ls="--")
-    ax_inner.plot([], [], color="k", label="k!=k_cb", ls="-", lw=0.2)
+                    ax_grads.plot(
+                        input_xs[s],
+                        main_output_grads[j].cpu().detach()[s][:, k],
+                        color="k",
+                        ls=ls,
+                        lw=0.2,
+                    )
+                    ax_attrib.plot(
+                        input_xs[s],
+                        attribution_scores[s][:, k],
+                        color="k",
+                        ls=ls,
+                        lw=0.2,
+                    )
+                    ax_attrib_each.plot(
+                        input_xs[s],
+                        main_attribution_scores_list[j].cpu().detach()[s][:, k],
+                        color="k",
+                        ls=ls,
+                        lw=0.2,
+                    )
 
     # Add some additional (blue) legend lines explaining the different line styles
+    # Add some additional (blue) legend lines explaining the different line styles
     if model_output_hardcoded is not None:
-        ax.plot([], [], ls=":", color="C0", label="true function")
-        ax.plot([], [], ls="-", color="C0", label="target model")
-    ax.plot([], [], ls="-.", color="C0", label="spd model")
-    ax.plot([], [], ls="--", color="C0", label="spd model topk")
-    ax.legend(ncol=3)
-    ax_attrib.legend(ncol=3)
-    ax_attrib.set_yscale("log")
-    ax_attrib.set_ylabel("attribution_scores (log)")
-    ax_attrib.set_xlabel("x (model input dim 0)")
-    ax_attrib.set_title(
-        "Attributions of each subnetwork for every control bit case (k=k_cb in bold)"
-    )
-    ax_inner.legend(ncol=3)
-    ax_inner.set_ylabel("inner acts (symlog)")
-    ax_inner.set_title("'inner acts', coloured for the top subnetwork, black for the others")
-    ax_inner.set_xlabel("x (model input dim 0)")
-    ax.set_xlabel("x (model input dim 0)")
-    ax.set_ylabel("f(x) (model output dim 0)")
+        ax_f.plot([], [], ls=":", color="C0", label="true function")
+        ax_f.plot([], [], ls="-", color="C0", label="target model")
+    ax_f.plot([], [], ls="-.", color="C0", label="spd model")
+    ax_f.plot([], [], ls="--", color="C0", label="spd model topk")
+    ax_f.set_xlabel("x (model input dim 0)")
+    ax_f.set_ylabel("f(x) (model output dim 0)")
+    ax_f.legend(ncol=3)
+    ax_f.grid(True)
+    axes[-1].set_xlabel("x (model input dim 0)")
+    # Lower plots
+    for ax in [ax_inner, ax_grads, ax_attrib, ax_attrib_each]:
+        ax.plot([], [], color="C0", label="W_in", ls="-")
+        ax.plot([], [], color="C0", label="W_out", ls="--")
+        ax.plot([], [], color="k", label="other subnets (k!=k_cb)", ls="-", lw=0.4)
+        ax.legend(ncol=4)
+        ax.grid(True)
+
+    ax_attrib.set_title("Attributions scores summed over layers (W_in and W_out)")
+    # ax_attrib.set_ylim(0, 0.2)
+
+    ax_attrib_each.set_title("Attributions scores for layer (W_in and W_out)")
+    # ax_attrib_each.set_ylim(-2, 2)
+
+    ax_grads.set_title("Gradients of output with respect to inner_acts")
+
+    ax_inner.set_title("Inner acts")
+    # ax_inner.set_ylim(-0.1, 2)
+
     return {"model_functions": fig}
 
 
@@ -433,7 +488,7 @@ def plot_subnetwork_correlations(
     for batch, _ in dataloader:
         batch = batch.to(device=device)
         assert config.topk is not None
-        _, _, _, _, _, _, _, _, topk_mask = run_spd_forward_pass(
+        _, _, _, _, _, _, _, _, topk_mask, grad_layer_acts_list = run_spd_forward_pass(
             spd_model=spd_model,
             target_model=None,
             input_array=batch,
