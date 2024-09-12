@@ -435,7 +435,7 @@ def plot_subnetwork_correlations(
     config: Config,
     device: str,
     n_forward_passes: int = 100,
-):
+) -> dict[str, plt.Figure]:
     topk_masks = []
     for batch, _ in dataloader:
         batch = batch.to(device=device)
