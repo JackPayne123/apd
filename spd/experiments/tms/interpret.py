@@ -27,7 +27,8 @@ subnet = torch.load(pretrained_path, map_location="cpu")["subnetwork_params"]
 
 # %%
 def plot_vectors(
-    subnet: Float[Tensor, "n_instances n_subnets n_features n_hidden"], n_instances: int = 5
+    subnet: Float[Tensor, "n_instances n_subnets n_features n_hidden"],
+    n_instances: int | None = None,
 ) -> plt.Figure:
     """2D polygon plot of each subnetwork.
 
@@ -35,14 +36,21 @@ def plot_vectors(
     https://colab.research.google.com/github/anthropics/toy-models-of-superposition/blob/main/toy_models.ipynb.
     """
     n_data_instances, n_subnets, n_features, n_hidden = subnet.shape
-    assert (
-        n_instances <= n_data_instances
-    ), "n_instances must be less than or equal to n_data_instances"
+    if n_instances is None:
+        n_instances = n_data_instances
+    else:
+        assert (
+            n_instances <= n_data_instances
+        ), "n_instances must be less than or equal to n_data_instances"
+
     sel = range(n_instances)
-    color = plt.cm.viridis(np.array([0.0]))  # type: ignore
+
+    # Use different colors for each subnetwork if there's only one instance
+    color_vals = np.linspace(0, 1, n_features) if n_instances == 1 else np.zeros(n_features)
+    colors = plt.cm.viridis(color_vals)  # type: ignore
 
     fig, axs = plt.subplots(len(sel), n_subnets + 1, figsize=(2 * (n_subnets + 1), 2 * (len(sel))))
-    axs = np.array(axs)
+    axs = np.atleast_2d(np.array(axs))
     for j in range(n_subnets + 1):
         for i, ax in enumerate(axs[:, j]):
             if j == 0:
@@ -51,12 +59,15 @@ def plot_vectors(
             else:
                 # Plot the jth subnet
                 arr = subnet[i, j - 1].cpu().detach().numpy()
-            ax.scatter(arr[:, 0], arr[:, 1], c=color)
-            ax.set_aspect("equal")
-            ax.add_collection(
-                mc.LineCollection(np.stack((np.zeros_like(arr), arr), axis=1), colors=[color])  # type: ignore
-            )
 
+            # Plot each feature with its unique color
+            for k in range(n_features):
+                ax.scatter(arr[k, 0], arr[k, 1], color=colors[k])
+                ax.add_collection(
+                    mc.LineCollection([[(0, 0), (arr[k, 0], arr[k, 1])]], colors=[colors[k]])
+                )
+
+            ax.set_aspect("equal")
             z = 1.5
             ax.set_facecolor("#FCFBF8")
             ax.set_xlim((-z, z))
@@ -70,13 +81,13 @@ def plot_vectors(
             if i == len(sel) - 1:
                 label = "Sum of subnets" if j == 0 else f"Subnet {j-1}"
                 ax.set_xlabel(label, rotation=0, ha="center", labelpad=60)
-            if j == 0:
+            if j == 0 and n_instances > 1:
                 ax.set_ylabel(f"Instance {i}", rotation=90, ha="center", labelpad=60)
 
     return fig
 
 
-fig = plot_vectors(subnet)
+fig = plot_vectors(subnet, n_instances=1)
 fig.savefig(pretrained_path.parent / "polygon_diagram.png", bbox_inches="tight", dpi=200)
 print(f"Saved figure to {pretrained_path.parent / 'polygon_diagram.png'}")
 
