@@ -35,6 +35,6 @@
         "feature_probability": 0.05,
         "train_bias": true,
         "bias_val": 0.0,
-        "pretrained_model_path": "/data/dan_braun/spd/spd/experiments/tms/out/tms_n-features5_n-hidden2_n-instances12_seed0.pth/model.pth"
+        "pretrained_model_path": "spd/experiments/tms/out/tms_n-features5_n-hidden2_n-instances12_seed0.pth/model.pth"
     }
 }

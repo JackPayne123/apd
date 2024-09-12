@@ -3,7 +3,6 @@
 import json
 
 import matplotlib.collections as mc
-import matplotlib.colors as mcolors
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
@@ -16,11 +15,7 @@ from spd.run_spd import (
 from spd.utils import REPO_ROOT
 
 # %%
-pretrained_path = (
-    REPO_ROOT
-    # / "spd/experiments/tms/out/fr_topk2.50e-01_topkrecon1.00e+01_topkl2_1.00e+00_lr1.00e-03_bs2048_ft5_hid2/model_30000.pth"
-    / "spd/experiments/tms/demo_spd_model/model_30000.pth"
-)
+pretrained_path = REPO_ROOT / "spd/experiments/tms/demo_spd_model/model_30000.pth"
 
 with open(pretrained_path.parent / "config.json") as f:
     config_dict = json.load(f)
@@ -44,11 +39,8 @@ def plot_vectors(
         n_instances <= n_data_instances
     ), "n_instances must be less than or equal to n_data_instances"
     sel = range(n_instances)
-    plt.rcParams["axes.prop_cycle"] = plt.cycler(
-        "color",
-        plt.cm.viridis(np.array([0.0])),  # type: ignore
-    )
-    plt.rcParams["figure.dpi"] = 200
+    color = plt.cm.viridis(np.array([0.0]))  # type: ignore
+
     fig, axs = plt.subplots(len(sel), n_subnets + 1, figsize=(2 * (n_subnets + 1), 2 * (len(sel))))
     axs = np.array(axs)
     for j in range(n_subnets + 1):
@@ -59,11 +51,10 @@ def plot_vectors(
             else:
                 # Plot the jth subnet
                 arr = subnet[i, j - 1].cpu().detach().numpy()
-            colors = [mcolors.to_rgba(c) for c in plt.rcParams["axes.prop_cycle"].by_key()["color"]]
-            ax.scatter(arr[:, 0], arr[:, 1], c=colors[0 : len(arr[:, 0])])
+            ax.scatter(arr[:, 0], arr[:, 1], c=color)
             ax.set_aspect("equal")
             ax.add_collection(
-                mc.LineCollection(np.stack((np.zeros_like(arr), arr), axis=1), colors=colors)  # type: ignore
+                mc.LineCollection(np.stack((np.zeros_like(arr), arr), axis=1), colors=[color])  # type: ignore
             )
 
             z = 1.5
@@ -86,6 +77,7 @@ def plot_vectors(
 
 
 fig = plot_vectors(subnet)
-fig.savefig(pretrained_path.parent / "polygon_diagram.png", bbox_inches="tight")
+fig.savefig(pretrained_path.parent / "polygon_diagram.png", bbox_inches="tight", dpi=200)
+print(f"Saved figure to {pretrained_path.parent / 'polygon_diagram.png'}")
 
 # %%
