@@ -14,7 +14,7 @@ from spd.utils import REPO_ROOT
 
 
 def plot_vectors(
-    subnet: Float[Tensor, "n_instances n_subnets n_features n_hidden"],
+    subnets: Float[Tensor, "n_instances n_subnets n_features n_hidden"],
     n_instances: int | None = None,
 ) -> plt.Figure:
     """2D polygon plot of each subnetwork.
@@ -22,30 +22,24 @@ def plot_vectors(
     Adapted from
     https://colab.research.google.com/github/anthropics/toy-models-of-superposition/blob/main/toy_models.ipynb.
     """
-    n_data_instances, n_subnets, n_features, n_hidden = subnet.shape
-    if n_instances is None:
-        n_instances = n_data_instances
-    else:
-        assert (
-            n_instances <= n_data_instances
-        ), "n_instances must be less than or equal to n_data_instances"
+    if n_instances is not None:
+        subnets = subnets[:n_instances]
+    n_instances, n_subnets, n_features, n_hidden = subnets.shape
 
-    sel = range(n_instances)
+    # Make a new subnet index in the beginning which is the sum of all subnets
+    subnets = torch.cat([subnets.sum(dim=1, keepdim=True), subnets], dim=1)
+    n_subnets += 1
 
     # Use different colors for each subnetwork if there's only one instance
     color_vals = np.linspace(0, 1, n_features) if n_instances == 1 else np.zeros(n_features)
     colors = plt.cm.viridis(color_vals)  # type: ignore
 
-    fig, axs = plt.subplots(len(sel), n_subnets + 1, figsize=(2 * (n_subnets + 1), 2 * (len(sel))))
+    fig, axs = plt.subplots(n_instances, n_subnets, figsize=(2 * n_subnets, 2 * n_instances))
     axs = np.atleast_2d(np.array(axs))
-    for j in range(n_subnets + 1):
+
+    for j in range(n_subnets):
         for i, ax in enumerate(axs[:, j]):
-            if j == 0:
-                # First, plot the addition of the subnetworks
-                arr = subnet[i].sum(dim=0).cpu().detach().numpy()
-            else:
-                # Plot the jth subnet
-                arr = subnet[i, j - 1].cpu().detach().numpy()
+            arr = subnets[i, j].cpu().detach().numpy()
 
             # Plot each feature with its unique color
             for k in range(n_features):
@@ -65,11 +59,125 @@ def plot_vectors(
             for spine in ["bottom", "left"]:
                 ax.spines[spine].set_position("center")
 
-            if i == len(sel) - 1:
+            if i == n_instances - 1:
                 label = "Sum of subnets" if j == 0 else f"Subnet {j-1}"
                 ax.set_xlabel(label, rotation=0, ha="center", labelpad=60)
             if j == 0 and n_instances > 1:
                 ax.set_ylabel(f"Instance {i}", rotation=90, ha="center", labelpad=60)
+
+    return fig
+
+
+def plot_networks(
+    subnets: Float[Tensor, "n_instances n_subnets n_features n_hidden"],
+    n_instances: int | None = None,
+) -> plt.Figure:
+    """Plot neural network diagrams for each W matrix in the subnet variable.
+
+    Args:
+        subnet: Tensor of shape [n_instances, n_subnets, n_features, n_hidden].
+        n_instances: Number of data instances to plot. If None, plot all.
+
+    Returns:
+        Matplotlib Figure object containing the network diagrams.
+    """
+
+    if n_instances is not None:
+        subnets = subnets[:n_instances]
+    n_instances, n_subnets, n_features, n_hidden = subnets.shape
+
+    # Make a new subnet index in the beginning which is the sum of all subnets
+    subnets = torch.cat([subnets.sum(dim=1, keepdim=True), subnets], dim=1)
+    n_subnets += 1
+
+    # Take the absolute value of the weights
+    subnets = subnets.abs()
+
+    # Find the maximum weight across each instance
+    max_weights = subnets.amax(dim=(1, 2, 3))
+
+    # Create a figure with subplots arranged as per the existing layout
+    fig, axs = plt.subplots(
+        n_instances,
+        n_subnets,
+        figsize=(2 * n_subnets, 3 * n_instances),
+        constrained_layout=True,
+    )
+    axs = np.atleast_2d(np.array(axs))
+
+    # Grayscale colormap. darker for larger weight
+    cmap = plt.get_cmap("gray_r")
+
+    for j in range(n_subnets):
+        for i, ax in enumerate(axs[:, j]):
+            arr = subnets[i, j].cpu().detach().numpy()
+
+            # Define node positions (top to bottom)
+            y_input, y_hidden, y_output = 0, -1, -2
+            x_input = np.linspace(0.05, 0.95, n_features)
+            x_hidden = np.linspace(0.25, 0.75, n_hidden)
+            x_output = np.linspace(0.05, 0.95, n_features)
+
+            # Plot nodes
+            ax.scatter(
+                x_input, [y_input] * n_features, s=200, color="grey", edgecolors="k", zorder=3
+            )
+            ax.scatter(
+                x_hidden, [y_hidden] * n_hidden, s=200, color="grey", edgecolors="k", zorder=3
+            )
+            ax.scatter(
+                x_output, [y_output] * n_features, s=200, color="grey", edgecolors="k", zorder=3
+            )
+
+            # Plot edges from input to hidden layer
+            for idx_input in range(n_features):
+                for idx_hidden in range(n_hidden):
+                    weight = arr[idx_input, idx_hidden]
+                    norm_weight = weight / max_weights[i]
+                    color = cmap(norm_weight)
+                    ax.plot(
+                        [x_input[idx_input], x_hidden[idx_hidden]],
+                        [y_input, y_hidden],
+                        color=color,
+                        linewidth=1,
+                    )
+
+            # Plot edges from hidden to output layer
+            arr_T = arr.T  # Transpose of W for W^T
+            for idx_hidden in range(n_hidden):
+                for idx_output in range(n_features):
+                    weight = arr_T[idx_hidden, idx_output]
+                    norm_weight = weight / max_weights[i]
+                    color = cmap(norm_weight)
+                    ax.plot(
+                        [x_hidden[idx_hidden], x_output[idx_output]],
+                        [y_hidden, y_output],
+                        color=color,
+                        linewidth=1,
+                    )
+
+            # Remove axes for clarity
+            ax.axis("off")
+            ax.set_xlim(-0.1, 1.1)
+            ax.set_ylim(y_output - 0.5, y_input + 0.5)
+
+            # Add labels
+            if i == n_instances - 1:
+                label = "Sum of subnets" if j == 0 else f"Subnet {j - 1}"
+                ax.text(
+                    0.5, -0.1, label, ha="center", va="center", transform=ax.transAxes, fontsize=12
+                )
+            if j == 0 and n_instances > 1:
+                ax.text(
+                    -0.1,
+                    0.5,
+                    f"Instance {i}",
+                    ha="center",
+                    va="center",
+                    rotation=90,
+                    transform=ax.transAxes,
+                    fontsize=12,
+                )
 
     return fig
 
@@ -83,6 +191,10 @@ if __name__ == "__main__":
 
     assert config.full_rank, "This script only works for full rank models"
     subnet = torch.load(pretrained_path, map_location="cpu")["subnetwork_params"]
-    fig = plot_vectors(subnet, n_instances=1)
-    fig.savefig(pretrained_path.parent / "polygon_diagram.png", bbox_inches="tight", dpi=200)
+    vector_fig = plot_vectors(subnet, n_instances=1)
+    vector_fig.savefig(pretrained_path.parent / "polygon_diagram.png", bbox_inches="tight", dpi=200)
     print(f"Saved figure to {pretrained_path.parent / 'polygon_diagram.png'}")
+
+    subnet_fig = plot_networks(subnet, n_instances=1)
+    subnet_fig.savefig(pretrained_path.parent / "network_diagram.png", bbox_inches="tight", dpi=200)
+    print(f"Saved figure to {pretrained_path.parent / 'network_diagram.png'}")
