@@ -52,7 +52,7 @@ def plot_vectors(
 
             ax.set_aspect("equal")
             z = 1.5
-            ax.set_facecolor("#FCFBF8")
+            ax.set_facecolor("#f6f6f6")
             ax.set_xlim((-z, z))
             ax.set_ylim((-z, z))
             ax.tick_params(left=True, right=False, labelleft=False, labelbottom=False, bottom=True)
@@ -75,12 +75,14 @@ def plot_vectors(
 def plot_networks(
     subnets: Float[Tensor, "n_instances n_subnets n_features n_hidden"],
     n_instances: int | None = None,
+    has_labels: bool = True,
 ) -> plt.Figure:
     """Plot neural network diagrams for each W matrix in the subnet variable.
 
     Args:
         subnet: Tensor of shape [n_instances, n_subnets, n_features, n_hidden].
         n_instances: Number of data instances to plot. If None, plot all.
+        has_labels: Whether to add labels to the plot.
 
     Returns:
         Matplotlib Figure object containing the network diagrams.
@@ -109,6 +111,28 @@ def plot_networks(
     )
     axs = np.atleast_2d(np.array(axs))
 
+    # axs[0, 0].set_xlabel("Outputs (before ReLU and biases)")
+    # Add the above but in text because the x-axis is killed
+    axs[0, 0].text(
+        0.1,
+        0.05,
+        "Outputs (before\nReLU and biases)",
+        ha="left",
+        va="center",
+        transform=axs[0, 0].transAxes,
+        fontsize=LABEL_FONT_SIZE,
+    )
+    # Also add "input label"
+    axs[0, 0].text(
+        0.1,
+        0.95,
+        "Inputs",
+        ha="left",
+        va="center",
+        transform=axs[0, 0].transAxes,
+        fontsize=LABEL_FONT_SIZE,
+    )
+
     # Grayscale colormap. darker for larger weight
     cmap = plt.get_cmap("gray_r")
 
@@ -121,6 +145,21 @@ def plot_networks(
             x_input = np.linspace(0.05, 0.95, n_features)
             x_hidden = np.linspace(0.25, 0.75, n_hidden)
             x_output = np.linspace(0.05, 0.95, n_features)
+
+            # Add transparent grey box around hidden layer
+            box_width = 0.8
+            box_height = 0.4
+            box = plt.Rectangle(
+                (0.5 - box_width / 2, y_hidden - box_height / 2),
+                box_width,
+                box_height,
+                fill=True,
+                facecolor="#e4e4e4",
+                edgecolor="none",
+                alpha=0.33,
+                transform=ax.transData,
+            )
+            ax.add_patch(box)
 
             # Plot nodes
             ax.scatter(
@@ -165,29 +204,29 @@ def plot_networks(
             ax.set_xlim(-0.1, 1.1)
             ax.set_ylim(y_output - 0.5, y_input + 0.5)
 
-            # Add labels
-            if i == n_instances - 1:
-                label = "Sum of subnets" if j == 0 else f"Subnet {j - 1}"
-                ax.text(
-                    0.5,
-                    0,
-                    label,
-                    ha="center",
-                    va="center",
-                    transform=ax.transAxes,
-                    fontsize=LABEL_FONT_SIZE,
-                )
-            if j == 0 and n_instances > 1:
-                ax.text(
-                    -0.1,
-                    0.5,
-                    f"Instance {i}",
-                    ha="center",
-                    va="center",
-                    rotation=90,
-                    transform=ax.transAxes,
-                    fontsize=LABEL_FONT_SIZE,
-                )
+            if has_labels:
+                if i == n_instances - 1:
+                    label = "Sum of subnets" if j == 0 else f"Subnet {j - 1}"
+                    ax.text(
+                        0.5,
+                        0,
+                        label,
+                        ha="center",
+                        va="center",
+                        transform=ax.transAxes,
+                        fontsize=LABEL_FONT_SIZE,
+                    )
+                if j == 0 and n_instances > 1:
+                    ax.text(
+                        -0.1,
+                        0.5,
+                        f"Instance {i}",
+                        ha="center",
+                        va="center",
+                        rotation=90,
+                        transform=ax.transAxes,
+                        fontsize=LABEL_FONT_SIZE,
+                    )
 
     return fig
 
@@ -200,11 +239,14 @@ if __name__ == "__main__":
         config = Config(**config_dict)
 
     assert config.full_rank, "This script only works for full rank models"
-    subnet = torch.load(pretrained_path, map_location="cpu")["subnetwork_params"]
-    vector_fig = plot_vectors(subnet, n_instances=1)
+    model = torch.load(pretrained_path, map_location="cpu", weights_only=True)
+    subnets = model["subnetwork_params"]
+    bias = model["b_final"]
+    subnets = torch.load(pretrained_path, map_location="cpu")["subnetwork_params"]
+    vector_fig = plot_vectors(subnets, n_instances=1)
     vector_fig.savefig(pretrained_path.parent / "polygon_diagram.png", bbox_inches="tight", dpi=200)
     print(f"Saved figure to {pretrained_path.parent / 'polygon_diagram.png'}")
 
-    subnet_fig = plot_networks(subnet, n_instances=1)
+    subnet_fig = plot_networks(subnets, n_instances=1, has_labels=False)
     subnet_fig.savefig(pretrained_path.parent / "network_diagram.png", bbox_inches="tight", dpi=200)
     print(f"Saved figure to {pretrained_path.parent / 'network_diagram.png'}")
