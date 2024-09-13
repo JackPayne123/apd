@@ -27,7 +27,12 @@ from tqdm import tqdm
 from spd.log import logger
 from spd.models.base import Model, SPDFullRankModel, SPDModel
 from spd.types import Probability, RootPath
-from spd.utils import calc_attributions_full_rank, calc_attributions_rank_one, calc_topk_mask
+from spd.utils import (
+    calc_ablation_attributions,
+    calc_attributions_full_rank,
+    calc_attributions_rank_one,
+    calc_topk_mask,
+)
 
 
 class TMSConfig(BaseModel):
@@ -470,23 +475,6 @@ def calc_lp_sparsity_loss_full_rank(
     lp_sparsity_loss = ((attributions.abs() + 1e-16) ** (step_pnorm * 0.5)).sum(dim=-1)
     lp_sparsity_loss = lp_sparsity_loss.mean(dim=0)  # Mean over batch dim
     return lp_sparsity_loss
-
-
-@torch.inference_mode()
-def calc_ablation_attributions(
-    model: SPDModel | SPDFullRankModel,
-    batch: Float[Tensor, "batch ... n_features"],
-    out: Float[Tensor, "batch ... d_model_out"],
-) -> Float[Tensor, "batch ... k"]:
-    """Calculate the attributions by ablating each subnetwork one at a time."""
-    attributions = torch.zeros(out.shape[:-1] + (model.k,), device=out.device, dtype=out.dtype)
-    for subnet_idx in range(model.k):
-        stored_vals = model.set_subnet_to_zero(subnet_idx)
-        ablation_out, _, _ = model(batch)
-        out_recon = ((out - ablation_out) ** 2).mean(dim=-1)
-        attributions[..., subnet_idx] = out_recon
-        model.restore_subnet(subnet_idx, stored_vals)
-    return attributions
 
 
 def optimize(

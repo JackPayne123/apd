@@ -19,6 +19,7 @@ from pydantic.v1.utils import deep_update
 from torch import Tensor
 from torch.utils.data import DataLoader, Dataset
 
+from spd.models.base import SPDFullRankModel, SPDModel
 from spd.settings import REPO_ROOT
 
 T = TypeVar("T", bound=BaseModel)
@@ -416,6 +417,23 @@ def calc_attributions_full_rank_per_layer(
             ).pow(2)
 
     return layer_attribution_scores
+
+
+@torch.inference_mode()
+def calc_ablation_attributions(
+    model: SPDModel | SPDFullRankModel,
+    batch: Float[Tensor, "batch ... n_features"],
+    out: Float[Tensor, "batch ... d_model_out"],
+) -> Float[Tensor, "batch ... k"]:
+    """Calculate the attributions by ablating each subnetwork one at a time."""
+    attributions = torch.zeros(out.shape[:-1] + (model.k,), device=out.device, dtype=out.dtype)
+    for subnet_idx in range(model.k):
+        stored_vals = model.set_subnet_to_zero(subnet_idx)
+        ablation_out, _, _ = model(batch)
+        out_recon = ((out - ablation_out) ** 2).mean(dim=-1)
+        attributions[..., subnet_idx] = out_recon
+        model.restore_subnet(subnet_idx, stored_vals)
+    return attributions
 
 
 def calc_topk_mask(
