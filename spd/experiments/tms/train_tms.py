@@ -147,7 +147,7 @@ if __name__ == "__main__":
     train(model, dataloader=dataloader, steps=config.steps)
 
     run_name = (
-        f"play_tms_n-features{config.n_features}_n-hidden{config.n_hidden}_"
+        f"tms_n-features{config.n_features}_n-hidden{config.n_hidden}_"
         f"n-instances{config.n_instances}_seed{config.seed}.pth"
     )
     out_dir = Path(__file__).parent / "out" / run_name
