@@ -12,6 +12,8 @@ from spd.run_spd import (
 )
 from spd.utils import REPO_ROOT
 
+LABEL_FONT_SIZE = 10
+
 
 def plot_vectors(
     subnets: Float[Tensor, "n_instances n_subnets n_features n_hidden"],
@@ -34,7 +36,7 @@ def plot_vectors(
     color_vals = np.linspace(0, 1, n_features) if n_instances == 1 else np.zeros(n_features)
     colors = plt.cm.viridis(color_vals)  # type: ignore
 
-    fig, axs = plt.subplots(n_instances, n_subnets, figsize=(2 * n_subnets, 2 * n_instances))
+    fig, axs = plt.subplots(n_instances, n_subnets, figsize=(2 * n_subnets, 3 * n_instances))
     axs = np.atleast_2d(np.array(axs))
 
     for j in range(n_subnets):
@@ -61,9 +63,11 @@ def plot_vectors(
 
             if i == n_instances - 1:
                 label = "Sum of subnets" if j == 0 else f"Subnet {j-1}"
-                ax.set_xlabel(label, rotation=0, ha="center", labelpad=60)
+                ax.set_xlabel(label, rotation=0, ha="center", labelpad=60, fontsize=LABEL_FONT_SIZE)
             if j == 0 and n_instances > 1:
-                ax.set_ylabel(f"Instance {i}", rotation=90, ha="center", labelpad=60)
+                ax.set_ylabel(
+                    f"Instance {i}", rotation=90, ha="center", labelpad=60, fontsize=LABEL_FONT_SIZE
+                )
 
     return fig
 
@@ -165,7 +169,13 @@ def plot_networks(
             if i == n_instances - 1:
                 label = "Sum of subnets" if j == 0 else f"Subnet {j - 1}"
                 ax.text(
-                    0.5, -0.1, label, ha="center", va="center", transform=ax.transAxes, fontsize=12
+                    0.5,
+                    0,
+                    label,
+                    ha="center",
+                    va="center",
+                    transform=ax.transAxes,
+                    fontsize=LABEL_FONT_SIZE,
                 )
             if j == 0 and n_instances > 1:
                 ax.text(
@@ -176,7 +186,7 @@ def plot_networks(
                     va="center",
                     rotation=90,
                     transform=ax.transAxes,
-                    fontsize=12,
+                    fontsize=LABEL_FONT_SIZE,
                 )
 
     return fig
