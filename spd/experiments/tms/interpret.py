@@ -116,7 +116,7 @@ def plot_networks(
     axs[0, 0].text(
         0.1,
         0.05,
-        "Outputs (before\nReLU and biases)",
+        "Outputs (before\nbias and ReLU)",
         ha="left",
         va="center",
         transform=axs[0, 0].transAxes,
