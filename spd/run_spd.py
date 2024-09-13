@@ -550,6 +550,24 @@ def optimize(
         out, layer_acts, inner_acts = model(batch)
         assert len(inner_acts) == model.n_param_matrices
 
+        # Get attributions
+        params: list[Float[Tensor, "k ..."]] = [p for p in model.parameters() if p.requires_grad]
+        batch_attribs: list[Float[Tensor, " k"]] = []
+        for batch_idx in range(out.shape[0]):
+            batch_grads = torch.autograd.grad(out[batch_idx, 0], params, retain_graph=True)
+            batch_attribs.append(
+                torch.stack(
+                    [
+                        einops.einsum(batch_grads[i], params[i], "k i j , k i j -> k")
+                        for i in range(len(params))
+                    ]
+                ).sum(dim=0)
+            )
+        attribs: Float[Tensor, "batch k"] = torch.stack(batch_attribs)
+
+        # out.backward(retain_graph=True)
+
+        # grads_all_parameters = [p.grad for p in ]
         # Calculate losses
         out_recon_loss = calc_recon_mse(out, labels, has_instance_dim)
 
@@ -598,6 +616,28 @@ def optimize(
             topk_mask = calc_topk_mask(
                 attribution_scores, config.topk, batch_topk=config.batch_topk
             )
+
+            fig, axes = plt.subplots(1, 2, figsize=(20, 10))
+            axes = np.array(axes)  # type: ignore
+            axes[0].matshow(attribution_scores[:10].cpu().detach(), vmin=-50, vmax=50)
+            axes[0].set_title("Old attribution scores")
+            axes[1].set_title("New param-based attribution scores")
+            axes[1].matshow(attribs[:10].cpu().detach(), vmin=-50, vmax=50)
+            # Numnbers
+            for i in range(10):
+                for j in range(len(attribution_scores[i])):
+                    axes[0].text(
+                        i,
+                        j,
+                        f"{attribution_scores[j][i].item():.2f}",
+                        ha="center",
+                        va="center",
+                        color="w",
+                    )
+                    axes[1].text(
+                        i, j, f"{attribs[j][i].item():.2f}", ha="center", va="center", color="w"
+                    )
+            plt.savefig("test.png")
 
             # Do a forward pass with only the topk subnetworks
             out_topk, _, inner_acts_topk = model.forward_topk(batch, topk_mask=topk_mask)

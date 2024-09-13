@@ -19,7 +19,6 @@ from spd.experiments.piecewise.models import (
 from spd.run_spd import Config, calc_recon_mse
 from spd.utils import (
     BatchedDataLoader,
-    calc_attributions_full_rank,
     calc_attributions_rank_one,
     calc_topk_mask,
 )
@@ -245,14 +244,30 @@ def run_spd_forward_pass(
     model_output_spd, layer_acts, inner_acts = spd_model(input_array)
 
     # SPD-model topk forward pass, copy-pasted from run_spd
-    if full_rank:
-        attribution_scores = calc_attributions_full_rank(
-            out=model_output_spd,
-            inner_acts=inner_acts,
-            layer_acts=layer_acts,
+    # if full_rank:
+    #     attribution_scores = calc_attributions_full_rank(
+    #         out=model_output_spd,
+    #         inner_acts=inner_acts,
+    #         layer_acts=layer_acts,
+    #     )
+    # else:
+    #     attribution_scores = calc_attributions_rank_one(out=model_output_spd, inner_acts=inner_acts)
+
+    # Get attributions
+    params: list[Float[Tensor, "k ..."]] = [p for p in spd_model.parameters() if p.requires_grad]
+    batch_attribs: list[Float[Tensor, " k"]] = []
+    for batch_idx in range(model_output_spd.shape[0]):
+        batch_grads = torch.autograd.grad(model_output_spd[batch_idx, 0], params, retain_graph=True)
+        batch_attribs.append(
+            torch.stack(
+                [
+                    einops.einsum(batch_grads[i], params[i], "k i j , k i j -> k")
+                    for i in range(len(params))
+                ]
+            ).sum(dim=0)
         )
-    else:
-        attribution_scores = calc_attributions_rank_one(out=model_output_spd, inner_acts=inner_acts)
+    attribution_scores: Float[Tensor, "batch k"] = torch.stack(batch_attribs)
+
     topk_mask = calc_topk_mask(attribution_scores, topk, batch_topk=batch_topk)
     model_output_spd_topk, layer_acts_topk, inner_acts_topk = spd_model.forward_topk(
         input_array, topk_mask=topk_mask
