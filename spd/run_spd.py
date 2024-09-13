@@ -97,6 +97,7 @@ class Config(BaseModel):
     sparsity_loss_type: Literal["jacobian"] = "jacobian"
     sparsity_warmup_pct: Probability = 0.0
     unit_norm_matrices: bool = True
+    ablation_attributions: bool = False
     task_config: DeepLinearConfig | PiecewiseConfig | TMSConfig = Field(
         ..., discriminator="task_name"
     )
@@ -471,6 +472,23 @@ def calc_lp_sparsity_loss_full_rank(
     return lp_sparsity_loss
 
 
+@torch.inference_mode()
+def calc_ablation_attributions(
+    model: SPDModel | SPDFullRankModel,
+    batch: Float[Tensor, "batch ... n_features"],
+    out: Float[Tensor, "batch ... d_model_out"],
+) -> Float[Tensor, "batch ... k"]:
+    """Calculate the attributions by ablating each subnetwork one at a time."""
+    attributions = torch.zeros(out.shape[:-1] + (model.k,), device=out.device, dtype=out.dtype)
+    for subnet_idx in range(model.k):
+        stored_vals = model.set_subnet_to_zero(subnet_idx)
+        ablation_out, _, _ = model(batch)
+        out_recon = ((out - ablation_out) ** 2).mean(dim=-1)
+        attributions[..., subnet_idx] = out_recon
+        model.restore_subnet(subnet_idx, stored_vals)
+    return attributions
+
+
 def optimize(
     model: SPDModel | SPDFullRankModel,
     config: Config,
@@ -557,6 +575,7 @@ def optimize(
         if config.param_match_coeff is not None:
             assert pretrained_model is not None, "Need a pretrained model for param_match loss"
             pretrained_weights = pretrained_model.all_decomposable_params()
+
             if config.full_rank:
                 assert isinstance(model, SPDFullRankModel)
                 param_match_loss = calc_param_match_loss_full_rank(
@@ -586,14 +605,17 @@ def optimize(
 
         out_topk, topk_l2_loss, topk_recon_loss = None, None, None
         if config.topk is not None:
-            if config.full_rank:
-                attribution_scores = calc_attributions_full_rank(
-                    out=out,
-                    inner_acts=inner_acts,
-                    layer_acts=layer_acts,
-                )
+            if config.ablation_attributions:
+                attribution_scores = calc_ablation_attributions(model=model, batch=batch, out=out)
             else:
-                attribution_scores = calc_attributions_rank_one(out=out, inner_acts=inner_acts)
+                if config.full_rank:
+                    attribution_scores = calc_attributions_full_rank(
+                        out=out,
+                        inner_acts=inner_acts,
+                        layer_acts=layer_acts,
+                    )
+                else:
+                    attribution_scores = calc_attributions_rank_one(out=out, inner_acts=inner_acts)
 
             topk_mask = calc_topk_mask(
                 attribution_scores, config.topk, batch_topk=config.batch_topk

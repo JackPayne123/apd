@@ -1,6 +1,6 @@
 wandb_project: spd-tms
 wandb_run_name: null
-wandb_run_name_prefix: ""
+wandb_run_name_prefix: "abl_"
 seed: 0
 topk: 0.25
 batch_topk: true
@@ -15,6 +15,7 @@ save_freq: 30_000
 lr: 1e-3
 lr_schedule: constant
 lr_warmup_pct: 0.1
+ablation_attributions: true
 task_config:
   task_name: tms
   k: 5
