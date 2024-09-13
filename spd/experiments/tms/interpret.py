@@ -1,5 +1,3 @@
-# %%
-
 import json
 
 import matplotlib.collections as mc
@@ -14,18 +12,7 @@ from spd.run_spd import (
 )
 from spd.utils import REPO_ROOT
 
-# %%
-pretrained_path = REPO_ROOT / "spd/experiments/tms/demo_spd_model/model_30000.pth"
 
-with open(pretrained_path.parent / "config.json") as f:
-    config_dict = json.load(f)
-    config = Config(**config_dict)
-
-assert config.full_rank, "This script only works for full rank models"
-subnet = torch.load(pretrained_path, map_location="cpu")["subnetwork_params"]
-
-
-# %%
 def plot_vectors(
     subnet: Float[Tensor, "n_instances n_subnets n_features n_hidden"],
     n_instances: int | None = None,
@@ -87,8 +74,15 @@ def plot_vectors(
     return fig
 
 
-fig = plot_vectors(subnet, n_instances=1)
-fig.savefig(pretrained_path.parent / "polygon_diagram.png", bbox_inches="tight", dpi=200)
-print(f"Saved figure to {pretrained_path.parent / 'polygon_diagram.png'}")
+if __name__ == "__main__":
+    pretrained_path = REPO_ROOT / "spd/experiments/tms/demo_spd_model/model_30000.pth"
 
-# %%
+    with open(pretrained_path.parent / "config.json") as f:
+        config_dict = json.load(f)
+        config = Config(**config_dict)
+
+    assert config.full_rank, "This script only works for full rank models"
+    subnet = torch.load(pretrained_path, map_location="cpu")["subnetwork_params"]
+    fig = plot_vectors(subnet, n_instances=1)
+    fig.savefig(pretrained_path.parent / "polygon_diagram.png", bbox_inches="tight", dpi=200)
+    print(f"Saved figure to {pretrained_path.parent / 'polygon_diagram.png'}")
