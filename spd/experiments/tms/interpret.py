@@ -12,8 +12,6 @@ from spd.run_spd import (
 )
 from spd.utils import REPO_ROOT
 
-LABEL_FONT_SIZE = 10
-
 
 def plot_vectors(
     subnets: Float[Tensor, "n_instances n_subnets n_features n_hidden"],
@@ -63,11 +61,9 @@ def plot_vectors(
 
             if i == n_instances - 1:
                 label = "Sum of subnets" if j == 0 else f"Subnet {j-1}"
-                ax.set_xlabel(label, rotation=0, ha="center", labelpad=60, fontsize=LABEL_FONT_SIZE)
+                ax.set_xlabel(label, rotation=0, ha="center", labelpad=60)
             if j == 0 and n_instances > 1:
-                ax.set_ylabel(
-                    f"Instance {i}", rotation=90, ha="center", labelpad=60, fontsize=LABEL_FONT_SIZE
-                )
+                ax.set_ylabel(f"Instance {i}", rotation=90, ha="center", labelpad=60)
 
     return fig
 
@@ -80,7 +76,7 @@ def plot_networks(
     """Plot neural network diagrams for each W matrix in the subnet variable.
 
     Args:
-        subnet: Tensor of shape [n_instances, n_subnets, n_features, n_hidden].
+        subnets: Tensor of shape [n_instances, n_subnets, n_features, n_hidden].
         n_instances: Number of data instances to plot. If None, plot all.
         has_labels: Whether to add labels to the plot.
 
@@ -97,10 +93,10 @@ def plot_networks(
     n_subnets += 1
 
     # Take the absolute value of the weights
-    subnets = subnets.abs()
+    subnets_abs = subnets.abs()
 
     # Find the maximum weight across each instance
-    max_weights = subnets.amax(dim=(1, 2, 3))
+    max_weights = subnets_abs.amax(dim=(1, 2, 3))
 
     # Create a figure with subplots arranged as per the existing layout
     fig, axs = plt.subplots(
@@ -120,7 +116,6 @@ def plot_networks(
         ha="left",
         va="center",
         transform=axs[0, 0].transAxes,
-        fontsize=LABEL_FONT_SIZE,
     )
     # Also add "input label"
     axs[0, 0].text(
@@ -130,7 +125,6 @@ def plot_networks(
         ha="left",
         va="center",
         transform=axs[0, 0].transAxes,
-        fontsize=LABEL_FONT_SIZE,
     )
 
     # Grayscale colormap. darker for larger weight
@@ -138,7 +132,7 @@ def plot_networks(
 
     for j in range(n_subnets):
         for i, ax in enumerate(axs[:, j]):
-            arr = subnets[i, j].cpu().detach().numpy()
+            arr = subnets_abs[i, j].cpu().detach().numpy()
 
             # Define node positions (top to bottom)
             y_input, y_hidden, y_output = 0, -1, -2
@@ -214,7 +208,6 @@ def plot_networks(
                         ha="center",
                         va="center",
                         transform=ax.transAxes,
-                        fontsize=LABEL_FONT_SIZE,
                     )
                 if j == 0 and n_instances > 1:
                     ax.text(
@@ -225,7 +218,6 @@ def plot_networks(
                         va="center",
                         rotation=90,
                         transform=ax.transAxes,
-                        fontsize=LABEL_FONT_SIZE,
                     )
 
     return fig
@@ -242,11 +234,10 @@ if __name__ == "__main__":
     model = torch.load(pretrained_path, map_location="cpu", weights_only=True)
     subnets = model["subnetwork_params"]
     bias = model["b_final"]
-    subnets = torch.load(pretrained_path, map_location="cpu")["subnetwork_params"]
-    vector_fig = plot_vectors(subnets, n_instances=1)
-    vector_fig.savefig(pretrained_path.parent / "polygon_diagram.png", bbox_inches="tight", dpi=200)
+    fig1 = plot_vectors(subnets, n_instances=1)
+    fig1.savefig(pretrained_path.parent / "polygon_diagram.png", bbox_inches="tight", dpi=200)
     print(f"Saved figure to {pretrained_path.parent / 'polygon_diagram.png'}")
 
-    subnet_fig = plot_networks(subnets, n_instances=1, has_labels=False)
-    subnet_fig.savefig(pretrained_path.parent / "network_diagram.png", bbox_inches="tight", dpi=200)
+    fig2 = plot_networks(subnets, n_instances=1, has_labels=False)
+    fig2.savefig(pretrained_path.parent / "network_diagram.png", bbox_inches="tight", dpi=200)
     print(f"Saved figure to {pretrained_path.parent / 'network_diagram.png'}")
