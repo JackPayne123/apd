@@ -37,9 +37,9 @@ def plot_vectors(
     fig, axs = plt.subplots(n_instances, n_subnets, figsize=(2 * n_subnets, 3 * n_instances))
     axs = np.atleast_2d(np.array(axs))
 
-    for j in range(n_subnets):
-        for i, ax in enumerate(axs[:, j]):
-            arr = subnets[i, j].cpu().detach().numpy()
+    for subnet_idx in range(n_subnets):
+        for instance_idx, ax in enumerate(axs[:, subnet_idx]):
+            arr = subnets[instance_idx, subnet_idx].cpu().detach().numpy()
 
             # Plot each feature with its unique color
             for k in range(n_features):
@@ -59,11 +59,11 @@ def plot_vectors(
             for spine in ["bottom", "left"]:
                 ax.spines[spine].set_position("center")
 
-            if i == n_instances - 1:
-                label = "Sum of subnets" if j == 0 else f"Subnet {j-1}"
+            if instance_idx == n_instances - 1:
+                label = "Sum of subnets" if subnet_idx == 0 else f"Subnet {subnet_idx-1}"
                 ax.set_xlabel(label, rotation=0, ha="center", labelpad=60)
-            if j == 0 and n_instances > 1:
-                ax.set_ylabel(f"Instance {i}", rotation=90, ha="center", labelpad=60)
+            if subnet_idx == 0 and n_instances > 1:
+                ax.set_ylabel(f"Instance {instance_idx}", rotation=90, ha="center", labelpad=60)
 
     return fig
 
@@ -130,9 +130,9 @@ def plot_networks(
     # Grayscale colormap. darker for larger weight
     cmap = plt.get_cmap("gray_r")
 
-    for j in range(n_subnets):
-        for i, ax in enumerate(axs[:, j]):
-            arr = subnets_abs[i, j].cpu().detach().numpy()
+    for subnet_idx in range(n_subnets):
+        for instance_idx, ax in enumerate(axs[:, subnet_idx]):
+            arr = subnets_abs[instance_idx, subnet_idx].cpu().detach().numpy()
 
             # Define node positions (top to bottom)
             y_input, y_hidden, y_output = 0, -1, -2
@@ -170,7 +170,7 @@ def plot_networks(
             for idx_input in range(n_features):
                 for idx_hidden in range(n_hidden):
                     weight = arr[idx_input, idx_hidden]
-                    norm_weight = weight / max_weights[i]
+                    norm_weight = weight / max_weights[instance_idx]
                     color = cmap(norm_weight)
                     ax.plot(
                         [x_input[idx_input], x_hidden[idx_hidden]],
@@ -184,7 +184,7 @@ def plot_networks(
             for idx_hidden in range(n_hidden):
                 for idx_output in range(n_features):
                     weight = arr_T[idx_hidden, idx_output]
-                    norm_weight = weight / max_weights[i]
+                    norm_weight = weight / max_weights[instance_idx]
                     color = cmap(norm_weight)
                     ax.plot(
                         [x_hidden[idx_hidden], x_output[idx_output]],
@@ -199,8 +199,8 @@ def plot_networks(
             ax.set_ylim(y_output - 0.5, y_input + 0.5)
 
             if has_labels:
-                if i == n_instances - 1:
-                    label = "Sum of subnets" if j == 0 else f"Subnet {j - 1}"
+                if instance_idx == n_instances - 1:
+                    label = "Sum of subnets" if subnet_idx == 0 else f"Subnet {subnet_idx - 1}"
                     ax.text(
                         0.5,
                         0,
@@ -209,11 +209,11 @@ def plot_networks(
                         va="center",
                         transform=ax.transAxes,
                     )
-                if j == 0 and n_instances > 1:
+                if subnet_idx == 0 and n_instances > 1:
                     ax.text(
                         -0.1,
                         0.5,
-                        f"Instance {i}",
+                        f"Instance {instance_idx}",
                         ha="center",
                         va="center",
                         rotation=90,
