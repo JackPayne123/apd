@@ -69,6 +69,7 @@ class PiecewiseConfig(BaseModel):
     range_max: float
     k: PositiveInt
     target_seed: int | None = None
+    dataset_seed: int | None = None
     simple_bias: bool = False
     handcoded_AB: bool = False
 
