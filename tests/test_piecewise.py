@@ -79,11 +79,11 @@ def piecewise_decomposition_optimize_test(config: Config, check_A_changed: bool 
     assert torch.allclose(piecewise_model_spd.W_U.weight, initial_W_U)
 
 
-def test_piecewise_batch_tokp_no_l2_handcoded_AB() -> None:
+def test_piecewise_batch_topk_no_l2_handcoded_AB() -> None:
     config = Config(
         topk=4,
         batch_topk=True,
-        batch_size=4,  # Needs to be enough to have at least 1 control bit on.
+        batch_size=4,  # Needs to be enough to have at least 1 control bit on in two steps
         steps=2,
         print_freq=2,
         save_freq=None,
@@ -182,6 +182,7 @@ def test_piecewise_batch_topk_rank_one_simple_bias_false_loss_stable() -> None:
     set_seed(0)
     device = "cpu"
     config = Config(
+        seed=0,
         full_rank=False,
         topk=2,
         batch_topk=True,
