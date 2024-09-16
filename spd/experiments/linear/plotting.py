@@ -76,9 +76,12 @@ def plot_subnetwork_attributions_fn(
     step: int | None = None,
     n_instances: int | None = None,
 ) -> plt.Figure:
-    """Plot the attributions for the first batch_elements in the batch.
+    """Plot the attributions per layer, as well as the raw input batch.
 
-    The first row is the raw batch information, the following rows are the attributions per layer.
+    The first row of the plot is a matrix of shape (batch, n_features) where a unique features is
+    active in each element of the batch.
+    Subsequent rows are attributions for each layer of shape (batch, k).
+    Each column is a new instance.
     """
     n_layers = len(attributions)
     assert n_instances is None or n_instances <= batch.shape[1]
