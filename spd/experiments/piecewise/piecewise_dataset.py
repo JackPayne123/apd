@@ -24,7 +24,7 @@ class PiecewiseDataset(Dataset[tuple[Float[Tensor, " n_inputs"], Float[Tensor, "
         range_max: float,
         batch_size: int,
         return_labels: bool,
-        dataset_seed: int,
+        dataset_seed: int | None = None,
     ):
         self.n_inputs = n_inputs
         self.functions = functions
@@ -34,7 +34,8 @@ class PiecewiseDataset(Dataset[tuple[Float[Tensor, " n_inputs"], Float[Tensor, "
         self.batch_size = batch_size
         self.return_labels = return_labels
         self.seed_generator = torch.Generator()
-        self.seed_generator.manual_seed(dataset_seed)
+        if dataset_seed is not None:
+            self.seed_generator.manual_seed(dataset_seed)
 
     def __len__(self) -> int:
         return 2**31
