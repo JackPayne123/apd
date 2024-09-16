@@ -30,6 +30,16 @@ def to_root_path(path: str | Path):
     return Path(path) if Path(path).is_absolute() else Path(REPO_ROOT / path)
 
 
+def from_root_path(path: str | Path) -> Path:
+    """Converts absolute paths to relative ones, relative to the repo root."""
+    path = Path(path)
+    try:
+        return path.relative_to(REPO_ROOT)
+    except ValueError:
+        # If the path is not relative to REPO_ROOT, return the original path
+        return path
+
+
 def permute_to_identity(x: torch.Tensor, normalize_rows: bool = False) -> torch.Tensor:
     """Permute the rows of a matrix such that the maximum value in each column is on the leading
     diagonal.
@@ -351,6 +361,9 @@ def calc_attributions_full_rank(
         )
         assert len(grad_layer_acts) == len(inner_acts)
         for param_matrix_idx in range(len(inner_acts)):
+            # Note that this operation would be equivalent to:
+            # einsum(grad_inner_acts, inner_acts, "... k d_out ,... k d_out -> ... k")
+            # since the gradient distributes over the sum.
             feature_attributions += einops.einsum(
                 grad_layer_acts[param_matrix_idx].detach(),
                 inner_acts[param_matrix_idx],

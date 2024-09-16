@@ -1,9 +1,11 @@
 """Linear decomposition script."""
 
 import json
+from functools import partial
 from pathlib import Path
 
 import fire
+import matplotlib.pyplot as plt
 import torch
 import wandb
 from jaxtyping import Float
@@ -20,6 +22,7 @@ from spd.experiments.piecewise.plotting import (
     plot_components,
     plot_components_fullrank,
     plot_model_functions,
+    plot_subnetwork_correlations,
 )
 from spd.experiments.piecewise.trig_functions import generate_trig_functions
 from spd.log import logger
@@ -38,17 +41,19 @@ wandb.require("core")
 def piecewise_plot_results_fn(
     model: PiecewiseFunctionSPDTransformer | PiecewiseFunctionSPDFullRankTransformer,
     target_model: PiecewiseFunctionTransformer | None,
+    dataloader: BatchedDataLoader[tuple[Float[Tensor, " n_inputs"], Float[Tensor, ""]]] | None,
     step: int,
     out_dir: Path | None,
     device: str,
     config: Config,
     **_,
-):
+) -> dict[str, plt.Figure]:
     assert isinstance(config.task_config, PiecewiseConfig)
     slow_images = config.slow_images
+    fig_dict = {}
     # Plot functions
     if config.topk is not None:
-        fig_dict_1 = plot_model_functions(
+        fig_dict_functions = plot_model_functions(
             spd_model=model,
             target_model=target_model,
             full_rank=isinstance(model, PiecewiseFunctionSPDFullRankTransformer),
@@ -57,26 +62,35 @@ def piecewise_plot_results_fn(
             stop=config.task_config.range_max,
             print_info=False,
         )
-    else:
-        fig_dict_1 = {}
+        fig_dict.update(fig_dict_functions)
+    # Plot correlations
+    if config.topk is not None and dataloader is not None:
+        fig_dict_correlations = plot_subnetwork_correlations(
+            dataloader=dataloader,
+            spd_model=model,
+            config=config,
+            device=device,
+        )
+        fig_dict.update(fig_dict_correlations)
     # Plot components
     if isinstance(model, PiecewiseFunctionSPDFullRankTransformer):
-        fig_dict_2 = plot_components_fullrank(
+        fig_dict_components = plot_components_fullrank(
             model=model, step=step, out_dir=out_dir, slow_images=slow_images
         )
+        fig_dict.update(fig_dict_components)
     else:
-        fig_dict_2 = plot_components(
+        fig_dict_components = plot_components(
             model=model, step=step, out_dir=out_dir, device=device, slow_images=slow_images
         )
-    # Adjust order of plots on wandb
-    fig_dict = {**fig_dict_2, **fig_dict_1}
+        fig_dict.update(fig_dict_components)
+    # Save plots to files
     # Save plots to files
     if out_dir:
         for k, v in fig_dict.items():
             out_file = out_dir / f"{k}_s{step}.png"
             v.savefig(out_file, dpi=200)
             tqdm.write(f"Saved plot to {out_file}")
-    return {**fig_dict_2, **fig_dict_1}
+    return fig_dict
 
 
 def get_run_name(config: Config) -> str:
@@ -190,6 +204,11 @@ def get_model_and_dataloader(
     piecewise_model_spd.W_E.requires_grad_(False)
     piecewise_model_spd.W_U.requires_grad_(False)
 
+    train_dataset_seed = (
+        config.task_config.dataset_seed
+        if config.task_config.dataset_seed is not None
+        else config.seed
+    )
     dataset = PiecewiseDataset(
         n_inputs=piecewise_model.n_inputs,
         functions=functions,
@@ -198,6 +217,7 @@ def get_model_and_dataloader(
         range_max=config.task_config.range_max,
         batch_size=config.batch_size,
         return_labels=False,
+        dataset_seed=train_dataset_seed,
     )
     dataloader = BatchedDataLoader(dataset)
 
@@ -209,6 +229,7 @@ def get_model_and_dataloader(
         range_max=config.task_config.range_max,
         batch_size=config.batch_size,
         return_labels=True,
+        dataset_seed=train_dataset_seed + 1,
     )
     test_dataloader = BatchedDataLoader(test_dataset)
 
@@ -256,6 +277,11 @@ def main(
     loss /= n_batches
     logger.info(f"Loss of hardcoded model on 5 batches: {loss}")
 
+    plot_results_fn = partial(
+        piecewise_plot_results_fn,
+        dataloader=test_dataloader,
+    )
+
     optimize(
         model=piecewise_model_spd,
         config=config,
@@ -263,7 +289,7 @@ def main(
         device=device,
         pretrained_model=piecewise_model,
         dataloader=dataloader,
-        plot_results_fn=piecewise_plot_results_fn,
+        plot_results_fn=plot_results_fn,
     )
 
     if config.wandb_project:
