@@ -6,8 +6,9 @@ import torch.nn as nn
 from einops import einsum
 
 # %%
-m = torch.load("out/ml_topk0.625_topkrecon0.1_topkl2_1.0_lr0.01_bs2048lay2_/model_50000.pth")
-m = torch.load("out/ml_topk0.3_topkrecon0.1_topkl2_1.0_lr0.01_bs2000lay2_/model_50000.pth")
+m = torch.load(
+    "/data/stefan_heimersheim/projects/SPD/spd/spd/experiments/piecewise/out/plot4sn2l_seed0_topk2.49e-01_topkrecon1.00e+00_topkl2_1.00e+00_lr1.00e-02_bs2000lay2/model_30000.pth"
+)
 
 # m["mlps.0.linear1.A"]
 mlp_components = []
@@ -46,27 +47,28 @@ def plot_nodes(ax):
             ax.scatter(i + 0.5, d_embed + j, color="lightgrey", edgecolor="black", s=30)
 
 
-lw_scale = 0.1
+lw_scale = 2
 
 plot_nodes(ax)
 # Weights
 for i, mlp in enumerate(mlps):
     W_in, W_out = mlp
+    # Normalize weights
+    W_in = W_in / W_in.abs().max()
+    W_out = W_out / W_out.abs().max()
     for j in range(d_embed):
         for k in range(d_mlp):
-            ax.plot(
-                [i, i + 0.5],
-                [j, d_embed + k],
-                lw=lw_scale * W_in.abs()[j, k],
-                color="r" if W_in[j, k] > 0 else "b",
-            )
+            ax.plot([i, i + 0.5], [j, d_embed + k], lw=lw_scale * W_in.abs()[j, k], color="grey")
             ax.plot(
                 [i + 0.5, i + 1],
                 [d_embed + k, j],
-                lw=lw_scale * W_out.abs()[k, j],
-                color="r" if W_out[k, j] > 0 else "b",
+                lw=lw_scale * W_out[k, j],
+                color="grey",
             )
-
+# Plot residual
+for i in range(n_layers):
+    for j in range(d_embed):
+        ax.plot([i, i + 1], [j, j], lw=lw_scale * 1, color="grey")
 
 # %%
 

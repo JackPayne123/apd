@@ -1,8 +1,8 @@
 wandb_project: spd-piecewise
 wandb_run_name: null
-wandb_run_name_prefix: "ml_"
+wandb_run_name_prefix: "plot4s2l3n_"
 seed: 0
-topk: 0.27
+topk: 0.2490234375
 batch_topk: true
 param_match_coeff: 1.0
 topk_recon_coeff: 1.0
@@ -15,14 +15,14 @@ steps: 50_000
 print_freq: 500
 image_freq: 50_000
 slow_images: true
-save_freq: 50_000
+save_freq: 10_000
 lr_warmup_pct: 0.004
 unit_norm_matrices: false
 lr_schedule: cosine
 task_config:
   task_name: piecewise
   n_functions: 4
-  neurons_per_function: 10
+  neurons_per_function: 3
   n_layers: 2
   feature_probability: 0.05
   range_min: 0

@@ -73,17 +73,19 @@ def piecewise_plot_results_fn(
         )
         fig_dict.update(fig_dict_correlations)
     # Plot components
-    if isinstance(model, PiecewiseFunctionSPDFullRankTransformer):
-        fig_dict_components = plot_components_fullrank(
-            model=model, step=step, out_dir=out_dir, slow_images=slow_images
-        )
-        fig_dict.update(fig_dict_components)
+    if config.task_config.n_layers == 1:
+        if isinstance(model, PiecewiseFunctionSPDFullRankTransformer):
+            fig_dict_components = plot_components_fullrank(
+                model=model, step=step, out_dir=out_dir, slow_images=slow_images
+            )
+            fig_dict.update(fig_dict_components)
+        else:
+            fig_dict_components = plot_components(
+                model=model, step=step, out_dir=out_dir, device=device, slow_images=slow_images
+            )
+            fig_dict.update(fig_dict_components)
     else:
-        fig_dict_components = plot_components(
-            model=model, step=step, out_dir=out_dir, device=device, slow_images=slow_images
-        )
-        fig_dict.update(fig_dict_components)
-    # Save plots to files
+        tqdm.write("Skipping component plots for >1 layer models")
     # Save plots to files
     if out_dir:
         for k, v in fig_dict.items():

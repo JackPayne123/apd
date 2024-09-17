@@ -379,7 +379,7 @@ def plot_model_functions(
                     color=color1,
                     label=f"cb={cb}, k_cb={k}",
                 )
-                assert len(inner_acts) <= 3, "Didn't implement more than 3 SPD 'layers' yet"
+                assert len(inner_acts) <= 2, "Didn't implement more than 2 SPD 'layers' yet"
                 for j in range(len(inner_acts)):
                     ls = ["-", "--"][j]
                     if not isinstance(spd_model, PiecewiseFunctionSPDFullRankTransformer):
