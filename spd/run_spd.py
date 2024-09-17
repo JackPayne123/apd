@@ -63,6 +63,8 @@ class PiecewiseConfig(BaseModel):
     range_min: float
     range_max: float
     k: PositiveInt
+    target_seed: int | None = None
+    dataset_seed: int | None = None
     simple_bias: bool = False
     handcoded_AB: bool = False
 
@@ -291,11 +293,11 @@ def calc_topk_l2_full_rank(
     n_instances = topk_mask.shape[1] if topk_mask.ndim == 3 else None
     accumulate_shape = (batch_size,) if n_instances is None else (batch_size, n_instances)
 
+    topk_mask = topk_mask.to(subnetwork_params[0].dtype)
     topk_l2_penalty = torch.zeros(accumulate_shape, device=subnetwork_params[0].device)
     for subnetwork_param in subnetwork_params:
         # subnetwork_param: [k, d_in, d_out] or [n_instances, k, d_in, d_out]
         # topk_mask: [batch, k] or [batch, n_instances, k]
-        topk_mask = topk_mask.float()
         topk_params = einops.einsum(
             subnetwork_param, topk_mask, "... k d_in d_out, batch ... k -> batch ... d_in d_out"
         )
@@ -393,14 +395,14 @@ def calc_lp_sparsity_loss_rank_one(
             dimension.
     """
     assert len(layer_acts) == len(inner_acts) == len(layer_out_params)
-    lp_sparsity_loss = torch.zeros_like(inner_acts[0], requires_grad=True)
+    attributions = torch.zeros_like(inner_acts[0], requires_grad=True)
     for feature_idx in range(out.shape[-1]):
         grad_layer_acts = torch.autograd.grad(
             out[..., feature_idx].sum(),
             layer_acts,
             retain_graph=True,
         )
-        sparsity_inner = torch.zeros_like(lp_sparsity_loss, requires_grad=True)
+        sparsity_inner = torch.zeros_like(attributions, requires_grad=True)
         for param_matrix_idx in range(len(layer_out_params)):
             # h_i * grad_h_i
             sparsity_inner = sparsity_inner + (
@@ -412,11 +414,11 @@ def calc_lp_sparsity_loss_rank_one(
                 )
             )
 
-        lp_sparsity_loss = lp_sparsity_loss + sparsity_inner**2
-    lp_sparsity_loss = lp_sparsity_loss / out.shape[-1]
+        attributions = attributions + sparsity_inner**2
+    attributions = attributions / out.shape[-1]
 
     # step_pnorm * 0.5 is because we have the squares of sparsity_inner terms above
-    lp_sparsity_loss = ((lp_sparsity_loss.abs() + 1e-16) ** (step_pnorm * 0.5)).sum(dim=-1)
+    lp_sparsity_loss = ((attributions.abs() + 1e-16) ** (step_pnorm * 0.5)).sum(dim=-1)
     lp_sparsity_loss = lp_sparsity_loss.mean(dim=0)  # Mean over batch dim
     return lp_sparsity_loss
 
@@ -444,28 +446,28 @@ def calc_lp_sparsity_loss_full_rank(
     assert n_param_matrices == len(inner_acts)
     batch = out.shape[0]
     assert batch == layer_acts[0].shape[0] == inner_acts[0].shape[0]
-    lp_sparsity_loss = torch.zeros(inner_acts[0].shape[:-1], requires_grad=True)
+    attributions = torch.zeros(inner_acts[0].shape[:-1], requires_grad=True, device=out.device)
     for feature_idx in range(out.shape[-1]):
         grad_layer_acts = torch.autograd.grad(
             out[..., feature_idx].sum(),
             layer_acts,
             retain_graph=True,
         )
-        sparsity_inner = torch.zeros_like(lp_sparsity_loss, requires_grad=True)
+        sparsity_inner = torch.zeros_like(attributions, requires_grad=True)
         for param_matrix_idx in range(n_param_matrices):
             # h_i * grad_h_i
-            sparsity_inner += einops.einsum(
+            sparsity_inner = sparsity_inner + einops.einsum(
                 grad_layer_acts[param_matrix_idx].detach(),
                 inner_acts[param_matrix_idx],
                 "... d_out ,... k d_out -> ... k",
             )
 
-        lp_sparsity_loss = lp_sparsity_loss + sparsity_inner**2
+        attributions = attributions + sparsity_inner**2
     d_model_out = out.shape[-1]
-    lp_sparsity_loss = lp_sparsity_loss / d_model_out
+    attributions = attributions / d_model_out
 
     # step_pnorm * 0.5 is because we have the squares of sparsity_inner terms above
-    lp_sparsity_loss = ((lp_sparsity_loss.abs() + 1e-16) ** (step_pnorm * 0.5)).sum(dim=-1)
+    lp_sparsity_loss = ((attributions.abs() + 1e-16) ** (step_pnorm * 0.5)).sum(dim=-1)
     lp_sparsity_loss = lp_sparsity_loss.mean(dim=0)  # Mean over batch dim
     return lp_sparsity_loss
 
@@ -655,12 +657,9 @@ def optimize(
             if config.wandb_project:
                 wandb.log(
                     {
-                        "step": step,
                         "pnorm": step_pnorm,
                         "lr": step_lr,
                         "total_loss": loss.mean().item(),
-                        "lp_sparsity_coeff": step_lp_sparsity_coeff,
-                        "topk_recon_coeff": step_topk_recon_coeff,
                         "lp_sparsity_loss": lp_sparsity_loss.mean().item()
                         if lp_sparsity_loss is not None
                         else None,
@@ -686,12 +685,11 @@ def optimize(
         ):
             fig_dict = plot_results_fn(
                 model=model,
+                target_model=pretrained_model,
                 step=step,
                 out_dir=out_dir,
                 device=device,
-                topk=config.topk,
-                batch_topk=config.batch_topk,
-                slow_images=config.slow_images,
+                config=config,
             )
             if config.wandb_project:
                 wandb.log(

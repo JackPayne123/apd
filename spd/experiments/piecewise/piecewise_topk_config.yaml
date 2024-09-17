@@ -4,13 +4,11 @@ wandb_run_name_prefix: "ml_"
 seed: 0
 topk: 0.27
 batch_topk: true
-param_match_coeff: 2.0
-topk_recon_coeff: 0.5
-topk_l2_coeff: 0.2
+param_match_coeff: 1.0
+topk_recon_coeff: 1.0
+topk_l2_coeff: 1.0
 lp_sparsity_coeff: null
 out_recon_coeff: null
-pnorm: null
-full_rank: false
 lr: 0.01
 batch_size: 2000
 steps: 50_000
