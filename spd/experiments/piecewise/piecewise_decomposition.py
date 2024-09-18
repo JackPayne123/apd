@@ -78,9 +78,7 @@ def piecewise_plot_results_fn(
 
         assert topk_mask is not None
         # Plot subnet attribution statistics
-        fig_dict_attributions = plot_subnetwork_attributions_statistics(
-            topk_mask=topk_mask,
-        )
+        fig_dict_attributions = plot_subnetwork_attributions_statistics(topk_mask=topk_mask)
         fig_dict.update(fig_dict_attributions)
 
     # Plot components
