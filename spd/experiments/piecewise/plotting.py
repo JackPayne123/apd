@@ -348,14 +348,15 @@ def plot_model_functions(
     input_xs = input_array[:, 0].cpu().detach().numpy()
 
     # Plot for every k
-    tab20 = plt.get_cmap("tab20")
+    tab20b_colors = plt.get_cmap("tab20b").colors  # type: ignore
+    tab20c_colors = plt.get_cmap("tab20c").colors  # type: ignore
+    colors = [*tab20b_colors, *tab20c_colors]
     # cb stands for control bit which is active there; this differs from k due to permutation
     for cb in range(n_functions):
-        d = 1 / n_functions
-        color0 = tab20(cb / n_functions)
-        color1 = tab20(cb / n_functions + d / 4)
-        color2 = tab20(cb / n_functions + 2 * d / 4)
-        color3 = tab20(cb / n_functions + 3 * d / 4)
+        color0 = colors[(4 * cb + 1) % len(colors)]
+        color1 = colors[(4 * cb + 2) % len(colors)]
+        color2 = colors[(4 * cb + 3) % len(colors)]
+        color3 = colors[(4 * cb + 4) % len(colors)]
         s = slice(cb * n_samples, (cb + 1) * n_samples)
         if model_output_hardcoded is not None:
             assert target_model is not None
@@ -402,16 +403,16 @@ def plot_model_functions(
                             ls=ls,
                             lw=0.2,
                         )
-    ax_inner.plot([], [], color="C0", label="W_in", ls="-")
-    ax_inner.plot([], [], color="C0", label="W_out", ls="--")
+    ax_inner.plot([], [], color=colors[0], label="W_in", ls="-")
+    ax_inner.plot([], [], color=colors[0], label="W_out", ls="--")
     ax_inner.plot([], [], color="k", label="k!=k_cb", ls="-", lw=0.2)
 
     # Add some additional (blue) legend lines explaining the different line styles
     if model_output_hardcoded is not None:
-        ax.plot([], [], ls=":", color="C0", label="true function")
-        ax.plot([], [], ls="-", color="C0", label="target model")
-    ax.plot([], [], ls="-.", color="C0", label="spd model")
-    ax.plot([], [], ls="--", color="C0", label="spd model topk")
+        ax.plot([], [], ls=":", color=colors[0], label="true function")
+        ax.plot([], [], ls="-", color=colors[0], label="target model")
+    ax.plot([], [], ls="-.", color=colors[0], label="spd model")
+    ax.plot([], [], ls="--", color=colors[0], label="spd model topk")
     ax.legend(ncol=3)
     ax_attrib.legend(ncol=3)
     ax_attrib.set_yscale("log")
