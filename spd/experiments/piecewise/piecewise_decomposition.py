@@ -22,6 +22,7 @@ from spd.experiments.piecewise.plotting import (
     plot_components,
     plot_components_fullrank,
     plot_model_functions,
+    plot_subnetwork_attributions_statistics,
     plot_subnetwork_correlations,
 )
 from spd.experiments.piecewise.trig_functions import generate_trig_functions
@@ -41,11 +42,12 @@ wandb.require("core")
 def piecewise_plot_results_fn(
     model: PiecewiseFunctionSPDTransformer | PiecewiseFunctionSPDFullRankTransformer,
     target_model: PiecewiseFunctionTransformer | None,
-    dataloader: BatchedDataLoader[tuple[Float[Tensor, " n_inputs"], Float[Tensor, ""]]] | None,
+    dataloader: BatchedDataLoader[tuple[Float[Tensor, " n_inputs"], Float[Tensor, ""]]],
     step: int,
     out_dir: Path | None,
     device: str,
     config: Config,
+    topk_mask: Float[Tensor, " batch_size k"] | None,
     **_,
 ) -> dict[str, plt.Figure]:
     assert isinstance(config.task_config, PiecewiseConfig)
@@ -64,8 +66,9 @@ def piecewise_plot_results_fn(
             print_info=False,
         )
         fig_dict.update(fig_dict_functions)
-    # Plot correlations
-    if config.topk is not None and dataloader is not None:
+
+    if config.topk is not None:
+        # Plot correlations
         fig_dict_correlations = plot_subnetwork_correlations(
             dataloader=dataloader,
             spd_model=model,
@@ -73,6 +76,12 @@ def piecewise_plot_results_fn(
             device=device,
         )
         fig_dict.update(fig_dict_correlations)
+
+        assert topk_mask is not None
+        # Plot subnet attribution statistics
+        fig_dict_attributions = plot_subnetwork_attributions_statistics(topk_mask=topk_mask)
+        fig_dict.update(fig_dict_attributions)
+
     # Plot components
     if isinstance(model, PiecewiseFunctionSPDFullRankTransformer):
         fig_dict_components = plot_components_fullrank(
@@ -84,7 +93,7 @@ def piecewise_plot_results_fn(
             model=model, step=step, out_dir=out_dir, device=device, slow_images=slow_images
         )
         fig_dict.update(fig_dict_components)
-    # Save plots to files
+
     # Save plots to files
     if out_dir:
         for k, v in fig_dict.items():
@@ -205,7 +214,7 @@ def get_model_and_dataloader(
     piecewise_model_spd.W_E.requires_grad_(False)
     piecewise_model_spd.W_U.requires_grad_(False)
 
-    train_seed = (
+    train_dataset_seed = (
         config.task_config.dataset_seed
         if config.task_config.dataset_seed is not None
         else config.seed
@@ -218,7 +227,7 @@ def get_model_and_dataloader(
         range_max=config.task_config.range_max,
         batch_size=config.batch_size,
         return_labels=False,
-        dataset_seed=train_seed,
+        dataset_seed=train_dataset_seed,
     )
     dataloader = BatchedDataLoader(dataset)
 
@@ -230,7 +239,7 @@ def get_model_and_dataloader(
         range_max=config.task_config.range_max,
         batch_size=config.batch_size,
         return_labels=True,
-        dataset_seed=train_seed + 1,
+        dataset_seed=train_dataset_seed + 1,
     )
     test_dataloader = BatchedDataLoader(test_dataset)
 
