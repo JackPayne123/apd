@@ -352,7 +352,7 @@ def plot_model_functions(
     tab20c_colors = plt.get_cmap("tab20c").colors  # type: ignore
     colors = [*tab20b_colors, *tab20c_colors]
     # cb stands for control bit which is active there; this differs from k due to permutation
-    for cb in range(2):
+    for cb in range(n_functions):
         color0 = colors[(4 * cb + 0) % len(colors)]
         color1 = colors[(4 * cb + 1) % len(colors)]
         color2 = colors[(4 * cb + 2) % len(colors)]
