@@ -495,6 +495,7 @@ def plot_subnetwork_attributions_statistics(
 ) -> dict[str, plt.Figure]:
     """Plot a vertical bar chart of the number of active subnetworks over the batch."""
     fig, ax = plt.subplots(figsize=(5, 5), constrained_layout=True)
+    assert topk_mask.ndim == 2
     values = topk_mask.sum(dim=1).cpu().detach().numpy()
     bins = list(range(int(values.min().item()), int(values.max().item()) + 2))
     counts, _ = np.histogram(values, bins=bins)
