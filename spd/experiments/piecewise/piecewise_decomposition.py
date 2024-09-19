@@ -42,12 +42,13 @@ wandb.require("core")
 def piecewise_plot_results_fn(
     model: PiecewiseFunctionSPDTransformer | PiecewiseFunctionSPDFullRankTransformer,
     target_model: PiecewiseFunctionTransformer | None,
-    dataloader: BatchedDataLoader[tuple[Float[Tensor, " n_inputs"], Float[Tensor, ""]]],
     step: int,
     out_dir: Path | None,
     device: str,
     config: Config,
     topk_mask: Float[Tensor, " batch_size k"] | None,
+    dataloader: BatchedDataLoader[tuple[Float[Tensor, " n_inputs"], Float[Tensor, ""]]]
+    | None = None,
     **_,
 ) -> dict[str, plt.Figure]:
     assert isinstance(config.task_config, PiecewiseConfig)
@@ -67,14 +68,15 @@ def piecewise_plot_results_fn(
         fig_dict.update(fig_dict_functions)
 
     if config.topk is not None:
-        # Plot correlations
-        fig_dict_correlations = plot_subnetwork_correlations(
-            dataloader=dataloader,
-            spd_model=model,
-            config=config,
-            device=device,
-        )
-        fig_dict.update(fig_dict_correlations)
+        if dataloader is not None:
+            # Plot correlations
+            fig_dict_correlations = plot_subnetwork_correlations(
+                dataloader=dataloader,
+                spd_model=model,
+                config=config,
+                device=device,
+            )
+            fig_dict.update(fig_dict_correlations)
 
         assert topk_mask is not None
         # Plot subnet attribution statistics
