@@ -585,7 +585,7 @@ def optimize(
                     step_pnorm=step_pnorm,
                 )
 
-        out_topk, topk_l2_loss, topk_recon_loss = None, None, None
+        out_topk, topk_l2_loss, topk_recon_loss, topk_mask = None, None, None, None
         if config.topk is not None:
             if config.full_rank:
                 attribution_scores = calc_attributions_full_rank(
@@ -678,18 +678,6 @@ def optimize(
                 )
 
         if (
-            config.save_freq is not None
-            and step % config.save_freq == 0
-            and step > 0
-            and out_dir is not None
-        ):
-            torch.save(model.state_dict(), out_dir / f"model_{step}.pth")
-            tqdm.write(f"Saved model to {out_dir / f'model_{step}.pth'}")
-            with open(out_dir / "config.json", "w") as f:
-                json.dump(config.model_dump(), f, indent=4)
-            tqdm.write(f"Saved config to {out_dir / 'config.json'}")
-
-        if (
             plot_results_fn is not None
             and config.image_freq is not None
             and step % config.image_freq == 0
@@ -702,12 +690,25 @@ def optimize(
                 out_dir=out_dir,
                 device=device,
                 config=config,
+                topk_mask=topk_mask,
             )
             if config.wandb_project:
                 wandb.log(
                     {k: wandb.Image(v) for k, v in fig_dict.items()},
                     step=step,
                 )
+
+        if (
+            config.save_freq is not None
+            and step % config.save_freq == 0
+            and step > 0
+            and out_dir is not None
+        ):
+            torch.save(model.state_dict(), out_dir / f"model_{step}.pth")
+            tqdm.write(f"Saved model to {out_dir / f'model_{step}.pth'}")
+            with open(out_dir / "config.json", "w") as f:
+                json.dump(config.model_dump(), f, indent=4)
+            tqdm.write(f"Saved config to {out_dir / 'config.json'}")
 
         # Skip gradient step if we are at the last step (last step just for plotting and logging)
         if step != config.steps:

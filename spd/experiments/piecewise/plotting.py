@@ -494,7 +494,7 @@ def plot_subnetwork_correlations(
     ax.set_title("Subnetwork Correlation Matrix")
     ax.set_xlabel("Subnetwork")
     ax.set_ylabel("Subnetwork")
-    return {"correlation_matrix": fig}
+    return {"subnetwork_correlation_matrix": fig}
 
 
 def plot_single_network(ax: plt.Axes, weights: list[dict[str, Float[Tensor, "i j"]]]) -> None:
@@ -598,4 +598,4 @@ def plot_piecewise_network(
     axs[0].text(0.275, 0.985, "Inputs", ha="center", va="center", transform=axs[0].transAxes)
     for lay in range(n_layers):
         axs[0].text(1, 2 * lay + 1, "MLP", ha="left", va="center")
-    return {"subnetworks_graphs": fig}
+    return {"subnetworks_graph_plots": fig}
