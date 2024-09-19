@@ -52,10 +52,6 @@ spd_model.load_state_dict(torch.load(pretrained_path, weights_only=True, map_loc
 # spd_model.set_handcoded_AB(hardcoded_model)
 
 
-if config.topk is not None:
-    plot_subnetwork_correlations(dataloader, spd_model, config, device)
-    plot_piecewise_network(spd_model)
-
 if config.full_rank:
     assert isinstance(spd_model, PiecewiseFunctionSPDFullRankTransformer)
     fig_dict = plot_components_fullrank(model=spd_model, step=-1, out_dir=None, slow_images=True)
@@ -66,17 +62,19 @@ else:
     )
 
 if config.topk is not None:
-    extra_fig_dict = plot_model_functions(
-        spd_model=spd_model,
-        target_model=hardcoded_model,
-        full_rank=config.full_rank,
-        device=device,
-        start=config.task_config.range_min,
-        stop=config.task_config.range_max,
-        print_info=True,
+    fig_dict.update(**plot_subnetwork_correlations(dataloader, spd_model, config, device))
+    fig_dict.update(**plot_piecewise_network(spd_model))
+    fig_dict.update(
+        **plot_model_functions(
+            spd_model=spd_model,
+            target_model=hardcoded_model,
+            full_rank=config.full_rank,
+            device=device,
+            start=config.task_config.range_min,
+            stop=config.task_config.range_max,
+            print_info=True,
+        )
     )
-    fig_dict.update(extra_fig_dict)
-
 out_path = Path(__file__).parent / "out/attribution_scores" / pretrained_path.parent.name
 out_path.mkdir(parents=True, exist_ok=True)
 for k, v in fig_dict.items():

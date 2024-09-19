@@ -22,6 +22,7 @@ from spd.experiments.piecewise.plotting import (
     plot_components,
     plot_components_fullrank,
     plot_model_functions,
+    plot_piecewise_network,
     plot_subnetwork_correlations,
 )
 from spd.experiments.piecewise.trig_functions import generate_trig_functions
@@ -63,6 +64,8 @@ def piecewise_plot_results_fn(
             print_info=False,
         )
         fig_dict.update(fig_dict_functions)
+        fig_dict_network = plot_piecewise_network(model)
+        fig_dict.update(fig_dict_network)
     # Plot correlations
     if config.topk is not None and dataloader is not None:
         fig_dict_correlations = plot_subnetwork_correlations(
