@@ -14,6 +14,7 @@ from spd.experiments.piecewise.plotting import (
     plot_components,
     plot_components_fullrank,
     plot_model_functions,
+    plot_piecewise_network,
     plot_subnetwork_correlations,
 )
 
@@ -53,6 +54,7 @@ spd_model.load_state_dict(torch.load(pretrained_path, weights_only=True, map_loc
 
 if config.topk is not None:
     plot_subnetwork_correlations(dataloader, spd_model, config, device)
+    plot_piecewise_network(spd_model)
 
 if config.full_rank:
     assert isinstance(spd_model, PiecewiseFunctionSPDFullRankTransformer)
