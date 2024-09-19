@@ -172,6 +172,9 @@ class Config(BaseModel):
 
         if self.full_rank:
             assert not self.unit_norm_matrices, "Can't unit norm matrices if full rank"
+
+        if self.ablation_attributions:
+            assert self.topk is not None, "ablation_attributions is only compatible with topk"
         return self
 
 
