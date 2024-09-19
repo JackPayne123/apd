@@ -23,16 +23,16 @@ jobs:
         with:
           python-version: '3.11'
 
-      # - name: Cache Python Dependencies
-      #   uses: actions/cache@v3
-      #   id: cache-env
-      #   with:
-      #     path: |
-      #       ./venv
-      #     key: ${{ runner.os }}-${{ runner.environment }}-cache-${{ hashFiles('**/pyproject.toml') }}
+      - name: Cache Python Dependencies
+        uses: actions/cache@v3
+        id: cache-env
+        with:
+          path: |
+            ./venv
+          key: ${{ runner.os }}-${{ runner.environment }}-cache-${{ hashFiles('**/pyproject.toml') }}
 
       - name: Install Dependencies
-        # if: steps.cache-env.outputs.cache-hit != 'true'
+        if: steps.cache-env.outputs.cache-hit != 'true'
         run: |
           python -m venv venv
           source ./venv/bin/activate
@@ -40,12 +40,12 @@ jobs:
           echo PATH=$PATH >> $GITHUB_ENV
           echo "./venv/bin" >> $GITHUB_PATH
 
-      # - name: Restore Venv
-      #   if: steps.cache-env.outputs.cache-hit == 'true'
-      #   run: |
-      #     source ./venv/bin/activate
-      #     echo PATH=$PATH >> $GITHUB_ENV
-      #     echo "./venv/bin" >> $GITHUB_PATH
+      - name: Restore Venv
+        if: steps.cache-env.outputs.cache-hit == 'true'
+        run: |
+          source ./venv/bin/activate
+          echo PATH=$PATH >> $GITHUB_ENV
+          echo "./venv/bin" >> $GITHUB_PATH
 
       - name: Run pyright
         run: pyright --pythonpath ./venv/bin/python
