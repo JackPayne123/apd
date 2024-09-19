@@ -1,6 +1,5 @@
 # %%
 import json
-from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -10,21 +9,12 @@ from jaxtyping import Float
 from torch import Tensor
 
 from spd.experiments.piecewise.models import (
-    MLPComponents,
     PiecewiseFunctionSPDFullRankTransformer,
     PiecewiseFunctionSPDTransformer,
-    PiecewiseFunctionTransformer,
 )
 from spd.experiments.piecewise.piecewise_decomposition import get_model_and_dataloader
-from spd.experiments.piecewise.plotting import (
-    plot_components,
-    plot_components_fullrank,
-    plot_model_functions,
-    plot_subnetwork_correlations,
-)
 
 # plot_subnetwork_correlations,
-from spd.experiments.piecewise.trig_functions import create_trig_function
 from spd.models.components import ParamComponents, ParamComponentsFullRank
 from spd.run_spd import (
     Config,
@@ -94,7 +84,7 @@ def get_weight(general_param_components: ParamComponents | ParamComponentsFullRa
 
 def plot_resnet(model: PiecewiseFunctionSPDTransformer | PiecewiseFunctionSPDFullRankTransformer):
     n_components = model.k
-    mlps: list[MLPComponents] = model.mlps
+    mlps: torch.nn.ModuleList = model.mlps
     n_layers = len(mlps)
 
     subnetworks = {}
@@ -111,6 +101,7 @@ def plot_resnet(model: PiecewiseFunctionSPDTransformer | PiecewiseFunctionSPDFul
         figsize=(3 * (n_components + 1), 4 * n_layers),
         constrained_layout=True,
     )
+    axs = np.array(axs)
     for k in range(n_components):
         plot_single_network(axs[k + 1], subnetworks[k])
 
