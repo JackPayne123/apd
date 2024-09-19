@@ -23,6 +23,7 @@ from spd.experiments.piecewise.plotting import (
     plot_components_fullrank,
     plot_model_functions,
     plot_piecewise_network,
+    plot_subnetwork_attributions_statistics,
     plot_subnetwork_correlations,
 )
 from spd.experiments.piecewise.trig_functions import generate_trig_functions
@@ -42,11 +43,13 @@ wandb.require("core")
 def piecewise_plot_results_fn(
     model: PiecewiseFunctionSPDTransformer | PiecewiseFunctionSPDFullRankTransformer,
     target_model: PiecewiseFunctionTransformer | None,
-    dataloader: BatchedDataLoader[tuple[Float[Tensor, " n_inputs"], Float[Tensor, ""]]] | None,
     step: int,
     out_dir: Path | None,
     device: str,
     config: Config,
+    topk_mask: Float[Tensor, " batch_size k"] | None,
+    dataloader: BatchedDataLoader[tuple[Float[Tensor, " n_inputs"], Float[Tensor, ""]]]
+    | None = None,
     **_,
 ) -> dict[str, plt.Figure]:
     assert isinstance(config.task_config, PiecewiseConfig)
@@ -66,15 +69,23 @@ def piecewise_plot_results_fn(
         fig_dict.update(fig_dict_functions)
         fig_dict_network = plot_piecewise_network(model)
         fig_dict.update(fig_dict_network)
-    # Plot correlations
-    if config.topk is not None and dataloader is not None:
-        fig_dict_correlations = plot_subnetwork_correlations(
-            dataloader=dataloader,
-            spd_model=model,
-            config=config,
-            device=device,
-        )
-        fig_dict.update(fig_dict_correlations)
+
+    if config.topk is not None:
+        if dataloader is not None:
+            # Plot correlations
+            fig_dict_correlations = plot_subnetwork_correlations(
+                dataloader=dataloader,
+                spd_model=model,
+                config=config,
+                device=device,
+            )
+            fig_dict.update(fig_dict_correlations)
+
+        assert topk_mask is not None
+        # Plot subnet attribution statistics
+        fig_dict_attributions = plot_subnetwork_attributions_statistics(topk_mask=topk_mask)
+        fig_dict.update(fig_dict_attributions)
+
     # Plot components
     if config.task_config.n_layers == 1:
         if isinstance(model, PiecewiseFunctionSPDFullRankTransformer):

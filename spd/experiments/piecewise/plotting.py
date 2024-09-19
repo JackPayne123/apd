@@ -53,9 +53,11 @@ def plot_matrix(
     ylabel: str,
     colorbar_format: str = "%.0f",
 ) -> None:
+    # Useful to have bigger text for small matrices
+    fontsize = 8 if matrix.numel() < 50 else 4
     im = ax.matshow(matrix.detach().cpu().numpy(), cmap="coolwarm", norm=CenteredNorm())
     for (j, i), label in np.ndenumerate(matrix.detach().cpu().numpy()):
-        ax.text(i, j, f"{label:.2f}", ha="center", va="center", fontsize=4)
+        ax.text(i, j, f"{label:.2f}", ha="center", va="center", fontsize=fontsize)
     ax.set_xlabel(xlabel)
     if ylabel != "":
         ax.set_ylabel(ylabel)
@@ -368,27 +370,28 @@ def plot_model_functions(
     input_xs = input_array[:, 0].cpu().detach().numpy()
 
     # Plot for every k
-    tab20 = plt.get_cmap("tab20")
+    tab20b_colors = plt.get_cmap("tab20b").colors  # type: ignore
+    tab20c_colors = plt.get_cmap("tab20c").colors  # type: ignore
+    colors = [*tab20b_colors, *tab20c_colors]
     # cb stands for control bit which is active there; this differs from k due to permutation
     for cb in range(n_functions):
-        d = 1 / n_functions
-        color0 = tab20(cb / n_functions)
-        color1 = tab20(cb / n_functions + d / 4)
-        color2 = tab20(cb / n_functions + 2 * d / 4)
-        color3 = tab20(cb / n_functions + 3 * d / 4)
+        color0 = colors[(4 * cb + 0) % len(colors)]
+        color1 = colors[(4 * cb + 1) % len(colors)]
+        color2 = colors[(4 * cb + 2) % len(colors)]
+        color3 = colors[(4 * cb + 3) % len(colors)]
         s = slice(cb * n_samples, (cb + 1) * n_samples)
+        ax.plot(input_xs[s], out_topk[s], ls="--", color=color0)
         if model_output_hardcoded is not None:
             assert target_model is not None
             assert target_model.controlled_resnet is not None
+            ax.plot(input_xs[s], model_output_hardcoded[s], label=f"cb={cb}", color=color1)
             ax.plot(
                 x_space,
                 target_model.controlled_resnet.functions[cb](x_space),
                 ls=":",
-                color=color0,
+                color=color2,
             )
-            ax.plot(input_xs[s], model_output_hardcoded[s], label=f"cb={cb}", color=color1)
-        ax.plot(input_xs[s], model_output_spd[s], ls="-.", color=color2)
-        ax.plot(input_xs[s], out_topk[s], ls="--", color=color3)
+        ax.plot(input_xs[s], model_output_spd[s], ls="-.", color=color3)
         k_cb = attribution_scores[s].mean(dim=0).argmax()
         for k in range(n_functions):
             # Find permutation
@@ -396,7 +399,7 @@ def plot_model_functions(
                 ax_attrib.plot(
                     input_xs[s],
                     attribution_scores[s][:, k],
-                    color=color1,
+                    color=color0,
                     label=f"cb={cb}, k_cb={k}",
                 )
                 assert len(inner_acts) <= 2, "Didn't implement more than 2 SPD 'layers' yet"
@@ -406,12 +409,12 @@ def plot_model_functions(
                         ax_inner.plot(
                             input_xs[s],
                             inner_acts[j].cpu().detach()[s][:, k],
-                            color=color1,
+                            color=color0,
                             ls=ls,
                             label=f"cb={cb}, k_cb={k}" if j == 0 else None,
                         )
             else:
-                ax_attrib.plot(input_xs[s], attribution_scores[s][:, k], color=color1, alpha=0.2)
+                ax_attrib.plot(input_xs[s], attribution_scores[s][:, k], color=color0, alpha=0.2)
                 for j in range(len(inner_acts)):
                     ls = ["-", "--"][j]
                     if not isinstance(spd_model, PiecewiseFunctionSPDFullRankTransformer):
@@ -422,16 +425,16 @@ def plot_model_functions(
                             ls=ls,
                             lw=0.2,
                         )
-    ax_inner.plot([], [], color="C0", label="W_in", ls="-")
-    ax_inner.plot([], [], color="C0", label="W_out", ls="--")
+    ax_inner.plot([], [], color=colors[0], label="W_in", ls="-")
+    ax_inner.plot([], [], color=colors[0], label="W_out", ls="--")
     ax_inner.plot([], [], color="k", label="k!=k_cb", ls="-", lw=0.2)
 
     # Add some additional (blue) legend lines explaining the different line styles
+    ax.plot([], [], ls="--", color=colors[0], label="spd model topk")
     if model_output_hardcoded is not None:
-        ax.plot([], [], ls=":", color="C0", label="true function")
-        ax.plot([], [], ls="-", color="C0", label="target model")
-    ax.plot([], [], ls="-.", color="C0", label="spd model")
-    ax.plot([], [], ls="--", color="C0", label="spd model topk")
+        ax.plot([], [], ls="-", color=colors[1], label="target model")
+        ax.plot([], [], ls=":", color=colors[2], label="true function")
+    ax.plot([], [], ls="-.", color=colors[3], label="spd model")
     ax.legend(ncol=3)
     ax_attrib.legend(ncol=3)
     ax_attrib.set_yscale("log")
@@ -599,3 +602,32 @@ def plot_piecewise_network(
     for lay in range(n_layers):
         axs[0].text(1, 2 * lay + 1, "MLP", ha="left", va="center")
     return {"subnetworks_graph_plots": fig}
+
+
+def plot_subnetwork_attributions_statistics(
+    topk_mask: Float[Tensor, "batch_size k"],
+) -> dict[str, plt.Figure]:
+    """Plot a vertical bar chart of the number of active subnetworks over the batch."""
+    fig, ax = plt.subplots(figsize=(5, 5), constrained_layout=True)
+    assert topk_mask.ndim == 2
+    values = topk_mask.sum(dim=1).cpu().detach().numpy()
+    bins = list(range(int(values.min().item()), int(values.max().item()) + 2))
+    counts, _ = np.histogram(values, bins=bins)
+    bars = ax.bar(bins[:-1], counts, align="center", width=0.8)
+    ax.set_xticks(bins[:-1])
+    ax.set_xticklabels([str(b) for b in bins[:-1]])
+    ax.set_title(f"Active subnetworks on current batch (batch_size={topk_mask.shape[0]})")
+    ax.set_xlabel("Number of active subnetworks")
+    ax.set_ylabel("Count")
+
+    for bar in bars:
+        height = bar.get_height()
+        ax.annotate(
+            f"{height}",
+            xy=(bar.get_x() + bar.get_width() / 2, height),
+            xytext=(0, 3),  # 3 points vertical offset
+            textcoords="offset points",
+            ha="center",
+            va="bottom",
+        )
+    return {"subnetwork_attributions_statistics": fig}
