@@ -555,6 +555,7 @@ def optimize(
         batch_attribs: list[Float[Tensor, " k"]] = []
         for batch_idx in range(out.shape[0]):
             batch_grads = torch.autograd.grad(out[batch_idx, 0], params, retain_graph=True)
+            # FYI: batch_grads do not depend on k (due to sum rule), so they are the same for all k
             batch_attribs.append(
                 torch.stack(
                     [
@@ -563,6 +564,7 @@ def optimize(
                     ]
                 ).sum(dim=0)
             )
+
         attribs: Float[Tensor, "batch k"] = torch.stack(batch_attribs)
 
         # out.backward(retain_graph=True)
@@ -622,7 +624,7 @@ def optimize(
             axes[0].matshow(attribution_scores[:10].cpu().detach(), vmin=-50, vmax=50)
             axes[0].set_title("Old attribution scores")
             axes[1].set_title("New param-based attribution scores")
-            axes[1].matshow(attribs[:10].cpu().detach(), vmin=-50, vmax=50)
+            axes[1].matshow(attribs[:10].cpu().detach() ** 2, vmin=-50, vmax=50)
             # Numnbers
             for i in range(10):
                 for j in range(len(attribution_scores[i])):

@@ -1,6 +1,7 @@
 wandb_project: spd-piecewise
 wandb_run_name: null
-wandb_run_name_prefix: ""
+wandb_run_name_prefix: "fr_hAB_debugweightbasedattrib"
+full_rank: true
 seed: 0
 topk: 0.625
 batch_topk: true
@@ -30,4 +31,4 @@ task_config:
   k: 10
   target_seed: 0
   simple_bias: false
-  handcoded_AB: false
+  handcoded_AB: true
