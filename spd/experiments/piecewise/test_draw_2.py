@@ -1,147 +1,138 @@
+# %%
+import json
+from pathlib import Path
+
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
 from einops import einsum
+from jaxtyping import Float
+from torch import Tensor
+
+from spd.experiments.piecewise.models import (
+    MLPComponents,
+    PiecewiseFunctionSPDFullRankTransformer,
+    PiecewiseFunctionSPDTransformer,
+    PiecewiseFunctionTransformer,
+)
+from spd.experiments.piecewise.piecewise_decomposition import get_model_and_dataloader
+from spd.experiments.piecewise.plotting import (
+    plot_components,
+    plot_components_fullrank,
+    plot_model_functions,
+    plot_subnetwork_correlations,
+)
+
+# plot_subnetwork_correlations,
+from spd.experiments.piecewise.trig_functions import create_trig_function
+from spd.models.components import ParamComponents, ParamComponentsFullRank
+from spd.run_spd import (
+    Config,
+    PiecewiseConfig,
+)
+from spd.utils import REPO_ROOT
 
 
-def plot_single_network(ax, W_in, W_out, max_weight=None):
-    """
-    Plot a single network on the given axes.
-
-    Args:
-    - ax: matplotlib Axes object to plot on
-    - W_in: Input weight matrix
-    - W_out: Output weight matrix
-    - max_weight: Maximum weight for normalization (optional)
-    """
-    n_features, n_hidden = W_in.shape
-
-    # Normalize weights
-    if max_weight is None:
-        max_weight = max(W_in.abs().max().item(), W_out.abs().max().item())
-    W_in_norm = W_in / max_weight
-    W_out_norm = W_out / max_weight
+def plot_single_network(ax: plt.Axes, weights: list[dict[str, Float[Tensor, "i j"]]]):
+    n_layers = len(weights)
+    d_embed = weights[0]["W_in"].shape[0]
+    d_mlp = weights[0]["W_in"].shape[1]
+    assert all(W["W_in"].shape == (d_embed, d_mlp) for W in weights)
+    assert all(W["W_out"].shape == (d_mlp, d_embed) for W in weights)
 
     # Define node positions
-    y_input, y_hidden, y_output = 0, -1, -2
-    x_input = np.linspace(0.05, 0.95, n_features)
-    x_hidden = np.linspace(0.25, 0.75, n_hidden)
-    x_output = np.linspace(0.05, 0.95, n_features)
-
-    # Add transparent grey box around hidden layer
-    box_width, box_height = 0.8, 0.4
-    box = plt.Rectangle(
-        (0.5 - box_width / 2, y_hidden - box_height / 2),
-        box_width,
-        box_height,
-        fill=True,
-        facecolor="#e4e4e4",
-        edgecolor="none",
-        alpha=0.33,
-    )
-    ax.add_patch(box)
+    x_embed = np.linspace(0.05, 0.45, d_embed)
+    x_mlp = np.linspace(0.55, 0.95, d_mlp)
 
     # Plot nodes
-    ax.scatter(x_input, [y_input] * n_features, s=100, color="grey", edgecolors="k", zorder=3)
-    ax.scatter(x_hidden, [y_hidden] * n_hidden, s=100, color="grey", edgecolors="k", zorder=3)
-    ax.scatter(x_output, [y_output] * n_features, s=100, color="grey", edgecolors="k", zorder=3)
+    for lay in range(n_layers + 1):
+        ax.scatter(x_embed, [2 * lay] * d_embed, s=100, color="grey", edgecolors="k", zorder=3)
+    for lay in range(n_layers):
+        ax.scatter(x_mlp, [2 * lay + 1] * d_mlp, s=100, color="grey", edgecolors="k", zorder=3)
 
     # Plot edges
     cmap = plt.get_cmap("RdBu_r")
-    for i in range(n_features):
-        for j in range(n_hidden):
-            # Input to hidden
-            weight = W_in_norm[i, j].item()
-            color = cmap(0.5 * (weight + 1))  # Map [-1, 1] to [0, 1]
-            ax.plot(
-                [x_input[i], x_hidden[j]], [y_input, y_hidden], color=color, linewidth=abs(weight)
-            )
-
-            # Hidden to output
-            weight = W_out_norm[j, i].item()
-            color = cmap(0.5 * (weight + 1))
-            ax.plot(
-                [x_hidden[j], x_output[i]], [y_hidden, y_output], color=color, linewidth=abs(weight)
-            )
-
-    ax.axis("off")
-    ax.set_xlim(-0.1, 1.1)
-    ax.set_ylim(y_output - 0.5, y_input + 0.5)
-
-
-def plot_resnet(mlp_components, mlps):
-    """
-    Plot the entire ResNet visualization.
-
-    Args:
-    - mlp_components: List of (W_in, W_out) tuples for each layer and component
-    - mlps: List of (W_in_sum, W_out_sum) tuples for each layer
-    """
-    n_layers = len(mlp_components)
-    n_components = mlp_components[0][0].shape[0]  # number of components in each layer
-
-    fig, axs = plt.subplots(
-        n_components + 1,  # +1 for the sum of components
-        n_layers,
-        figsize=(4 * n_layers, 5 * (n_components + 1)),
-        constrained_layout=True,
-    )
-    axs = np.atleast_2d(axs)
-
-    # Find global max weight for consistent normalization
-    max_weight = max(
-        max(W.abs().max().item() for layer in mlp_components for W in layer),
-        max(W.abs().max().item() for layer in mlps for W in layer),
-    )
-
-    for layer_idx in range(n_layers):
-        for component_idx in range(n_components + 1):
-            ax = axs[component_idx, layer_idx]
-
-            if component_idx < n_components:
-                W_in, W_out = mlp_components[layer_idx]
-                W_in = W_in[component_idx]
-                W_out = W_out[component_idx]
-            else:
-                # Sum of components
-                W_in, W_out = mlps[layer_idx]
-
-            plot_single_network(ax, W_in, W_out, max_weight)
-
-            if component_idx == n_components:
-                ax.set_title(f"Layer {layer_idx}\n(Sum of components)", fontsize=12)
-            elif layer_idx == 0:
-                ax.text(
-                    -0.1,
-                    0.5,
-                    f"Component {component_idx}",
-                    rotation=90,
-                    va="center",
-                    ha="right",
-                    transform=ax.transAxes,
+    for lay in range(n_layers):
+        # Normalize weights
+        W_in_norm = weights[lay]["W_in"] / weights[lay]["W_in"].abs().max()
+        W_out_norm = weights[lay]["W_out"] / weights[lay]["W_out"].abs().max()
+        for i in range(d_embed):
+            for j in range(d_mlp):
+                weight = W_in_norm[i, j].item()
+                color = cmap(0.5 * (weight + 1))
+                ax.plot(
+                    [x_embed[i], x_mlp[j]],
+                    [2 * lay + 2, 2 * lay + 1],
+                    color=color,
+                    linewidth=abs(weight),
+                )
+                weight = W_out_norm[j, i].item()
+                color = cmap(0.5 * (weight + 1))
+                ax.plot(
+                    [x_mlp[j], x_embed[i]],
+                    [2 * lay + 1, 2 * lay],
+                    color=color,
+                    linewidth=abs(weight),
                 )
 
-    fig.suptitle("ResNet Visualization", fontsize=16)
+    ax.axis("off")
+    ax.set_xlabel("Output")
+
+
+def get_weight(general_param_components: ParamComponents | ParamComponentsFullRank):
+    if isinstance(general_param_components, ParamComponentsFullRank):
+        weight: Float[Tensor, "k i j"] = general_param_components.subnetwork_params
+        return weight
+    elif isinstance(general_param_components, ParamComponents):
+        a: Float[Tensor, "i k"] = general_param_components.A
+        b: Float[Tensor, "k j"] = general_param_components.B
+        weight: Float[Tensor, "k i j"] = einsum(a, b, "i k, k j -> k i j")
+        return weight
+    else:
+        raise ValueError(f"Unknown type: {type(general_param_components)}")
+
+
+def plot_resnet(model: PiecewiseFunctionSPDTransformer | PiecewiseFunctionSPDFullRankTransformer):
+    n_components = model.k
+    mlps: list[MLPComponents] = model.mlps
+    n_layers = len(mlps)
+
+    subnetworks = {}
+    for k in range(n_components):
+        subnetworks[k] = []
+        for lay in range(n_layers):
+            W_in = get_weight(mlps[lay].linear1)
+            W_out = get_weight(mlps[lay].linear2)
+            subnetworks[k].append({"W_in": W_in[k], "W_out": W_out[k]})
+
+    fig, axs = plt.subplots(
+        1,
+        n_components + 1,
+        figsize=(3 * (n_components + 1), 4 * n_layers),
+        constrained_layout=True,
+    )
+    for k in range(n_components):
+        plot_single_network(axs[k + 1], subnetworks[k])
+
     return fig
 
 
 # Load and process the model
-m = torch.load(
-    "/data/stefan_heimersheim/projects/SPD/spd/spd/experiments/piecewise/out/plot4sn2l_seed0_topk2.49e-01_topkrecon1.00e+00_topkl2_1.00e+00_lr1.00e-02_bs2000lay2/model_30000.pth"
+pretrained_path = (
+    REPO_ROOT
+    / "spd/experiments/piecewise/out/plot4sn2l_seed0_topk2.49e-01_topkrecon1.00e+00_topkl2_1.00e+00_lr1.00e-02_bs2000lay2/model_30000.pth"
+)
+with open(pretrained_path.parent / "config.json") as f:
+    config_dict = json.load(f)
+    config = Config(**config_dict)
+
+device = "cuda" if torch.cuda.is_available() else "cpu"
+
+assert isinstance(config.task_config, PiecewiseConfig)
+
+hardcoded_model, spd_model, dataloader, test_dataloader = get_model_and_dataloader(
+    config, device, out_dir=None
 )
 
-mlp_components = []
-mlps = []
-for i in range(2):  # Assuming 2 layers
-    W_in = einsum(
-        m[f"mlps.{i}.linear1.A"], m[f"mlps.{i}.linear1.B"], "embed k, k mlp -> k embed mlp"
-    )
-    W_out = einsum(
-        m[f"mlps.{i}.linear2.A"], m[f"mlps.{i}.linear2.B"], "mlp k, k embed -> k mlp embed"
-    )
-    mlp_components.append((W_in, W_out))
-    mlps.append((W_in.sum(dim=0), W_out.sum(dim=0)))
-
-# Create and display the plot
-fig = plot_resnet(mlp_components, mlps)
+fig = plot_resnet(spd_model)
 plt.show()
