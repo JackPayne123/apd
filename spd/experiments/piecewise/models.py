@@ -1,5 +1,4 @@
 import json
-from collections import deque
 from collections.abc import Callable, Sequence
 from pathlib import Path
 
@@ -816,26 +815,27 @@ class PiecewiseFunctionSPDTransformer(SPDModel):
             remove_grad_parallel_to_subnetwork_vecs(mlp.linear1.A.data, mlp.linear1.A.grad)
             remove_grad_parallel_to_subnetwork_vecs(mlp.linear2.A.data, mlp.linear2.A.grad)
 
-    def set_subnet_to_zero(self, subnet_idx: int) -> list[Float[Tensor, " dim"]]:
-        stored_vals = []
-        for mlp in self.mlps:
-            stored_vals.append(mlp.linear1.A.data[:, subnet_idx].detach().clone())
-            stored_vals.append(mlp.linear2.A.data[:, subnet_idx].detach().clone())
-            stored_vals.append(mlp.linear1.B.data[subnet_idx, :].detach().clone())
-            stored_vals.append(mlp.linear2.B.data[subnet_idx, :].detach().clone())
+    def set_subnet_to_zero(self, subnet_idx: int) -> dict[str, Float[Tensor, " dim"]]:
+        stored_vals = {}
+        for i, mlp in enumerate(self.mlps):
+            stored_vals[f"mlp_{i}_linear1_A"] = mlp.linear1.A.data[:, subnet_idx].detach().clone()
+            stored_vals[f"mlp_{i}_linear2_A"] = mlp.linear2.A.data[:, subnet_idx].detach().clone()
+            stored_vals[f"mlp_{i}_linear1_B"] = mlp.linear1.B.data[subnet_idx, :].detach().clone()
+            stored_vals[f"mlp_{i}_linear2_B"] = mlp.linear2.B.data[subnet_idx, :].detach().clone()
             mlp.linear1.A.data[:, subnet_idx] = 0.0
             mlp.linear2.A.data[:, subnet_idx] = 0.0
             mlp.linear1.B.data[subnet_idx, :] = 0.0
             mlp.linear2.B.data[subnet_idx, :] = 0.0
         return stored_vals
 
-    def restore_subnet(self, subnet_idx: int, stored_vals: list[Float[Tensor, " dim"]]) -> None:
-        queue = deque(stored_vals)
-        for mlp in self.mlps:
-            mlp.linear1.A.data[:, subnet_idx] = queue.popleft()
-            mlp.linear2.A.data[:, subnet_idx] = queue.popleft()
-            mlp.linear1.B.data[subnet_idx, :] = queue.popleft()
-            mlp.linear2.B.data[subnet_idx, :] = queue.popleft()
+    def restore_subnet(
+        self, subnet_idx: int, stored_vals: dict[str, Float[Tensor, " dim"]]
+    ) -> None:
+        for i, mlp in enumerate(self.mlps):
+            mlp.linear1.A.data[:, subnet_idx] = stored_vals[f"mlp_{i}_linear1_A"]
+            mlp.linear2.A.data[:, subnet_idx] = stored_vals[f"mlp_{i}_linear2_A"]
+            mlp.linear1.B.data[subnet_idx, :] = stored_vals[f"mlp_{i}_linear1_B"]
+            mlp.linear2.B.data[subnet_idx, :] = stored_vals[f"mlp_{i}_linear2_B"]
 
 
 class PiecewiseFunctionSPDFullRankTransformer(SPDFullRankModel):
@@ -992,13 +992,13 @@ class PiecewiseFunctionSPDFullRankTransformer(SPDFullRankModel):
         model.load_state_dict(params)
         return model
 
-    def set_subnet_to_zero(self, subnet_idx: int) -> list[Float[Tensor, "d_in d_out"]]:
-        stored_vals = []
-        for mlp in self.mlps:
-            stored_vals.append(
+    def set_subnet_to_zero(self, subnet_idx: int) -> dict[str, Float[Tensor, "d_in d_out"]]:
+        stored_vals = {}
+        for i, mlp in enumerate(self.mlps):
+            stored_vals[f"mlp_{i}_linear1"] = (
                 mlp.linear1.subnetwork_params.data[subnet_idx, :, :].detach().clone()
             )
-            stored_vals.append(
+            stored_vals[f"mlp_{i}_linear2"] = (
                 mlp.linear2.subnetwork_params.data[subnet_idx, :, :].detach().clone()
             )
             mlp.linear1.subnetwork_params.data[subnet_idx, :, :] = 0.0
@@ -1006,10 +1006,8 @@ class PiecewiseFunctionSPDFullRankTransformer(SPDFullRankModel):
         return stored_vals
 
     def restore_subnet(
-        self, subnet_idx: int, stored_vals: list[Float[Tensor, "d_in d_out"]]
+        self, subnet_idx: int, stored_vals: dict[str, Float[Tensor, "d_in d_out"]]
     ) -> None:
-        # Make a queue to restore the values in the correct order
-        queue = deque(stored_vals)
-        for mlp in self.mlps:
-            mlp.linear1.subnetwork_params.data[subnet_idx, :, :] = queue.popleft()
-            mlp.linear2.subnetwork_params.data[subnet_idx, :, :] = queue.popleft()
+        for i, mlp in enumerate(self.mlps):
+            mlp.linear1.subnetwork_params.data[subnet_idx, :, :] = stored_vals[f"mlp_{i}_linear1"]
+            mlp.linear2.subnetwork_params.data[subnet_idx, :, :] = stored_vals[f"mlp_{i}_linear2"]

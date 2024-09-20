@@ -1,4 +1,3 @@
-from collections import deque
 from pathlib import Path
 
 import einops
@@ -165,22 +164,21 @@ class DeepLinearComponentModel(SPDModel):
         for layer in self.layers:
             remove_grad_parallel_to_subnetwork_vecs(layer.A.data, layer.A.grad)
 
-    def set_subnet_to_zero(self, subnet_idx: int) -> list[Float[Tensor, "n_instances dim"]]:
-        stored_vals = []
-        for layer in self.layers:
-            stored_vals.append(layer.A.data[:, :, subnet_idx].detach().clone())
-            stored_vals.append(layer.B.data[:, subnet_idx, :].detach().clone())
+    def set_subnet_to_zero(self, subnet_idx: int) -> dict[str, Float[Tensor, "n_instances dim"]]:
+        stored_vals = {}
+        for i, layer in enumerate(self.layers):
+            stored_vals[f"layer_{i}_A"] = layer.A.data[:, :, subnet_idx].detach().clone()
+            stored_vals[f"layer_{i}_B"] = layer.B.data[:, subnet_idx, :].detach().clone()
             layer.A.data[:, :, subnet_idx] = 0.0
             layer.B.data[:, subnet_idx, :] = 0.0
         return stored_vals
 
     def restore_subnet(
-        self, subnet_idx: int, stored_vals: list[Float[Tensor, "n_instances dim"]]
+        self, subnet_idx: int, stored_vals: dict[str, Float[Tensor, "n_instances dim"]]
     ) -> None:
-        queue = deque(stored_vals)
-        for layer in self.layers:
-            layer.A.data[:, :, subnet_idx] = queue.popleft()
-            layer.B.data[:, subnet_idx, :] = queue.popleft()
+        for i, layer in enumerate(self.layers):
+            layer.A.data[:, :, subnet_idx] = stored_vals[f"layer_{i}_A"]
+            layer.B.data[:, subnet_idx, :] = stored_vals[f"layer_{i}_B"]
 
 
 class DeepLinearParamComponentsFullRank(nn.Module):
@@ -302,15 +300,17 @@ class DeepLinearComponentFullRankModel(SPDFullRankModel):
         model.load_state_dict(params)
         return model
 
-    def set_subnet_to_zero(self, subnet_idx: int) -> list[Float[Tensor, "n_instances d_in d_out"]]:
-        stored_vals = []
-        for layer in self.layers:
-            stored_vals.append(layer.subnetwork_params.data[:, subnet_idx].detach().clone())
+    def set_subnet_to_zero(
+        self, subnet_idx: int
+    ) -> dict[str, Float[Tensor, "n_instances d_in d_out"]]:
+        stored_vals = {}
+        for i, layer in enumerate(self.layers):
+            stored_vals[f"layer_{i}"] = layer.subnetwork_params.data[:, subnet_idx].detach().clone()
             layer.subnetwork_params.data[:, subnet_idx, :, :] = 0.0
         return stored_vals
 
     def restore_subnet(
-        self, subnet_idx: int, stored_vals: list[Float[Tensor, "n_instances d_in d_out"]]
+        self, subnet_idx: int, stored_vals: dict[str, Float[Tensor, "n_instances d_in d_out"]]
     ) -> None:
         for i, layer in enumerate(self.layers):
-            layer.subnetwork_params.data[:, subnet_idx, :, :] = stored_vals[i]
+            layer.subnetwork_params.data[:, subnet_idx, :, :] = stored_vals[f"layer_{i}"]

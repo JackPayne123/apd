@@ -139,20 +139,20 @@ class TMSSPDModel(SPDModel):
         assert self.A.grad is not None
         remove_grad_parallel_to_subnetwork_vecs(self.A.data, self.A.grad)
 
-    def set_subnet_to_zero(self, subnet_idx: int) -> list[Float[Tensor, "n_instances dim2"]]:
-        stored_vals = [
-            self.A.data[:, :, subnet_idx].detach().clone(),
-            self.B.data[:, subnet_idx, :].detach().clone(),
-        ]
+    def set_subnet_to_zero(self, subnet_idx: int) -> dict[str, Float[Tensor, "n_instances dim2"]]:
+        stored_vals = {
+            "A": self.A.data[:, :, subnet_idx].detach().clone(),
+            "B": self.B.data[:, subnet_idx, :].detach().clone(),
+        }
         self.A.data[:, :, subnet_idx] = 0.0
         self.B.data[:, subnet_idx, :] = 0.0
         return stored_vals
 
     def restore_subnet(
-        self, subnet_idx: int, stored_vals: list[Float[Tensor, "n_instances dim2"]]
+        self, subnet_idx: int, stored_vals: dict[str, Float[Tensor, "n_instances dim2"]]
     ) -> None:
-        self.A.data[:, :, subnet_idx] = stored_vals[0]
-        self.B.data[:, subnet_idx, :] = stored_vals[1]
+        self.A.data[:, :, subnet_idx] = stored_vals["A"]
+        self.B.data[:, subnet_idx, :] = stored_vals["B"]
 
 
 class TMSSPDFullRankModel(SPDFullRankModel):
@@ -238,12 +238,16 @@ class TMSSPDFullRankModel(SPDFullRankModel):
 
     def set_subnet_to_zero(
         self, subnet_idx: int
-    ) -> list[Float[Tensor, "n_instances n_features n_hidden"]]:
-        stored_vals = [self.subnetwork_params.data[:, subnet_idx, :, :].detach().clone()]
+    ) -> dict[str, Float[Tensor, "n_instances n_features n_hidden"]]:
+        stored_vals = {
+            "subnetwork_params": self.subnetwork_params.data[:, subnet_idx, :, :].detach().clone()
+        }
         self.subnetwork_params.data[:, subnet_idx, :, :] = 0.0
         return stored_vals
 
     def restore_subnet(
-        self, subnet_idx: int, stored_vals: list[Float[Tensor, "n_instances n_features n_hidden"]]
+        self,
+        subnet_idx: int,
+        stored_vals: dict[str, Float[Tensor, "n_instances n_features n_hidden"]],
     ) -> None:
-        self.subnetwork_params.data[:, subnet_idx, :, :] = stored_vals[0]
+        self.subnetwork_params.data[:, subnet_idx, :, :] = stored_vals["subnetwork_params"]

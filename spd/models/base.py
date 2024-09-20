@@ -51,11 +51,11 @@ class SPDModel(ABC, nn.Module):
         pass
 
     @abstractmethod
-    def set_subnet_to_zero(self, subnet_idx: int) -> list[Float[Tensor, "..."]]:
+    def set_subnet_to_zero(self, subnet_idx: int) -> dict[str, Float[Tensor, "..."]]:
         pass
 
     @abstractmethod
-    def restore_subnet(self, subnet_idx: int, stored_vals: list[Float[Tensor, "..."]]) -> None:
+    def restore_subnet(self, subnet_idx: int, stored_vals: dict[str, Float[Tensor, "..."]]) -> None:
         pass
 
 
@@ -90,11 +90,11 @@ class SPDFullRankModel(ABC, nn.Module):
         pass
 
     @abstractmethod
-    def set_subnet_to_zero(self, subnet_idx: int) -> list[Float[Tensor, "..."]]:
+    def set_subnet_to_zero(self, subnet_idx: int) -> dict[str, Float[Tensor, "..."]]:
         pass
 
     @abstractmethod
-    def restore_subnet(self, subnet_idx: int, stored_vals: list[Float[Tensor, "..."]]) -> None:
+    def restore_subnet(self, subnet_idx: int, stored_vals: dict[str, Float[Tensor, "..."]]) -> None:
         pass
 
 
