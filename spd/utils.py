@@ -429,7 +429,9 @@ def calc_ablation_attributions(
     out: Float[Tensor, "batch ... d_model_out"],
 ) -> Float[Tensor, "batch ... k"]:
     """Calculate the attributions by ablating each subnetwork one at a time."""
-    attributions = torch.zeros(out.shape[:-1] + (model.k,), device=out.device, dtype=out.dtype)
+
+    attr_shape = out.shape[:-1] + (model.k,)  # (batch, k) or (batch, n_instances, k)
+    attributions = torch.zeros(attr_shape, device=out.device, dtype=out.dtype)
     for subnet_idx in range(model.k):
         stored_vals = model.set_subnet_to_zero(subnet_idx)
         ablation_out, _, _ = model(batch)
