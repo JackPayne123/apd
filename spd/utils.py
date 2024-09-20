@@ -286,11 +286,11 @@ def calc_attributions_rank_one(
     return attribution_scores
 
 
-def calc_attributions_rank_one_per_layer(
+def calc_grad_attributions_rank_one_per_layer(
     out: Float[Tensor, "... d_out"],
     inner_acts: list[Float[Tensor, "... k"]],
 ) -> list[Float[Tensor, "... k"]]:
-    """Calculate the attributions for each layer.
+    """Calculate the gradient attributions for each layer.
 
     This differs from calc_attributions_rank_one in that it returns a list of attribution scores
     for each layer that are the sum of squares of output features, rather than taking the sum of
@@ -299,6 +299,7 @@ def calc_attributions_rank_one_per_layer(
     i.e. we do sum_{n_features}(activation * grad)^2 for each layer, rather than
     sum_{n_features}(sum_{layers}(activation * grad))^2.
 
+    Note that we don't have an ablation version of this for computational reasons.
     Args:
         out: The output of the model.
         inner_acts: The inner acts of the model (i.e. the set of subnetwork activations for each
@@ -376,7 +377,7 @@ def calc_attributions_full_rank(
     return attribution_scores
 
 
-def calc_attributions_full_rank_per_layer(
+def calc_grad_attributions_full_rank_per_layer(
     out: Float[Tensor, "... out_dim"],
     inner_acts: list[Float[Tensor, "... k d_out"]],
     layer_acts: list[Float[Tensor, "... d_out"]],
@@ -389,6 +390,8 @@ def calc_attributions_full_rank_per_layer(
 
     i.e. we do sum_{n_features}(activation * grad)^2 for each layer, rather than
     sum_{n_features}(sum_{layers}(activation * grad))^2.
+
+    Note that we don't have an ablation version of this for computational reasons.
 
     Args:
         out: The output of the model.
