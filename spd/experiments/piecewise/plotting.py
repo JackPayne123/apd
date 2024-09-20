@@ -572,19 +572,17 @@ def plot_piecewise_network(
     mlps: torch.nn.ModuleList = model.mlps
     n_layers = len(mlps)
 
+    W_ins = [get_weight_matrix(mlps[lay].linear1) for lay in range(n_layers)]
+    W_outs = [get_weight_matrix(mlps[lay].linear2) for lay in range(n_layers)]
     subnetworks = {}
     subnetworks[-1] = []
     for lay in range(n_layers):
-        W_in = get_weight_matrix(mlps[lay].linear1)
-        W_out = get_weight_matrix(mlps[lay].linear2)
-        subnetworks[-1].append({"W_in": W_in.sum(0), "W_out": W_out.sum(0)})
+        subnetworks[-1].append({"W_in": W_ins[lay].sum(0), "W_out": W_outs[lay].sum(0)})
 
     for k in range(n_components):
         subnetworks[k] = []
         for lay in range(n_layers):
-            W_in = get_weight_matrix(mlps[lay].linear1)
-            W_out = get_weight_matrix(mlps[lay].linear2)
-            subnetworks[k].append({"W_in": W_in[k], "W_out": W_out[k]})
+            subnetworks[k].append({"W_in": W_ins[lay][k], "W_out": W_outs[lay][k]})
 
     fig, axs = plt.subplots(
         1,
