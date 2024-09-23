@@ -891,12 +891,17 @@ class PiecewiseFunctionSPDFullRankTransformer(SPDFullRankModel):
             ]
         )
 
-    def set_handcoded_AB(self, target_transformer: PiecewiseFunctionSPDTransformer):
+    def set_handcoded_AB(
+        self, target_transformer: PiecewiseFunctionSPDTransformer, noise_scale: float = 0.0
+    ):
+        # same as set_handcoded_AB, but each weight is perturbed by a random gaussian variable with
+        # mean 0 and std dev noise_scale * the value of the weight
         assert self.n_inputs == target_transformer.n_inputs
         assert self.n_layers == target_transformer.n_layers
         assert self.d_embed == target_transformer.d_embed
         assert self.d_control == target_transformer.d_control
         self.to(target_transformer.W_E.weight.device)
+
         for i, mlp in enumerate(self.mlps):
             mlp.linear1.subnetwork_params.data[:, :] = einops.einsum(
                 target_transformer.mlps[i].linear1.A,
@@ -907,6 +912,16 @@ class PiecewiseFunctionSPDFullRankTransformer(SPDFullRankModel):
                 target_transformer.mlps[i].linear2.A,
                 target_transformer.mlps[i].linear2.B,
                 "d_mlp k, k d_embed -> k d_mlp d_embed",
+            )
+            mlp.linear1.subnetwork_params.data[:, :] += (
+                torch.randn_like(mlp.linear1.subnetwork_params.data)
+                * noise_scale
+                * mlp.linear1.subnetwork_params.data
+            )
+            mlp.linear2.subnetwork_params.data[:, :] += (
+                torch.randn_like(mlp.linear2.subnetwork_params.data)
+                * noise_scale
+                * mlp.linear2.subnetwork_params.data
             )
 
     def all_subnetwork_params(self) -> list[Float[Tensor, "k d_in d_out"]]:
