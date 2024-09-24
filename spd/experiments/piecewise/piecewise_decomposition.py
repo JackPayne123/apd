@@ -131,7 +131,7 @@ def get_run_name(config: Config) -> str:
         if config.topk_l2_coeff is not None:
             run_suffix += f"topkl2_{config.topk_l2_coeff:.2e}_"
         if config.task_config.handcoded_AB:
-            run_suffix += "hAB_"
+            run_suffix += f"hAB_noisescale_{config.task_config.handcoded_AB_noise_scale:.2e}_"
         run_suffix += f"lr{config.lr:.2e}_"
         run_suffix += f"bs{config.batch_size}"
         run_suffix += f"lay{config.task_config.n_layers}"
@@ -200,7 +200,9 @@ def get_model_and_dataloader(
                 input_biases=input_biases,
             )
             non_full_rank_spd_model.set_handcoded_AB(piecewise_model)
-            piecewise_model_spd.set_handcoded_AB(non_full_rank_spd_model)
+            piecewise_model_spd.set_handcoded_AB(
+                non_full_rank_spd_model, noise_scale=config.task_config.handcoded_AB_noise_scale
+            )
     else:
         piecewise_model_spd = PiecewiseFunctionSPDTransformer(
             n_inputs=piecewise_model.n_inputs,

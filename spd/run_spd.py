@@ -72,6 +72,7 @@ class PiecewiseConfig(BaseModel):
     dataset_seed: int | None = None
     simple_bias: bool = False
     handcoded_AB: bool = False
+    handcoded_AB_noise_scale: float = 0.0
 
 
 class Config(BaseModel):
