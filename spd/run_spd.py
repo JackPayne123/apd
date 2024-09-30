@@ -21,6 +21,7 @@ from pydantic import (
     model_validator,
 )
 from torch import Tensor
+from torch.func import functional_call
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
@@ -550,22 +551,55 @@ def optimize(
         out, layer_acts, inner_acts = model(batch)
         assert len(inner_acts) == model.n_param_matrices
 
-        # Get attributions
-        params: list[Float[Tensor, "k ..."]] = [p for p in model.parameters() if p.requires_grad]
-        batch_attribs: list[Float[Tensor, " k"]] = []
-        for batch_idx in range(out.shape[0]):
-            batch_grads = torch.autograd.grad(out[batch_idx, 0], params, retain_graph=True)
-            # FYI: batch_grads do not depend on k (due to sum rule), so they are the same for all k
-            batch_attribs.append(
-                torch.stack(
-                    [
-                        einops.einsum(batch_grads[i], params[i], "k i j , k i j -> k")
-                        for i in range(len(params))
-                    ]
-                ).sum(dim=0)
-            )
+        # Collect parameter names and parameters
+        param_names = [name for name, param in model.named_parameters() if param.requires_grad]
+        params = tuple(param for name, param in model.named_parameters() if param.requires_grad)
 
-        attribs: Float[Tensor, "batch k"] = torch.stack(batch_attribs)
+        # Define a functional version of your model
+        def func_model(params, batch):
+            param_dict = {name: param for name, param in zip(param_names, params, strict=False)}
+            out, _, _ = functional_call(model, param_dict, (batch,))
+            return out[:, 0]  # Assuming you're interested in the first output dimension
+
+        # Compute the VJP and attributions
+        attribs = []
+        batch_size = batch.shape[0]
+        for batch_idx in range(batch_size):
+            # One-hot vector v to select the current sample
+            v = torch.zeros(batch_size, device=batch.device)
+            v[batch_idx] = 1  # Focus on one sample at a time
+
+            # Compute the VJP for the current sample
+            _, vjp = torch.autograd.functional.vjp(lambda *p: func_model(p, batch), params, v=v)
+
+            # Compute the attribution for this sample
+            attrib = torch.stack(
+                [
+                    einops.einsum(vjp_i, param_i, "k i j , k i j -> k")
+                    for vjp_i, param_i in zip(vjp, params, strict=False)
+                ]
+            ).sum(dim=0)
+            attribs.append(attrib)
+
+        # Stack attributions for all samples
+        attribs = torch.stack(attribs) ** 2
+
+        pass
+        # # Get attributions
+        # params: list[Float[Tensor, "k ..."]] = [p for p in model.parameters() if p.requires_grad]
+        # batch_attribs: list[Float[Tensor, " k"]] = []
+        # for batch_idx in range(out.shape[0]):
+        #     batch_grads = torch.autograd.grad(out[batch_idx, 0], params, retain_graph=True)
+        #     # FYI: batch_grads do not depend on k (due to sum rule), so they are the same for all k
+        #     batch_attribs.append(
+        #         torch.stack(
+        #             [
+        #                 einops.einsum(batch_grads[i], params[i], "k i j , k i j -> k")
+        #                 for i in range(len(params))
+        #             ]
+        #         ).sum(dim=0)
+        #     )
+        # attribs: Float[Tensor, "batch k"] = torch.stack(batch_attribs)
 
         # out.backward(retain_graph=True)
 
@@ -621,10 +655,12 @@ def optimize(
 
             fig, axes = plt.subplots(1, 2, figsize=(20, 10))
             axes = np.array(axes)  # type: ignore
-            axes[0].matshow(attribution_scores[:10].cpu().detach(), vmin=-50, vmax=50)
+            im = axes[0].matshow(attribution_scores[:10].cpu().detach(), vmin=-50, vmax=50)
+            cax = fig.colorbar(im, ax=axes[0])
             axes[0].set_title("Old attribution scores")
+            im = axes[1].matshow(attribs[:10].cpu().detach(), vmin=-50, vmax=50)
+            cax = fig.colorbar(im, ax=axes[1])
             axes[1].set_title("New param-based attribution scores")
-            axes[1].matshow(attribs[:10].cpu().detach() ** 2, vmin=-50, vmax=50)
             # Numnbers
             for i in range(10):
                 for j in range(len(attribution_scores[i])):
@@ -639,7 +675,8 @@ def optimize(
                     axes[1].text(
                         i, j, f"{attribs[j][i].item():.2f}", ha="center", va="center", color="w"
                     )
-            plt.savefig("test.png")
+            plt.savefig("/data/stefan_heimersheim/test.png")
+            print("Saved figure to /data/stefan_heimersheim/test.png")
 
             # Do a forward pass with only the topk subnetworks
             out_topk, _, inner_acts_topk = model.forward_topk(batch, topk_mask=topk_mask)
