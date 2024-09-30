@@ -384,6 +384,8 @@ def calc_orthog_loss_full_rank(
         otherwise of shape [].
     """
     first_param = subnetwork_params[0]
+    # NOTE: The below assumes that the last three dims are the k, d_in, d_out and will not work
+    # for e.g. biases.
     batch_dims = first_param.shape[:-3]  # All dimensions except the last three
     k = first_param.shape[-3]
     dot_prods = torch.zeros((*batch_dims, k, k), device=first_param.device)
