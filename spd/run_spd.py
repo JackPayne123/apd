@@ -390,7 +390,9 @@ def calc_orthog_loss_full_rank(
     k = first_param.shape[-3]
     dot_prods = torch.zeros((*batch_dims, k, k), device=first_param.device)
     for subnet in subnetwork_params:
-        dot_prods += einops.einsum(subnet, subnet, "... k d_in d_out, ... l d_in d_out -> ... k l")
+        dot_prods += einops.einsum(
+            subnet, subnet, "... k1 d_in d_out, ... k2 d_in d_out -> ... k1 k2"
+        )
 
     # Multiply the k l diagonal by 0
     dot_prods.diagonal(dim1=-2, dim2=-1).zero_()
