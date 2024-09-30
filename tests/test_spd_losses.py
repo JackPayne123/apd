@@ -203,5 +203,5 @@ class TestCalcOrthogLoss:
     )
     def test_calc_orthog_loss_full_rank(self, subnet: Tensor, expected: Tensor) -> None:
         result = calc_orthog_loss_full_rank(subnetwork_params=[subnet])
-        # Note that we take the dot product, then abs, then mean over d_in and d_out
+        # Note that we take the dot product, then abs, then mean over the subnetwork indices
         assert torch.allclose(result, expected), f"Expected {expected}, but got {result}"
