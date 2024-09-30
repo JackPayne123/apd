@@ -557,32 +557,23 @@ def optimize(
 
         # Define a functional version of your model
         def func_model(params, batch):
-            param_dict = {name: param for name, param in zip(param_names, params, strict=False)}
+            param_dict = {name: param for name, param in zip(param_names, params, strict=True)}
             out, _, _ = functional_call(model, param_dict, (batch,))
             return out[:, 0]  # Assuming you're interested in the first output dimension
 
-        # Compute the VJP and attributions
         attribs = []
-        batch_size = batch.shape[0]
-        for batch_idx in range(batch_size):
-            # One-hot vector v to select the current sample
-            v = torch.zeros(batch_size, device=batch.device)
-            v[batch_idx] = 1  # Focus on one sample at a time
-
-            # Compute the VJP for the current sample
-            _, vjp = torch.autograd.functional.vjp(lambda *p: func_model(p, batch), params, v=v)
-
-            # Compute the attribution for this sample
-            attrib = torch.stack(
-                [
-                    einops.einsum(vjp_i, param_i, "k i j , k i j -> k")
-                    for vjp_i, param_i in zip(vjp, params, strict=False)
-                ]
-            ).sum(dim=0)
-            attribs.append(attrib)
-
-        # Stack attributions for all samples
-        attribs = torch.stack(attribs) ** 2
+        for k in range(model.k):
+            k_params = []
+            for _, param in zip(param_names, params, strict=False):
+                mask = torch.zeros_like(param)
+                mask[k, ...] = 1
+                k_params.append(param * mask)
+            k_params = tuple(k_params)
+            _, jvp = torch.autograd.functional.jvp(
+                lambda *p: func_model(p, batch), params, v=k_params
+            )
+            attribs.append(jvp**2)
+        attribs = torch.stack(attribs).T
 
         pass
         # # Get attributions
