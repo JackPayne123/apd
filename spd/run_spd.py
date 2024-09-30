@@ -376,6 +376,9 @@ def calc_orthog_loss_full_rank(
 ) -> Float[Tensor, ""] | Float[Tensor, " n_instances"]:
     """Calculate the sum of the absolute values of inner products of different subnets.
 
+    NOTE: We could and maybe should try L2 instead of absolute, as well as cosine sim rather than
+    dot product.
+
     Args:
         subnetwork_params (list[Float[Tensor, " ... k d_in d_out"]]): The parameters of the SPDModel
 
@@ -385,7 +388,7 @@ def calc_orthog_loss_full_rank(
     """
     first_param = subnetwork_params[0]
     # NOTE: The below assumes that the last three dims are the k, d_in, d_out and will not work
-    # for e.g. biases.
+    # for decomposing e.g. biases.
     batch_dims = first_param.shape[:-3]  # All dimensions except the last three
     k = first_param.shape[-3]
     dot_prods = torch.zeros((*batch_dims, k, k), device=first_param.device)
