@@ -318,12 +318,14 @@ def calc_topk_l2_full_rank(
             # topk_mask: [batch, k]
             ein_str = "k ... d_out, batch k -> batch ... d_out"
             # output dimensions to mean over
+            assert subnetwork_param_val.ndim in (3, 2), "Invalid number of dimensions"
             mean_dims = (-2, -1) if subnetwork_param_val.ndim == 3 else (-1,)
         else:
             # subnetwork_param_val: [n_instances, k, d_in, d_out] or [n_instances, k, d_out]
             # topk_mask: [batch, n_instances, k]
             ein_str = "n_instances k ... d_out, batch n_instances k -> batch n_instances ... d_out"
             # output dimensions to mean over
+            assert subnetwork_param_val.ndim in (4, 3), "Invalid number of dimensions"
             mean_dims = (-2, -1) if subnetwork_param_val.ndim == 4 else (-1,)
 
         topk_params = einops.einsum(subnetwork_param_val, topk_mask, ein_str)
@@ -362,8 +364,12 @@ def calc_param_match_loss(
         pretrained_weight = pretrained_weights[target_param_name]
         subnetwork_param = subnetwork_params_summed[subnetwork_param_name]
         if has_instance_dim:
+            # params: [n_instances, d_out] or [n_instances, d_in, d_out]
+            assert pretrained_weight.ndim in (3, 2)
             mean_dims = (-2, -1) if pretrained_weight.ndim == 3 else (-1,)
         else:
+            # params: [d_out] or [d_in, d_out]
+            assert pretrained_weight.ndim in (2, 1)
             mean_dims = (-2, -1) if pretrained_weight.ndim == 2 else (-1,)
         param_match_loss = param_match_loss + ((subnetwork_param - pretrained_weight) ** 2).mean(
             dim=mean_dims
@@ -393,10 +399,14 @@ def calc_orthog_loss_full_rank(
     """
     first_param = subnetwork_params[0]
     if has_instance_dim:
+        # params: [n_instances, k, d_out] or [n_instances, k, d_in, d_out]
+        assert all(param.ndim in (3, 4) for param in subnetwork_params), "Invalid number of dims"
         k = first_param.shape[1]
         dot_prods = torch.zeros((first_param.shape[0], k, k), device=first_param.device)
         ein_str = "n_instances k1 ... d_out, n_instances k2 ... d_out -> n_instances k1 k2"
     else:
+        # params: [k, d_out] or [k, d_in, d_out]
+        assert all(param.ndim in (2, 3) for param in subnetwork_params), "Invalid number of dims"
         k = first_param.shape[0]
         dot_prods = torch.zeros((k, k), device=first_param.device)
         ein_str = "k1 ... d_out, k2 ... d_out -> k1 k2"
