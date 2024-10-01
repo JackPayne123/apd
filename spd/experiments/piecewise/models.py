@@ -638,9 +638,6 @@ class PiecewiseFunctionSPDTransformer(SPDModel):
         )
 
     def all_As_and_Bs(self) -> list[tuple[Float[Tensor, "dim k"], Float[Tensor, "k dim"]]]:
-        if self.decompose_bias:
-            raise NotImplementedError("Decomposing bias not implemented for rank 1")
-
         As_and_Bs = []
         for mlp in self.mlps:
             As_and_Bs.append((mlp.linear1.A, mlp.linear1.B))
