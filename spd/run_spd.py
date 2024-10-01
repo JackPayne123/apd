@@ -72,6 +72,7 @@ class PiecewiseConfig(BaseModel):
     dataset_seed: int | None = None
     simple_bias: bool = False
     handcoded_AB: bool = False
+    decompose_bias: bool = True
 
 
 class Config(BaseModel):
@@ -280,8 +281,11 @@ def calc_topk_l2_rank_one(
 
 
 def calc_topk_l2_full_rank(
-    subnetwork_params: list[Float[Tensor, " ... k d_in d_out"]],
+    subnetwork_params: list[
+        Float[Tensor, "k ... d_out"] | Float[Tensor, "n_instances k ... d_out"]
+    ],
     topk_mask: Bool[Tensor, "batch ... k"],
+    n_instances: int | None = None,
 ) -> Float[Tensor, ""] | Float[Tensor, " n_instances"]:
     """Calculate the L2 of the sum of the topk subnetworks.
 
@@ -289,10 +293,13 @@ def calc_topk_l2_full_rank(
     produce the same operation without it. The ... indicates an optional n_instances dimension.
 
     Args:
-        subnetwork_params (list[Float[Tensor, " ... k d_in d_out"]]): The parameters of the
-            subnetworks.
+        subnetwork_params (list[Float[Tensor, "k ... d_out"] |
+            Float[Tensor, "n_instances k ... d_out"]]):
+            The parameters of the subnetwork. The "..." indicates an optional d_in dimension which
+            would not be present if it's a bias parameter.
         topk_mask (Bool[Tensor, "batch ... k"]): The topk mask to use for the L2 penalty.
-            Will contain an n_instances dimension if the model has an n_instances dimension.
+            The "..." indicates an optional n_instances dimension.
+        n_instances (int | None): The number of instances in the model.
 
     Returns:
         The L2 penalty for the topk subnetworks. One value for each n_instance (used in tms and
@@ -301,28 +308,35 @@ def calc_topk_l2_full_rank(
     assert len(subnetwork_params) > 0, "No subnetwork parameters provided"
 
     batch_size = topk_mask.shape[0]
-    n_instances = topk_mask.shape[1] if topk_mask.ndim == 3 else None
     accumulate_shape = (batch_size,) if n_instances is None else (batch_size, n_instances)
 
     topk_mask = topk_mask.to(subnetwork_params[0].dtype)
     topk_l2_penalty = torch.zeros(accumulate_shape, device=subnetwork_params[0].device)
     for subnetwork_param_val in subnetwork_params:
-        # subnetwork_param: [k, d_in, d_out] or [n_instances, k, d_in, d_out]
-        # topk_mask: [batch, k] or [batch, n_instances, k]
-        topk_params = einops.einsum(
-            subnetwork_param_val, topk_mask, "... k d_in d_out, batch ... k -> batch ... d_in d_out"
-        )
-        topk_l2_penalty = topk_l2_penalty + ((topk_params) ** 2).mean(dim=(-2, -1))
-    # Mean over batch_dim and divide by number of parameter matrices we iterated over
-    # NOTE: Assumes all subnetwork params are the same shape, which will not be true if we add
-    # biases
+        if n_instances is None:
+            # subnetwork_param_val: [k, d_in, d_out] or [k, d_out] (if bias param)
+            # topk_mask: [batch, k]
+            ein_str = "k ... d_out, batch k -> batch ... d_out"
+            # output dimensions to mean over
+            mean_dims = (-2, -1) if subnetwork_param_val.ndim == 3 else (-1,)
+        else:
+            # subnetwork_param_val: [n_instances, k, d_in, d_out] or [n_instances, k, d_out]
+            # topk_mask: [batch, n_instances, k]
+            ein_str = "n_instances k ... d_out, batch n_instances k -> batch n_instances ... d_out"
+            # output dimensions to mean over
+            mean_dims = (-2, -1) if subnetwork_param_val.ndim == 4 else (-1,)
+
+        topk_params = einops.einsum(subnetwork_param_val, topk_mask, ein_str)
+        topk_l2_penalty = topk_l2_penalty + ((topk_params) ** 2).mean(dim=mean_dims)
+
     return topk_l2_penalty.mean(dim=0) / len(subnetwork_params)
 
 
 def calc_param_match_loss(
-    pretrained_weights: dict[str, Float[Tensor, " ... d_in d_out"]],
-    subnetwork_params_summed: dict[str, Float[Tensor, " ... d_in d_out"]],
+    pretrained_weights: dict[str, Float[Tensor, "... d_out"]],
+    subnetwork_params_summed: dict[str, Float[Tensor, " ... d_out"]],
     param_map: dict[str, str],
+    has_instance_dim: bool = False,
 ) -> Float[Tensor, ""] | Float[Tensor, " n_instances"]:
     """Calculate the parameter match loss.
 
@@ -330,13 +344,14 @@ def calc_param_match_loss(
     target params.
 
     Args:
-        pretrained_weights (dict[str, Float[Tensor, " ... d_in d_out"]]): The pretrained weights to
-            be matched.
-        subnetwork_params_summed (dict[str, Float[Tensor, " ... d_in d_out"]]): The parameters of
-            the SPDModel (that have already been summed over the subnetwork dimension).
+        pretrained_weights (dict[str, Float[Tensor, " ... d_out"]]): The pretrained weights to
+            be matched. May have an n_instances and/or d_in dimension.
+        subnetwork_params_summed (dict[str, Float[Tensor, " ... d_out"]]): The parameters of
+            the SPDModel (that have already been summed over the subnetwork dimension). May have
+            an n_instances and/or d_in dimension.
         param_map (dict[str, str]): A map from keys in pretrained_weights to keys in
             subnetwork_params_summed.
-
+        has_instance_dim (bool): Whether the model has an n_instances dimension.
     Returns:
         The parameter match loss of shape [n_instances] if the model has an n_instances dimension,
         otherwise of shape [].
@@ -346,14 +361,21 @@ def calc_param_match_loss(
     for target_param_name, subnetwork_param_name in param_map.items():
         pretrained_weight = pretrained_weights[target_param_name]
         subnetwork_param = subnetwork_params_summed[subnetwork_param_name]
+        if has_instance_dim:
+            mean_dims = (-2, -1) if pretrained_weight.ndim == 3 else (-1,)
+        else:
+            mean_dims = (-2, -1) if pretrained_weight.ndim == 2 else (-1,)
         param_match_loss = param_match_loss + ((subnetwork_param - pretrained_weight) ** 2).mean(
-            dim=(-2, -1)
+            dim=mean_dims
         )
     return param_match_loss / len(subnetwork_params_summed)
 
 
 def calc_orthog_loss_full_rank(
-    subnetwork_params: list[Float[Tensor, " ... k d_in d_out"]],
+    subnetwork_params: list[
+        Float[Tensor, "k ... d_out"] | Float[Tensor, "n_instances k ... d_out"]
+    ],
+    has_instance_dim: bool = False,
 ) -> Float[Tensor, ""] | Float[Tensor, " n_instances"]:
     """Calculate the sum of the absolute values of inner products of different subnets.
 
@@ -361,22 +383,26 @@ def calc_orthog_loss_full_rank(
     dot product.
 
     Args:
-        subnetwork_params (list[Float[Tensor, " ... k d_in d_out"]]): The parameters of the SPDModel
+        subnetwork_params (list[Float[Tensor, " ... k ... d_out"]]): The parameters of the SPDModel.
+            The first "..." is an optional n_instances dimension. The second "..." is an optional
+            d_in dimension which would not be present if it's a bias parameter.
 
     Returns:
         The orthogonality loss of shape [n_instances] if the model has an n_instances dimension,
         otherwise of shape [].
     """
     first_param = subnetwork_params[0]
-    # NOTE: The below assumes that the last three dims are the k, d_in, d_out and will not work
-    # for decomposing e.g. biases.
-    batch_dims = first_param.shape[:-3]  # All dimensions except the last three
-    k = first_param.shape[-3]
-    dot_prods = torch.zeros((*batch_dims, k, k), device=first_param.device)
+    if has_instance_dim:
+        k = first_param.shape[1]
+        dot_prods = torch.zeros((first_param.shape[0], k, k), device=first_param.device)
+        ein_str = "n_instances k1 ... d_out, n_instances k2 ... d_out -> n_instances k1 k2"
+    else:
+        k = first_param.shape[0]
+        dot_prods = torch.zeros((k, k), device=first_param.device)
+        ein_str = "k1 ... d_out, k2 ... d_out -> k1 k2"
+
     for subnet in subnetwork_params:
-        dot_prods += einops.einsum(
-            subnet, subnet, "... k1 d_in d_out, ... k2 d_in d_out -> ... k1 k2"
-        )
+        dot_prods += einops.einsum(subnet, subnet, ein_str)
 
     # Multiply the k l diagonal by 0
     dot_prods.diagonal(dim1=-2, dim2=-1).zero_()
@@ -571,6 +597,7 @@ def optimize(
                 pretrained_weights=pretrained_model.all_decomposable_params(),
                 subnetwork_params_summed=model.all_subnetwork_params_summed(),
                 param_map=param_map,
+                has_instance_dim=has_instance_dim,
             )
 
         lp_sparsity_loss = None
@@ -615,6 +642,7 @@ def optimize(
                     topk_l2_loss = calc_topk_l2_full_rank(
                         subnetwork_params=list(model.all_subnetwork_params().values()),
                         topk_mask=topk_mask,
+                        n_instances=getattr(model, "n_instances", None),
                     )
                 else:
                     topk_l2_loss = calc_topk_l2_rank_one(
