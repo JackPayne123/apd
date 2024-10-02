@@ -1,4 +1,4 @@
-wandb_project: spd-piecewise
+# wandb_project: spd-piecewise
 wandb_run_name: null
 wandb_run_name_prefix: "fr_"
 full_rank: true
@@ -29,4 +29,4 @@ task_config:
   range_max: 5
   k: 10
   simple_bias: false
-  handcoded_AB: false
+  handcoded_AB: true

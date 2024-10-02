@@ -21,6 +21,7 @@ from pydantic import (
     model_validator,
 )
 from torch import Tensor
+from torch.func import functional_call
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
@@ -485,6 +486,75 @@ def optimize(
     plot_results_fn: Callable[..., dict[str, plt.Figure]] | None = None,
     out_dir: Path | None = None,
 ) -> None:
+    assert pretrained_model is not None
+    pretrained_model.to(device=device)
+
+    for k, v in pretrained_model.state_dict().items():
+        print(k, f"rg={v.requires_grad}", f"{v.shape}")
+
+    param_dict = pretrained_model.all_decomposable_params_noT()
+    param_dict_keys = list(param_dict.keys())
+    # Currently param_dict['mlp_0.input_layer.weight'].requires_grad is true
+    k_param_dict = model.all_subnetwork_params_T()  # could also create this here
+    # k_param_dict = {k: torch.te for k, v in param_dict.items()}
+    print(f"{param_dict[param_dict_keys[0]].requires_grad=}")
+    for key, value in param_dict.items():
+        print(key, f"{value.shape}")
+    print(f"{k_param_dict[param_dict_keys[0]].requires_grad=}")
+    for key, value in k_param_dict.items():
+        print(key, f"{value.shape}")
+        value.requires_grad_(True)
+
+    alpha = torch.ones(config.task_config.k, device=device)  # type: ignore
+
+    data_iter = iter(dataloader)
+    for _ in tqdm(range(config.steps + 1), ncols=0):
+        try:
+            batch, labels = next(data_iter)
+        except StopIteration:
+            data_iter = iter(dataloader)
+            batch, labels = next(data_iter)
+
+        batch = batch.to(device=device)
+        labels = labels.to(device=device)
+
+        # Tests:
+        _ = pretrained_model(batch)
+        _ = functional_call(pretrained_model, param_dict, (batch,))
+
+        # summed_param_dict = {
+        #     k: einops.einsum(v, alpha, "k ..., k -> ...") for k, v in k_param_dict.items()
+        # }
+        # print("summed_param_dict")
+        # for key, value in summed_param_dict.items():
+        #     print(key, f"{value.shape=}")
+        # out: Float[Tensor, " batch"] = functional_call(
+        #     pretrained_model, summed_param_dict, (batch,)
+        # )
+        jacobian = torch.autograd.functional.jacobian(
+            lambda alpha: functional_call(
+                pretrained_model,
+                {k: einops.einsum(v, alpha, "k ..., k -> ...") for k, v in k_param_dict.items()},
+                batch,
+            ),
+            alpha,
+        ).squeeze(dim=-2)
+        print(f"{jacobian.shape=}")
+        print(f"{jacobian=}")
+        print(f"{param_dict[param_dict_keys[0]].grad=}")
+        print(f"{k_param_dict[param_dict_keys[0]].grad=}")
+        print(f"{alpha.grad=}")
+        attribs: Float[Tensor, "batch k"] = jacobian**2
+        topk_mask = calc_topk_mask(attribs, config.topk, batch_topk=config.batch_topk).float()
+        # could make this non-binary (softmax) if we wanted
+        out_recon = TODO
+        recon_loss = calc_recon_mse(out_recon, labels, has_instance_dim=False)
+        recon_loss.backward()
+        print(f"{param_dict[param_dict_keys[0]].grad=}")
+        print(f"{k_param_dict[param_dict_keys[0]].grad=}")
+        print(f"{alpha.grad=}")
+        pass
+
     model.to(device=device)
 
     has_instance_dim = hasattr(model, "n_instances")

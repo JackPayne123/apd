@@ -471,8 +471,17 @@ class PiecewiseFunctionTransformer(Model):
         params = {}
         for i, mlp in enumerate(self.mlps):
             # We transpose because our SPD model uses (input, output) pairs, not (output, input)
-            params[f"mlp_{i}.input_layer.weight"] = mlp.input_layer.weight.T
-            params[f"mlp_{i}.output_layer.weight"] = mlp.output_layer.weight.T
+            params[f"mlps.{i}.input_layer.weight"] = mlp.input_layer.weight.T
+            params[f"mlps.{i}.output_layer.weight"] = mlp.output_layer.weight.T
+        return params
+
+    def all_decomposable_params_noT(self) -> dict[str, Float[Tensor, "..."]]:
+        """Dictionary of all parameters which will be decomposed with SPD."""
+        params = {}
+        for i, mlp in enumerate(self.mlps):
+            # We transpose because our SPD model uses (input, output) pairs, not (output, input)
+            params[f"mlps.{i}.input_layer.weight"] = mlp.input_layer.weight
+            params[f"mlps.{i}.output_layer.weight"] = mlp.output_layer.weight
         return params
 
     @classmethod
@@ -643,21 +652,32 @@ class PiecewiseFunctionSPDTransformer(SPDModel):
     def all_subnetwork_params(self) -> dict[str, Float[Tensor, "..."]]:
         params = {}
         for i, mlp in enumerate(self.mlps):
-            params[f"mlp_{i}.input_layer.weight"] = einops.einsum(
+            params[f"mlps.{i}.input_layer.weight"] = einops.einsum(
                 mlp.linear1.A, mlp.linear1.B, "d_embed k, k d_mlp -> k d_embed d_mlp"
             )
-            params[f"mlp_{i}.output_layer.weight"] = einops.einsum(
+            params[f"mlps.{i}.output_layer.weight"] = einops.einsum(
                 mlp.linear2.A, mlp.linear2.B, "d_embed k, k d_mlp -> k d_embed d_mlp"
+            )
+        return params
+
+    def all_subnetwork_params_T(self) -> dict[str, Float[Tensor, "..."]]:
+        params = {}
+        for i, mlp in enumerate(self.mlps):
+            params[f"mlps.{i}.input_layer.weight"] = einops.einsum(
+                mlp.linear1.A, mlp.linear1.B, "d_embed k, k d_mlp -> k d_mlp d_embed"
+            )
+            params[f"mlps.{i}.output_layer.weight"] = einops.einsum(
+                mlp.linear2.A, mlp.linear2.B, "d_embed k, k d_mlp -> k d_mlp d_embed"
             )
         return params
 
     def all_subnetwork_params_summed(self) -> dict[str, Float[Tensor, "..."]]:
         params = {}
         for i, mlp in enumerate(self.mlps):
-            params[f"mlp_{i}.input_layer.weight"] = einops.einsum(
+            params[f"mlps.{i}.input_layer.weight"] = einops.einsum(
                 mlp.linear1.A, mlp.linear1.B, "d_embed k, k d_mlp -> d_embed d_mlp"
             )
-            params[f"mlp_{i}.output_layer.weight"] = einops.einsum(
+            params[f"mlps.{i}.output_layer.weight"] = einops.einsum(
                 mlp.linear2.A, mlp.linear2.B, "d_embed k, k d_mlp -> d_embed d_mlp"
             )
         return params
@@ -832,10 +852,10 @@ class PiecewiseFunctionSPDTransformer(SPDModel):
     def set_subnet_to_zero(self, subnet_idx: int) -> dict[str, Float[Tensor, " dim"]]:
         stored_vals = {}
         for i, mlp in enumerate(self.mlps):
-            stored_vals[f"mlp_{i}_linear1_A"] = mlp.linear1.A.data[:, subnet_idx].detach().clone()
-            stored_vals[f"mlp_{i}_linear2_A"] = mlp.linear2.A.data[:, subnet_idx].detach().clone()
-            stored_vals[f"mlp_{i}_linear1_B"] = mlp.linear1.B.data[subnet_idx, :].detach().clone()
-            stored_vals[f"mlp_{i}_linear2_B"] = mlp.linear2.B.data[subnet_idx, :].detach().clone()
+            stored_vals[f"mlps.{i}_linear1_A"] = mlp.linear1.A.data[:, subnet_idx].detach().clone()
+            stored_vals[f"mlps.{i}_linear2_A"] = mlp.linear2.A.data[:, subnet_idx].detach().clone()
+            stored_vals[f"mlps.{i}_linear1_B"] = mlp.linear1.B.data[subnet_idx, :].detach().clone()
+            stored_vals[f"mlps.{i}_linear2_B"] = mlp.linear2.B.data[subnet_idx, :].detach().clone()
             mlp.linear1.A.data[:, subnet_idx] = 0.0
             mlp.linear2.A.data[:, subnet_idx] = 0.0
             mlp.linear1.B.data[subnet_idx, :] = 0.0
@@ -846,10 +866,10 @@ class PiecewiseFunctionSPDTransformer(SPDModel):
         self, subnet_idx: int, stored_vals: dict[str, Float[Tensor, " dim"]]
     ) -> None:
         for i, mlp in enumerate(self.mlps):
-            mlp.linear1.A.data[:, subnet_idx] = stored_vals[f"mlp_{i}_linear1_A"]
-            mlp.linear2.A.data[:, subnet_idx] = stored_vals[f"mlp_{i}_linear2_A"]
-            mlp.linear1.B.data[subnet_idx, :] = stored_vals[f"mlp_{i}_linear1_B"]
-            mlp.linear2.B.data[subnet_idx, :] = stored_vals[f"mlp_{i}_linear2_B"]
+            mlp.linear1.A.data[:, subnet_idx] = stored_vals[f"mlps.{i}_linear1_A"]
+            mlp.linear2.A.data[:, subnet_idx] = stored_vals[f"mlps.{i}_linear2_A"]
+            mlp.linear1.B.data[subnet_idx, :] = stored_vals[f"mlps.{i}_linear1_B"]
+            mlp.linear2.B.data[subnet_idx, :] = stored_vals[f"mlps.{i}_linear2_B"]
 
 
 class PiecewiseFunctionSPDFullRankTransformer(SPDFullRankModel):
@@ -926,15 +946,24 @@ class PiecewiseFunctionSPDFullRankTransformer(SPDFullRankModel):
     def all_subnetwork_params(self) -> dict[str, Float[Tensor, "..."]]:
         params = {}
         for i, mlp in enumerate(self.mlps):
-            params[f"mlp_{i}.input_layer.weight"] = mlp.linear1.subnetwork_params
-            params[f"mlp_{i}.output_layer.weight"] = mlp.linear2.subnetwork_params
+            params[f"mlps.{i}.input_layer.weight"] = mlp.linear1.subnetwork_params
+            params[f"mlps.{i}.output_layer.weight"] = mlp.linear2.subnetwork_params
+        return params
+
+    def all_subnetwork_params_T(self) -> dict[str, Float[Tensor, "..."]]:
+        params = {}
+        for i, mlp in enumerate(self.mlps):
+            params[f"mlps.{i}.input_layer.weight"] = mlp.linear1.subnetwork_params.transpose(-2, -1)
+            params[f"mlps.{i}.output_layer.weight"] = mlp.linear2.subnetwork_params.transpose(
+                -2, -1
+            )
         return params
 
     def all_subnetwork_params_summed(self) -> dict[str, Float[Tensor, "..."]]:
         params = {}
         for i, mlp in enumerate(self.mlps):
-            params[f"mlp_{i}.input_layer.weight"] = mlp.linear1.subnetwork_params.sum(dim=-3)
-            params[f"mlp_{i}.output_layer.weight"] = mlp.linear2.subnetwork_params.sum(dim=-3)
+            params[f"mlps.{i}.input_layer.weight"] = mlp.linear1.subnetwork_params.sum(dim=-3)
+            params[f"mlps.{i}.output_layer.weight"] = mlp.linear2.subnetwork_params.sum(dim=-3)
         return params
 
     def forward(
@@ -1015,10 +1044,10 @@ class PiecewiseFunctionSPDFullRankTransformer(SPDFullRankModel):
     def set_subnet_to_zero(self, subnet_idx: int) -> dict[str, Float[Tensor, "d_in d_out"]]:
         stored_vals = {}
         for i, mlp in enumerate(self.mlps):
-            stored_vals[f"mlp_{i}_linear1"] = (
+            stored_vals[f"mlps.{i}_linear1"] = (
                 mlp.linear1.subnetwork_params.data[subnet_idx, :, :].detach().clone()
             )
-            stored_vals[f"mlp_{i}_linear2"] = (
+            stored_vals[f"mlps.{i}_linear2"] = (
                 mlp.linear2.subnetwork_params.data[subnet_idx, :, :].detach().clone()
             )
             mlp.linear1.subnetwork_params.data[subnet_idx, :, :] = 0.0
@@ -1029,5 +1058,5 @@ class PiecewiseFunctionSPDFullRankTransformer(SPDFullRankModel):
         self, subnet_idx: int, stored_vals: dict[str, Float[Tensor, "d_in d_out"]]
     ) -> None:
         for i, mlp in enumerate(self.mlps):
-            mlp.linear1.subnetwork_params.data[subnet_idx, :, :] = stored_vals[f"mlp_{i}_linear1"]
-            mlp.linear2.subnetwork_params.data[subnet_idx, :, :] = stored_vals[f"mlp_{i}_linear2"]
+            mlp.linear1.subnetwork_params.data[subnet_idx, :, :] = stored_vals[f"mlps.{i}_linear1"]
+            mlp.linear2.subnetwork_params.data[subnet_idx, :, :] = stored_vals[f"mlps.{i}_linear2"]

@@ -305,8 +305,8 @@ def main(
     # `all_subnetwork_params_summed`.
     param_map = {}
     for i in range(piecewise_model_spd.n_layers):
-        param_map[f"mlp_{i}.input_layer.weight"] = f"mlp_{i}.input_layer.weight"
-        param_map[f"mlp_{i}.output_layer.weight"] = f"mlp_{i}.output_layer.weight"
+        param_map[f"mlps.{i}.input_layer.weight"] = f"mlps.{i}.input_layer.weight"
+        param_map[f"mlps.{i}.output_layer.weight"] = f"mlps.{i}.output_layer.weight"
 
     optimize(
         model=piecewise_model_spd,
