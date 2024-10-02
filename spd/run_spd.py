@@ -2,6 +2,7 @@
 
 import json
 from collections.abc import Callable
+from functools import partial
 from pathlib import Path
 from typing import Literal, Self
 
@@ -34,6 +35,8 @@ from spd.utils import (
     calc_attributions_rank_one,
     calc_topk_mask,
 )
+
+# torch.set_float32_matmul_precision("high")
 
 
 class TMSConfig(BaseModel):
@@ -486,26 +489,31 @@ def optimize(
     plot_results_fn: Callable[..., dict[str, plt.Figure]] | None = None,
     out_dir: Path | None = None,
 ) -> None:
+    # Remove model
+    model = None
     assert pretrained_model is not None
+    assert config.task_config.k is not None
+    device = "cuda"
     pretrained_model.to(device=device)
 
-    for k, v in pretrained_model.state_dict().items():
-        print(k, f"rg={v.requires_grad}", f"{v.shape}")
+    decomposable_params = ["mlps.0.input_layer.weight", "mlps.0.output_layer.weight"]
+    # Create k_params, an dictionary of empty parameters with an added 0th dimension
 
-    param_dict = pretrained_model.all_decomposable_params_noT()
-    param_dict_keys = list(param_dict.keys())
-    # Currently param_dict['mlp_0.input_layer.weight'].requires_grad is true
-    k_param_dict = model.all_subnetwork_params_T()  # could also create this here
-    # k_param_dict = {k: torch.te for k, v in param_dict.items()}
-    print(f"{param_dict[param_dict_keys[0]].requires_grad=}")
-    for key, value in param_dict.items():
-        print(key, f"{value.shape}")
-    print(f"{k_param_dict[param_dict_keys[0]].requires_grad=}")
-    for key, value in k_param_dict.items():
-        print(key, f"{value.shape}")
-        value.requires_grad_(True)
+    pretrained_params = pretrained_model.state_dict()
+    param_map = {k: k for k in decomposable_params}
 
-    alpha = torch.ones(config.task_config.k, device=device)  # type: ignore
+    k_params = {}
+    for k, v in pretrained_params.items():
+        if k in decomposable_params:
+            shape = list(v.shape)
+            k_params[k] = torch.empty(
+                [config.task_config.k, *shape], device=device, requires_grad=True
+            )
+            torch.nn.init.kaiming_uniform_(k_params[k], a=3)
+
+    opt = torch.optim.AdamW(k_params.values(), lr=config.lr, weight_decay=0.0)
+
+    alpha = torch.ones(config.task_config.k, device=device)
 
     data_iter = iter(dataloader)
     for _ in tqdm(range(config.steps + 1), ncols=0):
@@ -516,43 +524,89 @@ def optimize(
             batch, labels = next(data_iter)
 
         batch = batch.to(device=device)
-        labels = labels.to(device=device)
+        print("Running pretrained model")
+        pretrained_out = pretrained_model(batch)
 
-        # Tests:
-        _ = pretrained_model(batch)
-        _ = functional_call(pretrained_model, param_dict, (batch,))
+        print("Compiling test function")
 
-        # summed_param_dict = {
-        #     k: einops.einsum(v, alpha, "k ..., k -> ...") for k, v in k_param_dict.items()
-        # }
-        # print("summed_param_dict")
-        # for key, value in summed_param_dict.items():
-        #     print(key, f"{value.shape=}")
-        # out: Float[Tensor, " batch"] = functional_call(
-        #     pretrained_model, summed_param_dict, (batch,)
-        # )
-        jacobian = torch.autograd.functional.jacobian(
-            lambda alpha: functional_call(
-                pretrained_model,
-                {k: einops.einsum(v, alpha, "k ..., k -> ...") for k, v in k_param_dict.items()},
-                batch,
-            ),
-            alpha,
-        ).squeeze(dim=-2)
-        print(f"{jacobian.shape=}")
-        print(f"{jacobian=}")
-        print(f"{param_dict[param_dict_keys[0]].grad=}")
-        print(f"{k_param_dict[param_dict_keys[0]].grad=}")
-        print(f"{alpha.grad=}")
+        def calc_jacobian(alpha):
+            return torch.autograd.functional.jacobian(
+                lambda alpha: functional_call(
+                    pretrained_model,
+                    {k: einops.einsum(v, alpha, "k ..., k -> ...") for k, v in k_params.items()},
+                    batch,
+                ),
+                alpha,
+            ).squeeze(dim=-2)
+
+        calc_jacobian_compiled = torch.compile(calc_jacobian)
+
+        jacobian = calc_jacobian_compiled(alpha)
+        print(f"Jacobian: {(jacobian**2).sum()}")
+
+        # def test_func(alpha):
+        #     return functional_call(
+        #         pretrained_model,
+        #         {k: einops.einsum(v, alpha, "k ..., k -> ...") for k, v in k_params.items()},
+        #         batch,
+        #     )
+
+        # opt_test_func = torch.compile(test_func)
+        # print("Calculating jacobian")
+        # jacobian = torch.autograd.functional.jacobian(
+        #     opt_test_func,
+        #     alpha,
+        # ).squeeze(dim=-2)
+
+        # jacobian = torch.autograd.functional.jacobian(
+        #     lambda alpha: functional_call(
+        #         pretrained_model,
+        #         {k: einops.einsum(v, alpha, "k ..., k -> ...") for k, v in k_params.items()},
+        #         batch,
+        #     ),
+        #     alpha,
+        # ).squeeze(dim=-2)
+        print("Calculating topk mask")
         attribs: Float[Tensor, "batch k"] = jacobian**2
         topk_mask = calc_topk_mask(attribs, config.topk, batch_topk=config.batch_topk).float()
-        # could make this non-binary (softmax) if we wanted
-        out_recon = TODO
-        recon_loss = calc_recon_mse(out_recon, labels, has_instance_dim=False)
-        recon_loss.backward()
-        print(f"{param_dict[param_dict_keys[0]].grad=}")
-        print(f"{k_param_dict[param_dict_keys[0]].grad=}")
-        print(f"{alpha.grad=}")
+
+        print("Calculating per sample topk forward")
+
+        def per_sample_topk_forward(
+            batch_i: Float[Tensor, " n_inputs"],
+            topk_mask_i: Float[Tensor, " k"],
+            k_params: dict[str, Float[Tensor, " ... k"]],
+        ):
+            masked_params = {
+                k: einops.einsum(v, topk_mask_i, "k ..., k -> ...") for k, v in k_params.items()
+            }
+            return functional_call(pretrained_model, masked_params, batch_i)
+
+        per_sample_topk_forward_p = partial(per_sample_topk_forward, k_params=k_params)
+        out_recon = torch.vmap(per_sample_topk_forward_p)(batch, topk_mask)
+        print("Calculating recon loss")
+        recon_loss = calc_recon_mse(out_recon, pretrained_out, has_instance_dim=False)
+
+        l2_loss = calc_topk_l2_full_rank(
+            subnetwork_params=list(k_params.values()), topk_mask=topk_mask
+        )
+        print("Calculating param match loss")
+        param_match_loss = calc_param_match_loss(
+            pretrained_params,
+            {k: einops.einsum(v, "k ... -> ...") for k, v in k_params.items()},
+            param_map,
+        )
+        print("Backward pass")
+        loss = (
+            config.topk_recon_coeff * recon_loss
+            + config.param_match_coeff * param_match_loss
+            + config.topk_l2_coeff * l2_loss
+        )
+        loss.backward()
+        opt.step()
+        opt.zero_grad(set_to_none=True)
+        print(f"Loss: {loss.item()}")
+
         pass
 
     model.to(device=device)
