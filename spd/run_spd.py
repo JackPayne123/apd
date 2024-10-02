@@ -245,7 +245,7 @@ def calc_recon_mse(
 
 
 def calc_topk_l2_rank_one(
-    all_As_and_Bs: list[tuple[Float[Tensor, "d_layer_in k"], Float[Tensor, "k d_layer_out"]]],
+    As_and_Bs_vals: list[tuple[Float[Tensor, "d_layer_in k"], Float[Tensor, "k d_layer_out"]]],
     topk_mask: Bool[Tensor, "batch ... k"],
 ) -> Float[Tensor, ""] | Float[Tensor, " n_instances"]:
     """Calculate the L2 of the sum of the topk subnetworks.
@@ -267,8 +267,8 @@ def calc_topk_l2_rank_one(
     n_instances = topk_mask.shape[1] if topk_mask.ndim == 3 else None
     accumulate_shape = (batch_size,) if n_instances is None else (batch_size, n_instances)
 
-    topk_l2_penalty = torch.zeros(accumulate_shape, device=all_As_and_Bs[0][0].device)
-    for A, B in all_As_and_Bs:
+    topk_l2_penalty = torch.zeros(accumulate_shape, device=As_and_Bs_vals[0][0].device)
+    for A, B in As_and_Bs_vals:
         # A: [d_in, k] or [n_instances, d_in, k]
         # B: [k, d_out] or [n_instances, k, d_out]
         # topk_mask: [batch, k] or [batch, n_instances, k]
@@ -276,7 +276,7 @@ def calc_topk_l2_rank_one(
         AB_topk = torch.einsum("b...fk,...kh->b...fh", A_topk, B)
         topk_l2_penalty = topk_l2_penalty + ((AB_topk) ** 2).mean(dim=(-2, -1))
     # Mean over batch_dim and divide by number of parameter matrices we iterated over
-    return topk_l2_penalty.mean(dim=0) / len(all_As_and_Bs)
+    return topk_l2_penalty.mean(dim=0) / len(As_and_Bs_vals)
 
 
 def calc_topk_l2_full_rank(
@@ -386,9 +386,9 @@ def calc_orthog_loss_full_rank(
 
 def calc_lp_sparsity_loss_rank_one(
     out: Float[Tensor, "... d_model_out"],
-    layer_acts: list[Float[Tensor, "... d_in"]],
-    inner_acts: list[Float[Tensor, "... d_in"]],
-    layer_out_params: list[Float[Tensor, "... k d_out"]],
+    layer_acts: dict[str, Float[Tensor, "... d_in"]],
+    inner_acts: dict[str, Float[Tensor, "... d_in"]],
+    B_params: dict[str, Float[Tensor, "... k d_out"]],
     step_pnorm: float,
 ) -> Float[Tensor, ""] | Float[Tensor, " n_instances"]:
     """Calculate the Lp sparsity loss on the attributions (inner_acts * d(out)/d(inner_acts).
@@ -406,34 +406,34 @@ def calc_lp_sparsity_loss_rank_one(
 
     Args:
         out (Float[Tensor, "... d_model_out"]): The output of the model.
-        layer_acts (list[Float[Tensor, "... d_in"]]): Activations at the output of each layer (i.e.
+        layer_acts (dict[str, Float[Tensor, "... d_in"]]): Activations at the output of each layer (i.e.
             after both A and B transformations).
-        inner_acts (list[Float[Tensor, "... d_in"]]): The inner acts of the model (i.e.
+        inner_acts (dict[str, Float[Tensor, "... d_in"]]): The inner acts of the model (i.e.
             the set of subnetwork activations after the A transformation for each parameter matrix).
-        layer_out_params (list[Float[Tensor, "... k d_out"]]): The output parameters of each layer.
+        B_params (dict[str, Float[Tensor, "... k d_out"]]): The B parameters of each layer.
         step_pnorm (float): The pnorm at the current step.
 
     Returns:
         The Lp sparsity loss. Will have an n_instances dimension if the model has an n_instances
             dimension.
     """
-    assert len(layer_acts) == len(inner_acts) == len(layer_out_params)
-    attributions = torch.zeros_like(inner_acts[0], requires_grad=True)
+    assert layer_acts.keys() == inner_acts.keys() == B_params.keys()
+    first_param_name = next(iter(layer_acts.keys()))
+    attributions = torch.zeros_like(inner_acts[first_param_name], requires_grad=True)
     for feature_idx in range(out.shape[-1]):
         grad_layer_acts = torch.autograd.grad(
             out[..., feature_idx].sum(),
-            layer_acts,
+            list(layer_acts.values()),
             retain_graph=True,
         )
         sparsity_inner = torch.zeros_like(attributions, requires_grad=True)
-        for param_matrix_idx in range(len(layer_out_params)):
+        # for param_matrix_idx in range(len(B_params)):
+        for i, param_matrix_name in enumerate(layer_acts.keys()):
             # h_i * grad_h_i
             sparsity_inner = sparsity_inner + (
-                inner_acts[param_matrix_idx]
+                inner_acts[param_matrix_name]
                 * torch.einsum(
-                    "...o,...ko->...k",
-                    grad_layer_acts[param_matrix_idx].detach(),
-                    layer_out_params[param_matrix_idx],
+                    "...o,...ko->...k", grad_layer_acts[i].detach(), B_params[param_matrix_name]
                 )
             )
 
@@ -448,16 +448,16 @@ def calc_lp_sparsity_loss_rank_one(
 
 def calc_lp_sparsity_loss_full_rank(
     out: Float[Tensor, "... d_model_out"],
-    layer_acts: list[Float[Tensor, "... d_out"]],
-    inner_acts: list[Float[Tensor, "... k d_out"]],
+    layer_acts: dict[str, Float[Tensor, "... d_out"]],
+    inner_acts: dict[str, Float[Tensor, "... k d_out"]],
     step_pnorm: float,
 ) -> Float[Tensor, ""] | Float[Tensor, " n_instances"]:
     """Calculate the Lp sparsity loss on the attributions (inner_acts * d(out)/d(inner_acts).
 
     Args:
         out (Float[Tensor, "... d_model_out"]): The output of the model.
-        layer_acts (list[Float[Tensor, "... d_out"]]): The activations of each layer.
-        inner_acts (list[Float[Tensor, "... k d_out"]]): The activations of each subnetwork.
+        layer_acts (dict[str, Float[Tensor, "... d_out"]]): The activations of each layer.
+        inner_acts (dict[str, Float[Tensor, "... k d_out"]]): The activations of each subnetwork.
         step_pnorm (float): The pnorm to use for the sparsity loss.
     Returns:
         The Lp sparsity loss. Will have an n_instances dimension if the model has an n_instances
@@ -585,7 +585,7 @@ def optimize(
                     out=out,
                     layer_acts=layer_acts,
                     inner_acts=inner_acts,
-                    layer_out_params=[tup[1] for tup in model.all_As_and_Bs()],
+                    B_params={k: tup[1] for k, tup in model.all_As_and_Bs().items()},
                     step_pnorm=step_pnorm,
                 )
 
@@ -599,7 +599,9 @@ def optimize(
                         out=out, inner_acts=inner_acts, layer_acts=layer_acts
                     )
                 else:
-                    attribution_scores = calc_attributions_rank_one(out=out, inner_acts=inner_acts)
+                    attribution_scores = calc_attributions_rank_one(
+                        out=out, inner_acts_list=list(inner_acts.values())
+                    )
 
             topk_mask = calc_topk_mask(
                 attribution_scores, config.topk, batch_topk=config.batch_topk
@@ -618,7 +620,7 @@ def optimize(
                     )
                 else:
                     topk_l2_loss = calc_topk_l2_rank_one(
-                        all_As_and_Bs=model.all_As_and_Bs(), topk_mask=topk_mask
+                        As_and_Bs_vals=list(model.all_As_and_Bs().values()), topk_mask=topk_mask
                     )
 
             if config.topk_recon_coeff is not None:

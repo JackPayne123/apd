@@ -254,7 +254,9 @@ def test_piecewise_batch_topk_rank_one_simple_bias_false_loss_stable() -> None:
     )
 
     # Rank 1 so layer_acts is None
-    attribution_scores = calc_attributions_rank_one(out=out, inner_acts=inner_acts)
+    attribution_scores = calc_attributions_rank_one(
+        out=out, inner_acts_list=list(inner_acts.values())
+    )
     initial_topk_recon_loss = get_topk_recon_on_batch(
         batch, labels, attribution_scores, piecewise_model_spd
     )
@@ -283,7 +285,9 @@ def test_piecewise_batch_topk_rank_one_simple_bias_false_loss_stable() -> None:
     )
 
     out, _, inner_acts = piecewise_model_spd(batch)
-    attribution_scores = calc_attributions_rank_one(out=out, inner_acts=inner_acts)
+    attribution_scores = calc_attributions_rank_one(
+        out=out, inner_acts_list=list(inner_acts.values())
+    )
     final_topk_recon_loss = get_topk_recon_on_batch(
         batch, labels, attribution_scores, piecewise_model_spd
     )
