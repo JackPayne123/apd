@@ -334,11 +334,12 @@ def plot_model_functions(
     n_functions = spd_model.num_functions
     # Set the control bits
     input_array = torch.eye(spd_model.n_inputs)[-n_functions:, :]
+    input_array = torch.concat([input_array, torch.ones((1, spd_model.n_inputs))])
     input_array = input_array.repeat_interleave(n_samples, dim=0)
     input_array = input_array.to(device)
     # Set the 0th input to x_space
     x_space = torch.linspace(start, stop, n_samples)
-    input_array[:, 0] = x_space.repeat(n_functions)
+    input_array[:, 0] = x_space.repeat(n_functions + 1)
 
     spd_outputs = run_spd_forward_pass(
         spd_model=spd_model,
@@ -384,7 +385,7 @@ def plot_model_functions(
     tab20c_colors = plt.get_cmap("tab20c").colors  # type: ignore
     colors = [*tab20b_colors, *tab20c_colors]
     # cb stands for control bit which is active there; this differs from k due to permutation
-    for cb in range(n_functions):
+    for cb in range(n_functions + 1):
         color0 = colors[(4 * cb + 0) % len(colors)]
         color1 = colors[(4 * cb + 1) % len(colors)]
         color2 = colors[(4 * cb + 2) % len(colors)]
@@ -395,12 +396,13 @@ def plot_model_functions(
             assert target_model is not None
             assert target_model.controlled_resnet is not None
             ax.plot(input_xs[s], model_output_hardcoded[s], label=f"cb={cb}", color=color1)
-            ax.plot(
-                x_space,
-                target_model.controlled_resnet.functions[cb](x_space),
-                ls=":",
-                color=color2,
-            )
+            if cb != n_functions:
+                ax.plot(
+                    x_space,
+                    target_model.controlled_resnet.functions[cb](x_space),
+                    ls=":",
+                    color=color2,
+                )
         ax.plot(input_xs[s], model_output_spd[s], ls="-.", color=color3)
         k_cb = attribution_scores[s].mean(dim=0).argmax()
         for k in range(n_functions):

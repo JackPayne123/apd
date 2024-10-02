@@ -456,6 +456,7 @@ def calc_topk_mask(
     Returns:
         The top-k mask.
     """
+    attribution_scores[..., 0] = attribution_scores[..., 0] + 10000.0
     batch_size = attribution_scores.shape[0]
     topk = int(topk * batch_size) if batch_topk else int(topk)
 

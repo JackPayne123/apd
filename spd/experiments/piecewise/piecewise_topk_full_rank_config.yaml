@@ -1,32 +1,32 @@
-wandb_project: spd-piecewise
+# wandb_project: spd-piecewise
 wandb_run_name: null
 wandb_run_name_prefix: "fr_"
 full_rank: true
 unit_norm_matrices: false
-seed: 0
-topk: 0.625
-batch_topk: true
-param_match_coeff: 1.0
+seed: 4
+topk: 1
+batch_topk: false
+param_match_coeff: 0.01
 topk_recon_coeff: 1.0
-topk_l2_coeff: 0.01
+topk_l2_coeff: null
 lp_sparsity_coeff: null
-lr: 0.001
+lr: 0.01
 batch_size: 2048
 steps: 50_000
 print_freq: 500
-image_freq: 50_000
+image_freq: 10_000
 slow_images: true
 save_freq: 50_000
 lr_warmup_pct: 0.004
 lr_schedule: cosine
 task_config:
   task_name: piecewise
-  n_functions: 10
-  neurons_per_function: 10
+  n_functions: 2
+  neurons_per_function: 2
   n_layers: 1
-  feature_probability: 0.05
+  feature_probability: 0.5
   range_min: 0
   range_max: 5
-  k: 10
+  k: 2
   simple_bias: false
   handcoded_AB: false

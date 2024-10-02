@@ -64,7 +64,7 @@ class PiecewiseLinear(nn.Module):
 
         self.interval = (end - start) / (neurons_per_function - 1)
         self.input_layer = nn.Linear(1, neurons_per_function, bias=True)
-        self.relu = nn.ReLU()
+        self.lelu = nn.LeakyReLU(negative_slope=0.1)
         self.output_layer = nn.Linear(self.neurons_per_function, 1, bias=True)
 
         self.initialise_params()
@@ -97,7 +97,7 @@ class PiecewiseLinear(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = self.input_layer(x)
-        x = self.relu(x)
+        x = self.lelu(x)
         x = self.output_layer(x)
         return x
 
@@ -136,7 +136,7 @@ class ControlledPiecewiseLinear(nn.Module):
         self.input_layer = nn.Linear(
             self.d_control + 1, self.num_functions * self.neurons_per_function, bias=True
         )
-        self.relu = nn.ReLU()
+        self.lelu = nn.LeakyReLU(negative_slope=0.1)
         self.output_layer = nn.Linear(
             self.num_functions * self.neurons_per_function, self.num_functions, bias=True
         )
@@ -211,7 +211,7 @@ class ControlledPiecewiseLinear(nn.Module):
         control_vectors = control_vectors.to(torch.float32)
         x = torch.cat([input_value, control_vectors], dim=1)
         x = self.input_layer(x)
-        x = self.relu(x)
+        x = self.lelu(x)
         x = self.output_layer(x)
         return x
 
@@ -222,7 +222,7 @@ class MLP(nn.Module):
         self.d_model = d_model
         self.d_mlp = d_mlp
         self.input_layer = nn.Linear(d_model, d_mlp)
-        self.relu = nn.ReLU()
+        self.lelu = nn.LeakyReLU(negative_slope=0.1)
         self.output_layer = nn.Linear(d_mlp, d_model)
         if initialise_zero:
             self.initialise_zero()
@@ -235,7 +235,7 @@ class MLP(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = self.input_layer(x)
-        x = self.relu(x)
+        x = self.lelu(x)
         x = self.output_layer(x)
         return x
 

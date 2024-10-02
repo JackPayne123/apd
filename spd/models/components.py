@@ -140,6 +140,7 @@ class MLPComponents(nn.Module):
         full_rank: bool = False,
     ):
         super().__init__()
+        self.lelu = nn.LeakyReLU(negative_slope=0.1)
         if full_rank:
             self.linear1 = ParamComponentsFullRank(in_dim=d_embed, out_dim=d_mlp, k=k)
             self.linear2 = ParamComponentsFullRank(in_dim=d_mlp, out_dim=d_embed, k=k)
@@ -179,9 +180,11 @@ class MLPComponents(nn.Module):
         inner_acts.append(inner_acts_linear1)
         layer_acts.append(x)
 
-        x, inner_acts_linear2 = self.linear2(torch.nn.functional.relu(x))
+        x, inner_acts_linear2 = self.linear2(self.lelu(x))
         inner_acts.append(inner_acts_linear2)
         layer_acts.append(x)
+        # WARNING SPD transformer has no output bias while piecewise does
+        # but it's set to zero so that's fine, just a bit sketch.
         return x, layer_acts, inner_acts
 
     def forward_topk(
@@ -217,7 +220,7 @@ class MLPComponents(nn.Module):
         inner_acts.append(inner_acts_linear1)
         layer_acts.append(x)
 
-        x = torch.nn.functional.relu(x)
+        x = self.lelu(x)
 
         # Second linear layer
         x, inner_acts_linear2 = self.linear2.forward_topk(x, topk_mask)
