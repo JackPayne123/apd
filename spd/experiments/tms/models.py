@@ -82,7 +82,11 @@ class TMSSPDModel(SPDModel):
             (rearrange(self.B, "i k h -> i h k"), rearrange(self.A, "i f k -> i k f")),
         ]
 
-    def all_subnetwork_params_summed(self) -> dict[str, Float[Tensor, "d_layer_in d_layer_out"]]:
+    def all_subnetwork_params(self) -> dict[str, Float[Tensor, "n_instances k d_in d_out"]]:
+        W = torch.einsum("ifk,ikh->ikfh", self.A, self.B)
+        return {"W": W, "W_T": rearrange(W, "i k f h -> i k h f")}
+
+    def all_subnetwork_params_summed(self) -> dict[str, Float[Tensor, "n_instances d_in d_out"]]:
         """All subnetwork params summed over the subnetwork dimension. I.e. all the ABs."""
         W = torch.einsum("ifk,ikh->ifh", self.A, self.B)
         return {"W": W, "W_T": rearrange(W, "i f h -> i h f")}

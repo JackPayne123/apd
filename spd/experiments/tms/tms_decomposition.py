@@ -70,16 +70,12 @@ def plot_subnetwork_params(
     model: TMSSPDFullRankModel | TMSSPDModel, step: int, out_dir: Path, **_
 ) -> plt.Figure:
     """Plot the subnetwork parameter matrix."""
-    if isinstance(model, TMSSPDFullRankModel):
-        all_params = model.all_subnetwork_params()
-        if len(all_params) > 1:
-            logger.warning(
-                "Plotting multiple subnetwork params is currently not supported. Plotting the first."
-            )
-        subnet_params = all_params["W"]
-    else:
-        assert isinstance(model, TMSSPDModel)
-        subnet_params = torch.einsum("ifk,ikh->ikfh", model.A, model.B)
+    all_params = model.all_subnetwork_params()
+    if len(all_params) > 1:
+        logger.warning(
+            "Plotting multiple subnetwork params is currently not supported. Plotting the first."
+        )
+    subnet_params = all_params["W"]
 
     # subnet_params: [n_instances, k, n_features, n_hidden]
     n_instances, k, dim1, dim2 = subnet_params.shape
