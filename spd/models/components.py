@@ -286,8 +286,7 @@ class MLPComponentsFullRank(nn.Module):
         list[Float[Tensor, "... d_embed"] | Float[Tensor, "... d_mlp"]],
         list[Float[Tensor, "... k"]] | list[Float[Tensor, "... k d_embed"]],
     ]:
-        """
-        Performs a forward pass using only the top-k components for each linear layer.
+        """Performs a forward pass using only the top-k components for each linear layer.
 
         Args:
             x: Input tensor
@@ -301,14 +300,12 @@ class MLPComponentsFullRank(nn.Module):
         inner_acts = []
         layer_acts = []
 
-        # First linear layer
         x, inner_acts_linear1 = self.linear1.forward_topk(x, topk_mask)
         inner_acts.append(inner_acts_linear1)
         layer_acts.append(x)
 
         x = torch.nn.functional.relu(x)
 
-        # Second linear layer
         x, inner_acts_linear2 = self.linear2.forward_topk(x, topk_mask)
         inner_acts.append(inner_acts_linear2)
         layer_acts.append(x)

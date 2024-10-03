@@ -178,7 +178,7 @@ def get_model_and_dataloader(
     ).to(device)
     piecewise_model.eval()
 
-    # Use the input biases from the original model for the rank one model
+    # For rank 1, we initialise with the input biases from the original model
     input_biases = [
         piecewise_model.mlps[i].input_layer.bias.detach().clone()
         for i in range(piecewise_model.n_layers)
@@ -219,12 +219,12 @@ def get_model_and_dataloader(
     piecewise_model_spd.to(device)
 
     # Set requires_grad to False for params we want to fix (embeds, sometimes biases)
-    if config.full_rank and not config.task_config.decompose_bias:
-        for i in range(piecewise_model_spd.n_layers):
+    for i in range(piecewise_model_spd.n_layers):
+        if config.full_rank and not config.task_config.decompose_bias:
             piecewise_model_spd.mlps[i].linear1.bias.requires_grad_(False)
-    elif not config.full_rank:
-        for i in range(piecewise_model_spd.n_layers):
+        elif not config.full_rank:
             piecewise_model_spd.mlps[i].bias1.requires_grad_(False)
+
     piecewise_model_spd.W_E.requires_grad_(False)
     piecewise_model_spd.W_U.requires_grad_(False)
 
@@ -281,8 +281,6 @@ def main(
     logger.info(f"Using device: {device}")
     assert isinstance(config.task_config, PiecewiseConfig)
     assert config.task_config.k is not None
-    if config.task_config.decompose_bias:
-        assert config.full_rank, "Cannot decompose bias in the rank 1 case"
 
     out_dir = Path(__file__).parent / "out" / run_name
     out_dir.mkdir(parents=True, exist_ok=True)

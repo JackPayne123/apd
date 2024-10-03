@@ -468,7 +468,9 @@ class PiecewiseFunctionTransformer(Model):
             residual = residual + layer(residual)
         return self.W_U(residual)
 
-    def all_decomposable_params(self) -> dict[str, Float[Tensor, "... d_out"]]:
+    def all_decomposable_params(
+        self,
+    ) -> dict[str, Float[Tensor, " d_out"] | Float[Tensor, "d_in d_out"]]:  # bias or weight
         """Dictionary of all parameters which will be decomposed with SPD."""
         params = {}
         for i, mlp in enumerate(self.mlps):
@@ -622,7 +624,6 @@ class PiecewiseFunctionSPDTransformer(SPDModel):
         # The output_component is used for all B matrices in the second linear layer of each MLP
         self.output_component = nn.Parameter(torch.empty(self.k, self.d_embed))
 
-        # If input_bias is None, we assume that we decompose the bias in the input layer
         self.mlps = nn.ModuleList(
             [
                 MLPComponents(
@@ -1031,7 +1032,7 @@ class PiecewiseFunctionSPDFullRankTransformer(SPDFullRankModel):
 
     def set_subnet_to_zero(
         self, subnet_idx: int
-    ) -> dict[str, Float[Tensor, "d_in d_out"] | Float[Tensor, " d_out"]]:
+    ) -> dict[str, Float[Tensor, " d_out"] | Float[Tensor, "d_in d_out"]]:  # bias or weight
         stored_vals = {}
         for i, mlp in enumerate(self.mlps):
             stored_vals[f"mlp_{i}_linear1"] = (
@@ -1052,7 +1053,9 @@ class PiecewiseFunctionSPDFullRankTransformer(SPDFullRankModel):
     def restore_subnet(
         self,
         subnet_idx: int,
-        stored_vals: dict[str, Float[Tensor, "d_in d_out"] | Float[Tensor, " d_out"]],
+        stored_vals: dict[
+            str, Float[Tensor, " d_out"] | Float[Tensor, "d_in d_out"]  # bias or weight
+        ],
     ) -> None:
         for i, mlp in enumerate(self.mlps):
             mlp.linear1.subnetwork_params.data[subnet_idx, :, :] = stored_vals[f"mlp_{i}_linear1"]
