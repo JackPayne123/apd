@@ -508,11 +508,13 @@ def optimize(
         desired_shape = [k, *shape_pretrained]
         print(f"Transposing {key2}: {shape_model} -> {desired_shape}")
         k_params[key1] = model_params[key2].transpose(-2, -1)
+        k_params[key1].requires_grad = True
 
     opt = torch.optim.AdamW(k_params.values(), lr=config.lr, weight_decay=0.0)
     alpha = torch.ones(k, device=device)
 
     for batch in tqdm(dataloader):
+        opt.zero_grad(set_to_none=True)
         batch = batch[0].to(device=device)
         # print("Running pretrained model")
         pretrained_out = pretrained_model(batch)
@@ -604,5 +606,4 @@ def optimize(
         loss = recon_loss + param_match_loss + l2_loss
         loss.backward()
         opt.step()
-        opt.zero_grad(set_to_none=True)
         print(f"Loss: {loss.item()} Attribs: {attribs.sum()}")
