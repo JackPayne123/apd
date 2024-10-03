@@ -132,10 +132,7 @@ class ParamComponentsFullRank(nn.Module):
 
 
 class MLPComponents(nn.Module):
-    """
-    A module that contains two linear layers with a ReLU activation in between.
-
-    Handles both full rank and rank one versions.
+    """A module that contains two linear layers with a ReLU activation in between for full rank SPD.
 
     Note that the first linear layer has a bias that is not decomposed, and the second linear layer
     has no bias.
@@ -236,13 +233,9 @@ class MLPComponents(nn.Module):
 
 
 class MLPComponentsFullRank(nn.Module):
-    """
-    A module that contains two linear layers with a ReLU activation in between.
+    """A module that contains two linear layers with a ReLU activation in between for full rank SPD.
 
-    Handles both full rank and rank one versions.
-
-    Note that the first linear layer has a bias that is not decomposed, and the second linear layer
-    has no bias.
+    The biases are (optionally) part of the "linear" layers.
     """
 
     def __init__(
