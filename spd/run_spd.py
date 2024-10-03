@@ -74,6 +74,12 @@ class PiecewiseConfig(BaseModel):
     handcoded_AB: bool = False
     decompose_bias: bool = True
 
+    @model_validator(mode="after")
+    def validate_handcoded_AB_and_decompose_bias(self) -> Self:
+        if not self.handcoded_AB and not self.decompose_bias:
+            raise ValueError("Can't have both handcoded_AB=False and decompose_bias=False")
+        return self
+
 
 class Config(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)

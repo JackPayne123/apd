@@ -864,8 +864,8 @@ class PiecewiseFunctionSPDFullRankTransformer(SPDFullRankModel):
         d_mlp: The number of neurons in each MLP layer
         n_layers: The number of MLP layers
         k: The number of components to keep
-        input_biases: The biases for the first linear layer of each MLP
         d_embed: The dimension of the embedding space
+        decompose_bias: Whether to decompose the bias term in the MLP layers
     """
 
     def __init__(
@@ -875,6 +875,7 @@ class PiecewiseFunctionSPDFullRankTransformer(SPDFullRankModel):
         n_layers: int,
         k: int,
         d_embed: int | None = None,
+        decompose_bias: bool = True,
     ):
         super().__init__()
         self.n_inputs = n_inputs
@@ -883,6 +884,7 @@ class PiecewiseFunctionSPDFullRankTransformer(SPDFullRankModel):
         self.d_embed = self.n_inputs + 1 if d_embed is None else d_embed
         self.d_control = self.d_embed - 2
         self.n_param_matrices = n_layers * 2
+        self.decompose_bias = decompose_bias
 
         self.num_functions = n_inputs - 1
         self.n_outputs = 1  # this is hardcoded. This class isn't defined for multiple outputs
@@ -930,7 +932,8 @@ class PiecewiseFunctionSPDFullRankTransformer(SPDFullRankModel):
         params = {}
         for i, mlp in enumerate(self.mlps):
             params[f"mlp_{i}.input_layer.weight"] = mlp.linear1.subnetwork_params
-            params[f"mlp_{i}.input_layer.bias"] = mlp.linear1.bias
+            if self.decompose_bias:
+                params[f"mlp_{i}.input_layer.bias"] = mlp.linear1.bias
             params[f"mlp_{i}.output_layer.weight"] = mlp.linear2.subnetwork_params
         return params
 
@@ -938,7 +941,8 @@ class PiecewiseFunctionSPDFullRankTransformer(SPDFullRankModel):
         params = {}
         for i, mlp in enumerate(self.mlps):
             params[f"mlp_{i}.input_layer.weight"] = mlp.linear1.subnetwork_params.sum(dim=-3)
-            params[f"mlp_{i}.input_layer.bias"] = mlp.linear1.bias.sum(dim=-2)
+            if self.decompose_bias:
+                params[f"mlp_{i}.input_layer.bias"] = mlp.linear1.bias.sum(dim=-2)
             params[f"mlp_{i}.output_layer.weight"] = mlp.linear2.subnetwork_params.sum(dim=-3)
         return params
 
@@ -1030,10 +1034,11 @@ class PiecewiseFunctionSPDFullRankTransformer(SPDFullRankModel):
             )
             mlp.linear1.subnetwork_params.data[subnet_idx, :, :] = 0.0
             mlp.linear2.subnetwork_params.data[subnet_idx, :, :] = 0.0
-            stored_vals[f"mlp_{i}_linear1_bias"] = (
-                mlp.linear1.bias.data[subnet_idx].detach().clone()
-            )
-            mlp.linear1.bias.data[subnet_idx] = 0.0
+            if self.decompose_bias:
+                stored_vals[f"mlp_{i}_linear1_bias"] = (
+                    mlp.linear1.bias.data[subnet_idx].detach().clone()
+                )
+                mlp.linear1.bias.data[subnet_idx] = 0.0
         return stored_vals
 
     def restore_subnet(
@@ -1044,4 +1049,5 @@ class PiecewiseFunctionSPDFullRankTransformer(SPDFullRankModel):
         for i, mlp in enumerate(self.mlps):
             mlp.linear1.subnetwork_params.data[subnet_idx, :, :] = stored_vals[f"mlp_{i}_linear1"]
             mlp.linear2.subnetwork_params.data[subnet_idx, :, :] = stored_vals[f"mlp_{i}_linear2"]
-            mlp.linear1.bias.data[subnet_idx] = stored_vals[f"mlp_{i}_linear1_bias"]
+            if self.decompose_bias:
+                mlp.linear1.bias.data[subnet_idx] = stored_vals[f"mlp_{i}_linear1_bias"]

@@ -191,6 +191,7 @@ def get_model_and_dataloader(
             d_mlp=piecewise_model.d_mlp,
             n_layers=piecewise_model.n_layers,
             k=config.task_config.k,
+            decompose_bias=config.task_config.decompose_bias,
         )
         if config.task_config.handcoded_AB:
             logger.info("Setting handcoded A and B matrices (!)")
@@ -218,7 +219,10 @@ def get_model_and_dataloader(
     piecewise_model_spd.to(device)
 
     # Set requires_grad to False for params we want to fix (embeds, sometimes biases)
-    if config.full_rank and not config.task_config.decompose_bias or not config.full_rank:
+    if config.full_rank and not config.task_config.decompose_bias:
+        for i in range(piecewise_model_spd.n_layers):
+            piecewise_model_spd.mlps[i].linear1.bias.requires_grad_(False)
+    elif not config.full_rank:
         for i in range(piecewise_model_spd.n_layers):
             piecewise_model_spd.mlps[i].bias1.requires_grad_(False)
     piecewise_model_spd.W_E.requires_grad_(False)
