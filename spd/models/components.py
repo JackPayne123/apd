@@ -211,7 +211,8 @@ class MLPComponents(nn.Module):
         Returns:
             x: The output of the MLP
             layer_acts: The activations of each linear layer
-            inner_acts: The component activations inside each linear layer
+            inner_acts: The component activations inside each linear layer (i.e. after multiplying
+                by A)
         """
         inner_acts = []
         layer_acts = []
@@ -257,14 +258,13 @@ class MLPComponentsFullRank(nn.Module):
         list[Float[Tensor, "... k"]] | list[Float[Tensor, "... k d_embed"]],
     ]:
         """
-        Note that "inner_acts" represents the activations after multiplcation by the subnetwork
-        params, (optionally) adding the bias, but before summing over the subnetwork dimension.
-
+        Args:
+            x: Input tensor
         Returns:
             x: The output of the MLP
-            layer_acts: The activations after each linear layer.
-            inner_acts: The component activations inside each linear layer before summing over the
+            layer_acts: The activations at the output of each layer after summing over the
                 subnetwork dimension.
+            inner_acts: The activations at the output of each subnetwork before summing.
         """
         inner_acts = []
         layer_acts = []
@@ -289,17 +289,14 @@ class MLPComponentsFullRank(nn.Module):
         """
         Performs a forward pass using only the top-k components for each linear layer.
 
-        Note that "inner_acts" represents the activations after multiplcation by A in the rank 1
-        case, and after multiplication by subnetwork_params (but before summing over k) in the
-        full-rank case.
-
         Args:
             x: Input tensor
             topk_mask: Boolean tensor indicating which components to keep.
         Returns:
             x: The output of the MLP
-            layer_acts: The activations of each linear layer
-            inner_acts: The component activations inside each linear layer
+            layer_acts: The activations at the output of each layer after summing over the
+                subnetwork dimension.
+            inner_acts: The activations at the output of each subnetwork before summing.
         """
         inner_acts = []
         layer_acts = []
