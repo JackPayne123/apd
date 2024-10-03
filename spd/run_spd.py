@@ -490,9 +490,7 @@ def optimize(
     plot_results_fn: Callable[..., dict[str, plt.Figure]] | None = None,
     out_dir: Path | None = None,
 ) -> None:
-    topk = config.topk
     k = config.task_config.k
-    lr = config.lr
     assert k is not None, "k must be provided"
 
     pretrained_model.to(device=device)
@@ -511,7 +509,7 @@ def optimize(
         print(f"Transposing {key2}: {shape_model} -> {desired_shape}")
         k_params[key1] = model_params[key2].transpose(-2, -1)
 
-    opt = torch.optim.AdamW(k_params.values(), lr=lr, weight_decay=0.0)
+    opt = torch.optim.AdamW(k_params.values(), lr=config.lr, weight_decay=0.0)
     alpha = torch.ones(k, device=device)
 
     for batch in tqdm(dataloader):
@@ -562,7 +560,7 @@ def optimize(
         attribs: Float[Tensor, "batch k"] = einops.reduce(
             jacobian**2, "batch n_outputs k -> batch k", "sum"
         )
-        topk_mask = calc_topk_mask(attribs, topk, batch_topk=True).float()
+        topk_mask = calc_topk_mask(attribs, config.topk, batch_topk=config.batch_topk).float()
         print(f"Attribs: {attribs.sum()}")
 
         # print("Calculating per sample topk forward")
@@ -579,12 +577,13 @@ def optimize(
             return functional_call(pretrained_model, masked_params, batch_i)
 
         per_sample_topk_forward_p = partial(per_sample_topk_forward, k_params=k_params)
-        out_recon = torch.vmap(per_sample_topk_forward_p)(batch, topk_mask)
-        recon_loss = (out_recon - pretrained_out).pow(2).mean()
+        out_topk = torch.vmap(per_sample_topk_forward_p)(batch, topk_mask)
+        recon_loss = (out_topk.cpu() - pretrained_out.cpu()).pow(2).mean()
 
         param_match_loss = 0.0
         for key, value in k_params.items():
             param_match_loss += (value.sum(dim=0) - pretrained_params[key]).pow(2).mean()
+        param_match_loss = param_match_loss / len(k_params)
 
         l2_loss = 0.0
         for _, value in k_params.items():
@@ -597,6 +596,7 @@ def optimize(
                 .pow(2)
                 .mean()
             )
+        l2_loss = l2_loss / len(k_params)
 
         print(
             f"param_match_loss: {param_match_loss: .3e}, l2_loss: {l2_loss: .3e}, recon_loss: {recon_loss: .3e}"

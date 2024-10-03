@@ -459,6 +459,13 @@ def calc_topk_mask(
     batch_size = attribution_scores.shape[0]
     topk = int(topk * batch_size) if batch_topk else int(topk)
 
+    if torch.any(attribution_scores != 0):
+        smallest_non_zero = attribution_scores[attribution_scores > 0].min()
+    else:
+        smallest_non_zero = 1.0
+    noise = 1e-5 * smallest_non_zero * torch.randn_like(attribution_scores)
+    attribution_scores = attribution_scores + noise
+
     if batch_topk:
         attribution_scores = einops.rearrange(attribution_scores, "b ... k -> ... (b k)")
 
