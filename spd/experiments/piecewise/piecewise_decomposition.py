@@ -27,8 +27,9 @@ from spd.experiments.piecewise.plotting import (
     plot_subnetwork_correlations,
 )
 from spd.experiments.piecewise.trig_functions import generate_trig_functions
+from spd.func_spd import optimize
 from spd.log import logger
-from spd.run_spd import Config, PiecewiseConfig, calc_recon_mse, optimize
+from spd.run_spd import Config, PiecewiseConfig, calc_recon_mse
 from spd.utils import (
     BatchedDataLoader,
     init_wandb,
