@@ -23,7 +23,7 @@ from pydantic import (
     model_validator,
 )
 from torch import Tensor
-from torch.func import functional_call
+from torch.func import functional_call, grad, vmap
 from torch.utils.data import DataLoader, TensorDataset
 from tqdm import tqdm
 
@@ -38,6 +38,13 @@ from spd.utils import (
 )
 
 # torch.set_float32_matmul_precision("high")
+
+
+def calc_topk_mask_simple(scores: Float[Tensor, "batch k"], topk: int) -> Float[Tensor, "batch k"]:
+    topk_indices = scores.topk(topk, dim=-1).indices
+    topk_mask = torch.zeros_like(scores, dtype=torch.bool)
+    topk_mask.scatter_(dim=-1, index=topk_indices, value=True)
+    return topk_mask
 
 
 class TMSConfig(BaseModel):
@@ -516,10 +523,103 @@ def optimize(
     for batch in tqdm(dataloader):
         opt.zero_grad(set_to_none=True)
         batch = batch[0].to(device=device)
-        # print("Running pretrained model")
         pretrained_out = pretrained_model(batch)
 
-        # print("Compiling test function")
+        # def attrib_fn(alpha: Float[Tensor, "k"]) -> Float[Tensor, "batch k"]:
+
+        # def make_functional_fwd(_model):
+        #     def fn(data, parameters):
+        #         return functional_call(_model, parameters, data).pow(2).mean(dim=-1)
+
+        #     return fn
+
+        # Should I use a closure here?
+        def model_func_attrib(
+            alpha: Float[Tensor, "k"],
+            k_params: dict[str, Float[Tensor, " k ..."]],
+            single_batch: Float[Tensor, " n_inputs"],
+        ) -> float:
+            return (
+                functional_call(
+                    pretrained_model,
+                    {k: einops.einsum(v, alpha, "k ..., k -> ...") for k, v in k_params.items()},
+                    single_batch,
+                )
+                .pow(2)
+                .mean(dim=-1)
+            )
+
+        def model_func_recon(
+            alpha: Float[Tensor, "k"],
+            k_params: dict[str, Float[Tensor, " k ..."]],
+            single_batch: Float[Tensor, " n_inputs"],
+        ) -> float:
+            out_topk = functional_call(
+                pretrained_model,
+                {k: einops.einsum(v, alpha, "k ..., k -> ...") for k, v in k_params.items()},
+                single_batch,
+            )
+            return (out_topk - pretrained_out).pow(2).mean()
+
+        topk = 1
+
+        def single_attrib(
+            single_batch: Float[Tensor, " n_inputs"],
+            # attrib_fn: nn.Module,
+            # loss_fn: nn.Module,
+            k_params: dict[str, Float[Tensor, " k ..."]],
+            # topk: int,
+        ) -> float:
+            alpha = torch.ones(k, device=device)
+            grad_alpha = grad(model_func_attrib, argnums=0)(alpha, k_params, single_batch)
+            return grad_alpha**2
+
+        multi_attrib = vmap(single_attrib, in_dims=(0, None))
+        attribs = multi_attrib(batch, k_params)
+        topk_mask = calc_topk_mask(attribs, topk, batch_topk=False).float()
+
+        def single_loss(
+            alpha: Float[Tensor, " k"],
+            single_batch: Float[Tensor, " n_inputs"],
+            k_params: dict[str, Float[Tensor, " k ..."]],
+        ) -> float:
+            out_topk = functional_call(
+                pretrained_model,
+                {k: einops.einsum(v, alpha, "k ..., k -> ...") for k, v in k_params.items()},
+                single_batch,
+            )
+            return (out_topk - pretrained_out).pow(2).mean()
+
+        multi_loss = vmap(single_loss, in_dims=(0, 0, None))
+        loss = multi_loss(topk_mask, batch, k_params)
+        # loss = model_func_recon(topk_mask, k_params, batch)
+        loss.sum().backward()
+        pass
+
+        # 1.1612
+
+        def single_forward(
+            single_batch: Float[Tensor, " n_inputs"],
+            # attrib_fn: nn.Module,
+            # loss_fn: nn.Module,
+            k_params: dict[str, Float[Tensor, " k ..."]],
+            # topk: int,
+        ) -> float:
+            alpha = torch.ones(k, device=device)
+            grad_alpha = grad(model_func_attrib, argnums=0)(alpha, k_params, single_batch)
+            topk_mask = calc_topk_mask_simple(grad_alpha**2, topk).float()
+            loss = model_func_recon(topk_mask, k_params, single_batch)
+            # grad_k_params = grad(model_func_recon, argnums=1)(topk_mask, k_params, single_batch)
+            # return grad_k_params
+            return loss
+
+        multi_forward = vmap(single_forward, in_dims=(0, None))
+        loss = multi_forward(batch, k_params)
+        loss.sum().backward()
+        # grad_k_params["mlps.0.output_layer.weight"].sum(dim=0)
+        # grad_k_params["mlps.0.output_layer.weight"].sum(dim=0)[-1,-1,-3] = 581
+        # grad_k_params["mlps.0.output_layer.weight"].sum(dim=0)[-1,-1]
+        # k_params["mlps.0.output_layer.weight"].sum(dim=0)[-1,-1]
 
         def calc_jacobian(alpha: Float[Tensor, "k"]) -> Float[Tensor, "batch n_outputs k"]:
             return torch.autograd.functional.jacobian(
@@ -532,40 +632,13 @@ def optimize(
                 alpha,
             )
 
-        # calc_jacobian_compiled = torch.compile(calc_jacobian)
         jacobian = calc_jacobian(alpha)
-        # print(f"Jacobian: {(jacobian**2).sum()}")
 
-        # def test_func(alpha):
-        #     return functional_call(
-        #         pretrained_model,
-        #         {k: einops.einsum(v, alpha, "k ..., k -> ...") for k, v in k_params.items()},
-        #         batch,
-        #     )
-
-        # opt_test_func = torch.compile(test_func)
-        # print("Calculating jacobian")
-        # jacobian = torch.autograd.functional.jacobian(
-        #     opt_test_func,
-        #     alpha,
-        # ).squeeze(dim=-2)
-
-        # jacobian = torch.autograd.functional.jacobian(
-        #     lambda alpha: functional_call(
-        #         pretrained_model,
-        #         {k: einops.einsum(v, alpha, "k ..., k -> ...") for k, v in k_params.items()},
-        #         batch,
-        #     ),
-        #     alpha,
-        # ).squeeze(dim=-2)
-        # print("Calculating topk mask")
         attribs: Float[Tensor, "batch k"] = einops.reduce(
             jacobian**2, "batch n_outputs k -> batch k", "sum"
         )
         topk_mask = calc_topk_mask(attribs, config.topk, batch_topk=config.batch_topk).float()
         print(f"Attribs: {attribs.sum()}")
-
-        # print("Calculating per sample topk forward")
 
         def per_sample_topk_forward(
             batch_i: Float[Tensor, " n_inputs"],
@@ -578,8 +651,12 @@ def optimize(
             }
             return functional_call(pretrained_model, masked_params, batch_i)
 
-        per_sample_topk_forward_p = partial(per_sample_topk_forward, k_params=k_params)
-        out_topk = torch.vmap(per_sample_topk_forward_p)(batch, topk_mask)
+        out_topk = torch.zeros_like(pretrained_out)
+        for i in range(batch.shape[0]):
+            out_topk[i] = per_sample_topk_forward(batch[i], topk_mask[i], k_params)
+
+        # per_sample_topk_forward_p = partial(per_sample_topk_forward, k_params=k_params)
+        # out_topk = torch.vmap(per_sample_topk_forward_p)(batch, topk_mask)
         recon_loss = (out_topk.cpu() - pretrained_out.cpu()).pow(2).mean()
 
         param_match_loss = 0.0
