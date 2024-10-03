@@ -9,10 +9,8 @@ from torch.func import functional_call
 from torch.utils.data import DataLoader, TensorDataset
 from tqdm import tqdm
 
-# torch.set_float32_matmul_precision("high")
 
-
-# Define a simple MLP
+# Dummy model and data for testing
 class SimpleMLP(nn.Module):
     def __init__(self):
         super().__init__()

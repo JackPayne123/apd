@@ -516,10 +516,10 @@ def optimize(
 
     for batch in tqdm(dataloader):
         batch = batch[0].to(device=device)
-        print("Running pretrained model")
+        # print("Running pretrained model")
         pretrained_out = pretrained_model(batch)
 
-        print("Compiling test function")
+        # print("Compiling test function")
 
         def calc_jacobian(alpha: Float[Tensor, "k"]) -> Float[Tensor, "batch n_outputs k"]:
             return torch.autograd.functional.jacobian(
@@ -533,7 +533,6 @@ def optimize(
             )
 
         # calc_jacobian_compiled = torch.compile(calc_jacobian)
-        print("Calculating jacobian")
         jacobian = calc_jacobian(alpha)
         # print(f"Jacobian: {(jacobian**2).sum()}")
 
@@ -563,7 +562,7 @@ def optimize(
         attribs: Float[Tensor, "batch k"] = einops.reduce(
             jacobian**2, "batch n_outputs k -> batch k", "sum"
         )
-        topk_mask = calc_topk_mask(attribs, topk, batch_topk=False).float()
+        topk_mask = calc_topk_mask(attribs, topk, batch_topk=True).float()
         print(f"Attribs: {attribs.sum()}")
 
         # print("Calculating per sample topk forward")
@@ -585,7 +584,7 @@ def optimize(
 
         param_match_loss = 0.0
         for key, value in k_params.items():
-            param_match_loss += (value - pretrained_params[key]).pow(2).mean()
+            param_match_loss += (value.sum(dim=0) - pretrained_params[key]).pow(2).mean()
 
         l2_loss = 0.0
         for _, value in k_params.items():
@@ -593,12 +592,15 @@ def optimize(
                 einops.einsum(
                     topk_mask,
                     value,
-                    "b k, k ... -> ...",
+                    "b k, k ... -> b k ...",  # could save some memory here by summing
                 )
                 .pow(2)
                 .mean()
             )
 
+        print(
+            f"param_match_loss: {param_match_loss: .3e}, l2_loss: {l2_loss: .3e}, recon_loss: {recon_loss: .3e}"
+        )
         loss = recon_loss + param_match_loss + l2_loss
         loss.backward()
         opt.step()

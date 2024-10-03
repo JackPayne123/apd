@@ -22,7 +22,7 @@ lr_schedule: cosine
 task_config:
   task_name: piecewise
   n_functions: 10
-  neurons_per_function: 10
+  neurons_per_function: 8
   n_layers: 1
   feature_probability: 0.05
   range_min: 0
