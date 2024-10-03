@@ -468,7 +468,7 @@ class PiecewiseFunctionTransformer(Model):
             residual = residual + layer(residual)
         return self.W_U(residual)
 
-    def all_decomposable_params(self) -> dict[str, Float[Tensor, "..."]]:
+    def all_decomposable_params(self) -> dict[str, Float[Tensor, "... d_out"]]:
         """Dictionary of all parameters which will be decomposed with SPD."""
         params = {}
         for i, mlp in enumerate(self.mlps):
@@ -644,25 +644,25 @@ class PiecewiseFunctionSPDTransformer(SPDModel):
             As_and_Bs.append((mlp.linear2.A, mlp.linear2.B))
         return As_and_Bs
 
-    def all_subnetwork_params(self) -> dict[str, Float[Tensor, "..."]]:
+    def all_subnetwork_params(self) -> dict[str, Float[Tensor, "k d_in d_out"]]:
         params = {}
         for i, mlp in enumerate(self.mlps):
             params[f"mlp_{i}.input_layer.weight"] = einops.einsum(
                 mlp.linear1.A, mlp.linear1.B, "d_embed k, k d_mlp -> k d_embed d_mlp"
             )
             params[f"mlp_{i}.output_layer.weight"] = einops.einsum(
-                mlp.linear2.A, mlp.linear2.B, "d_embed k, k d_mlp -> k d_embed d_mlp"
+                mlp.linear2.A, mlp.linear2.B, "d_mlp k, k d_embed -> k d_mlp d_embed"
             )
         return params
 
-    def all_subnetwork_params_summed(self) -> dict[str, Float[Tensor, "..."]]:
+    def all_subnetwork_params_summed(self) -> dict[str, Float[Tensor, "d_in d_out"]]:
         params = {}
         for i, mlp in enumerate(self.mlps):
             params[f"mlp_{i}.input_layer.weight"] = einops.einsum(
                 mlp.linear1.A, mlp.linear1.B, "d_embed k, k d_mlp -> d_embed d_mlp"
             )
             params[f"mlp_{i}.output_layer.weight"] = einops.einsum(
-                mlp.linear2.A, mlp.linear2.B, "d_embed k, k d_mlp -> d_embed d_mlp"
+                mlp.linear2.A, mlp.linear2.B, "d_mlp k, k d_embed -> d_mlp d_embed"
             )
         return params
 
@@ -932,7 +932,9 @@ class PiecewiseFunctionSPDFullRankTransformer(SPDFullRankModel):
             # Check that the sum of the biases in each subnetwork is equal to the target bias
             assert torch.allclose(mlp.linear1.bias.data.sum(dim=0), target_bias)
 
-    def all_subnetwork_params(self) -> dict[str, Float[Tensor, "..."]]:
+    def all_subnetwork_params(
+        self,
+    ) -> dict[str, Float[Tensor, "k d_out"] | Float[Tensor, "k d_in d_out"]]:  # bias or weight
         params = {}
         for i, mlp in enumerate(self.mlps):
             params[f"mlp_{i}.input_layer.weight"] = mlp.linear1.subnetwork_params
@@ -941,7 +943,9 @@ class PiecewiseFunctionSPDFullRankTransformer(SPDFullRankModel):
             params[f"mlp_{i}.output_layer.weight"] = mlp.linear2.subnetwork_params
         return params
 
-    def all_subnetwork_params_summed(self) -> dict[str, Float[Tensor, "..."]]:
+    def all_subnetwork_params_summed(
+        self,
+    ) -> dict[str, Float[Tensor, "k d_out"] | Float[Tensor, "k d_in d_out"]]:  # bias or weight
         params = {}
         for i, mlp in enumerate(self.mlps):
             params[f"mlp_{i}.input_layer.weight"] = mlp.linear1.subnetwork_params.sum(dim=-3)

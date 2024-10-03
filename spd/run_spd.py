@@ -74,12 +74,6 @@ class PiecewiseConfig(BaseModel):
     handcoded_AB: bool = False
     decompose_bias: bool = True
 
-    @model_validator(mode="after")
-    def validate_handcoded_AB_and_decompose_bias(self) -> Self:
-        if not self.handcoded_AB and not self.decompose_bias:
-            raise ValueError("Can't have both handcoded_AB=False and decompose_bias=False")
-        return self
-
 
 class Config(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
@@ -183,6 +177,16 @@ class Config(BaseModel):
 
         if self.ablation_attributions:
             assert self.topk is not None, "ablation_attributions is only compatible with topk"
+
+        if (
+            self.full_rank
+            and isinstance(self.task_config, PiecewiseConfig)
+            and not self.task_config.handcoded_AB
+            and not self.task_config.decompose_bias
+        ):
+            raise ValueError(
+                "full_rank piecewise isn't compatible with handcoded_AB==decompose_bias==False"
+            )
         return self
 
 
@@ -236,8 +240,8 @@ def get_lr_with_warmup(
 
 
 def calc_recon_mse(
-    output: Float[Tensor, "... n_features"],
-    labels: Float[Tensor, "... n_features"],
+    output: Float[Tensor, "batch n_features"] | Float[Tensor, "batch n_instances n_features"],
+    labels: Float[Tensor, "batch n_features"] | Float[Tensor, "batch n_instances n_features"],
     has_instance_dim: bool = False,
 ) -> Float[Tensor, ""] | Float[Tensor, " n_instances"]:
     recon_loss = (output - labels) ** 2
@@ -253,18 +257,15 @@ def calc_recon_mse(
 
 def calc_topk_l2_rank_one(
     all_As_and_Bs: list[tuple[Float[Tensor, "d_layer_in k"], Float[Tensor, "k d_layer_out"]]],
-    topk_mask: Bool[Tensor, "batch ... k"],
+    topk_mask: Bool[Tensor, "batch k"] | Bool[Tensor, "batch n_instances k"],
 ) -> Float[Tensor, ""] | Float[Tensor, " n_instances"]:
     """Calculate the L2 of the sum of the topk subnetworks.
 
-    Note that we explicitly write the batch dimension to aid understanding. The einsums
-    produce the same operation without it. The ... indicates an optional n_instances dimension.
-
     Args:
-        all_As_and_Bs (list[tuple[Float[Tensor, " ... d_in k"], Float[Tensor, " ... k d_out"]]]):
+        all_As_and_Bs (list[tuple[Float[Tensor, "d_in k"], Float[Tensor, "k d_out"]]]):
             The A and B matrices for each layer.
-        topk_mask (Bool[Tensor, "batch ... k"]): The topk mask to use for the L2 penalty.
-            Will contain an n_instances dimension if the model has an n_instances dimension.
+        topk_mask (Bool[Tensor, "batch k"] | Bool[Tensor, "batch n_instances k"]): The topk mask
+            to use for the L2 penalty.
 
     Returns:
         The L2 penalty for the topk subnetworks. One value for each n_instance (used in tms and
@@ -288,9 +289,12 @@ def calc_topk_l2_rank_one(
 
 def calc_topk_l2_full_rank(
     subnetwork_params: list[
-        Float[Tensor, "k ... d_out"] | Float[Tensor, "n_instances k ... d_out"]
+        Float[Tensor, "k d_out"]
+        | Float[Tensor, "k d_in d_out"]
+        | Float[Tensor, "n_instances k d_out"]
+        | Float[Tensor, "n_instances k d_in d_out"]
     ],
-    topk_mask: Bool[Tensor, "batch ... k"],
+    topk_mask: Bool[Tensor, "batch k"] | Bool[Tensor, "batch n_instances k"],
     n_instances: int | None = None,
 ) -> Float[Tensor, ""] | Float[Tensor, " n_instances"]:
     """Calculate the L2 of the sum of the topk subnetworks.
@@ -299,12 +303,8 @@ def calc_topk_l2_full_rank(
     produce the same operation without it. The ... indicates an optional n_instances dimension.
 
     Args:
-        subnetwork_params (list[Float[Tensor, "k ... d_out"] |
-            Float[Tensor, "n_instances k ... d_out"]]):
-            The parameters of the subnetwork. The "..." indicates an optional d_in dimension which
-            would not be present if it's a bias parameter.
-        topk_mask (Bool[Tensor, "batch ... k"]): The topk mask to use for the L2 penalty.
-            The "..." indicates an optional n_instances dimension.
+        subnetwork_params: The parameters of the subnetwork.
+        topk_mask: The topk mask to use for the L2 penalty.
         n_instances (int | None): The number of instances in the model.
 
     Returns:
@@ -341,8 +341,10 @@ def calc_topk_l2_full_rank(
 
 
 def calc_param_match_loss(
-    pretrained_weights: dict[str, Float[Tensor, "... d_out"]],
-    subnetwork_params_summed: dict[str, Float[Tensor, " ... d_out"]],
+    pretrained_weights: dict[str, Float[Tensor, "n_instances d_out"] | Float[Tensor, " d_out"]],
+    subnetwork_params_summed: dict[
+        str, Float[Tensor, "n_instances d_out"] | Float[Tensor, " d_out"]
+    ],
     param_map: dict[str, str],
     has_instance_dim: bool = False,
 ) -> Float[Tensor, ""] | Float[Tensor, " n_instances"]:
@@ -352,14 +354,13 @@ def calc_param_match_loss(
     target params.
 
     Args:
-        pretrained_weights (dict[str, Float[Tensor, " ... d_out"]]): The pretrained weights to
-            be matched. May have an n_instances and/or d_in dimension.
-        subnetwork_params_summed (dict[str, Float[Tensor, " ... d_out"]]): The parameters of
-            the SPDModel (that have already been summed over the subnetwork dimension). May have
-            an n_instances and/or d_in dimension.
-        param_map (dict[str, str]): A map from keys in pretrained_weights to keys in
+        pretrained_weights: The pretrained weights to be matched. May have an n_instances and/or
+            d_in dimension.
+        subnetwork_params_summed: The parameters of the SPDModel (that have already been summed over
+            the subnetwork dimension). May have an n_instances and/or d_in dimension.
+        param_map: A map from keys in pretrained_weights to keys in
             subnetwork_params_summed.
-        has_instance_dim (bool): Whether the model has an n_instances dimension.
+        has_instance_dim: Whether the model has an n_instances dimension.
     Returns:
         The parameter match loss of shape [n_instances] if the model has an n_instances dimension,
         otherwise of shape [].
@@ -385,7 +386,10 @@ def calc_param_match_loss(
 
 def calc_orthog_loss_full_rank(
     subnetwork_params: list[
-        Float[Tensor, "k ... d_out"] | Float[Tensor, "n_instances k ... d_out"]
+        Float[Tensor, "k d_out"]
+        | Float[Tensor, "k d_in d_out"]
+        | Float[Tensor, "n_instances k d_out"]
+        | Float[Tensor, "n_instances k d_in d_out"]
     ],
     has_instance_dim: bool = False,
 ) -> Float[Tensor, ""] | Float[Tensor, " n_instances"]:
@@ -395,9 +399,8 @@ def calc_orthog_loss_full_rank(
     dot product.
 
     Args:
-        subnetwork_params (list[Float[Tensor, " ... k ... d_out"]]): The parameters of the SPDModel.
-            The first "..." is an optional n_instances dimension. The second "..." is an optional
-            d_in dimension which would not be present if it's a bias parameter.
+        subnetwork_params: The parameters of the SPDModel.
+        has_instance_dim: Whether the model has an n_instances dimension.
 
     Returns:
         The orthogonality loss of shape [n_instances] if the model has an n_instances dimension,
@@ -427,10 +430,10 @@ def calc_orthog_loss_full_rank(
 
 
 def calc_lp_sparsity_loss_rank_one(
-    out: Float[Tensor, "... d_model_out"],
-    layer_acts: list[Float[Tensor, "... d_in"]],
-    inner_acts: list[Float[Tensor, "... d_in"]],
-    layer_out_params: list[Float[Tensor, "... k d_out"]],
+    out: Float[Tensor, "batch n_instances d_model_out"] | Float[Tensor, "batch d_model_out"],
+    layer_acts: list[Float[Tensor, "batch n_instances d_out"] | Float[Tensor, "batch d_out"]],
+    inner_acts: list[Float[Tensor, "batch n_instances k"] | Float[Tensor, "batch k"]],
+    layer_out_params: list[Float[Tensor, "n_instances k d_out"] | Float[Tensor, "k d_out"]],
     step_pnorm: float,
 ) -> Float[Tensor, ""] | Float[Tensor, " n_instances"]:
     """Calculate the Lp sparsity loss on the attributions (inner_acts * d(out)/d(inner_acts).
@@ -447,8 +450,8 @@ def calc_lp_sparsity_loss_rank_one(
     anyway.
 
     Args:
-        out (Float[Tensor, "... d_model_out"]): The output of the model.
-        layer_acts (list[Float[Tensor, "... d_in"]]): Activations at the output of each layer (i.e.
+        out: The output of the model.
+        layer_acts: Activations at the output of each layer (i.e.
             after both A and B transformations).
         inner_acts (list[Float[Tensor, "... d_in"]]): The inner acts of the model (i.e.
             the set of subnetwork activations after the A transformation for each parameter matrix).
@@ -489,18 +492,18 @@ def calc_lp_sparsity_loss_rank_one(
 
 
 def calc_lp_sparsity_loss_full_rank(
-    out: Float[Tensor, "... d_model_out"],
-    layer_acts: list[Float[Tensor, "... d_out"]],
-    inner_acts: list[Float[Tensor, "... k d_out"]],
+    out: Float[Tensor, "batch n_instances d_model_out"] | Float[Tensor, "batch d_model_out"],
+    layer_acts: list[Float[Tensor, "batch n_instances d_out"] | Float[Tensor, "batch d_out"]],
+    inner_acts: list[Float[Tensor, "batch n_instances k d_out"] | Float[Tensor, "batch k d_out"]],
     step_pnorm: float,
 ) -> Float[Tensor, ""] | Float[Tensor, " n_instances"]:
     """Calculate the Lp sparsity loss on the attributions (inner_acts * d(out)/d(inner_acts).
 
     Args:
-        out (Float[Tensor, "... d_model_out"]): The output of the model.
-        layer_acts (list[Float[Tensor, "... d_out"]]): The activations of each layer.
-        inner_acts (list[Float[Tensor, "... k d_out"]]): The activations of each subnetwork.
-        step_pnorm (float): The pnorm to use for the sparsity loss.
+        out: The output of the model.
+        layer_acts: The activations of each layer.
+        inner_acts: The activations of each subnetwork.
+        step_pnorm: The pnorm to use for the sparsity loss.
     Returns:
         The Lp sparsity loss. Will have an n_instances dimension if the model has an n_instances
             dimension.
