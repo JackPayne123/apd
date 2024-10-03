@@ -10,6 +10,7 @@ import einops
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
+import torch.nn as nn
 import wandb
 from jaxtyping import Bool, Float
 from pydantic import (
@@ -23,7 +24,7 @@ from pydantic import (
 )
 from torch import Tensor
 from torch.func import functional_call
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, TensorDataset
 from tqdm import tqdm
 
 from spd.log import logger
@@ -489,60 +490,52 @@ def optimize(
     plot_results_fn: Callable[..., dict[str, plt.Figure]] | None = None,
     out_dir: Path | None = None,
 ) -> None:
-    # Remove model
-    model = None
-    assert pretrained_model is not None
-    assert config.task_config.k is not None
-    device = "cuda"
+    topk = config.topk
+    k = config.task_config.k
+    lr = config.lr
+    assert k is not None, "k must be provided"
+
     pretrained_model.to(device=device)
-
-    decomposable_params = ["mlps.0.input_layer.weight", "mlps.0.output_layer.weight"]
-    # Create k_params, an dictionary of empty parameters with an added 0th dimension
-
     pretrained_params = pretrained_model.state_dict()
-    param_map = {k: k for k in decomposable_params}
-
     k_params = {}
-    for k, v in pretrained_params.items():
-        if k in decomposable_params:
-            shape = list(v.shape)
-            k_params[k] = torch.empty(
-                [config.task_config.k, *shape], device=device, requires_grad=True
-            )
-            torch.nn.init.kaiming_uniform_(k_params[k], a=3)
+    # Only use the model for initialization of the k_params
+    model_params = model.state_dict()
+    decomposable_params = {
+        "mlps.0.input_layer.weight": "mlps.0.linear1.subnetwork_params",
+        "mlps.0.output_layer.weight": "mlps.0.linear2.subnetwork_params",
+    }
+    for key1, key2 in decomposable_params.items():
+        shape_pretrained = pretrained_params[key1].shape
+        shape_model = model_params[key2].shape
+        desired_shape = [k, *shape_pretrained]
+        print(f"Transposing {key2}: {shape_model} -> {desired_shape}")
+        k_params[key1] = model_params[key2].transpose(-2, -1)
 
-    opt = torch.optim.AdamW(k_params.values(), lr=config.lr, weight_decay=0.0)
+    opt = torch.optim.AdamW(k_params.values(), lr=lr, weight_decay=0.0)
+    alpha = torch.ones(k, device=device)
 
-    alpha = torch.ones(config.task_config.k, device=device)
-
-    data_iter = iter(dataloader)
-    for _ in tqdm(range(config.steps + 1), ncols=0):
-        try:
-            batch, labels = next(data_iter)
-        except StopIteration:
-            data_iter = iter(dataloader)
-            batch, labels = next(data_iter)
-
-        batch = batch.to(device=device)
+    for batch in tqdm(dataloader):
+        batch = batch[0].to(device=device)
         print("Running pretrained model")
         pretrained_out = pretrained_model(batch)
 
         print("Compiling test function")
 
-        def calc_jacobian(alpha):
+        def calc_jacobian(alpha: Float[Tensor, "k"]) -> Float[Tensor, "batch n_outputs k"]:
             return torch.autograd.functional.jacobian(
                 lambda alpha: functional_call(
                     pretrained_model,
                     {k: einops.einsum(v, alpha, "k ..., k -> ...") for k, v in k_params.items()},
                     batch,
+                    # is it bad that function doesn't bind loop variable batch? I don't think so
                 ),
                 alpha,
-            ).squeeze(dim=-2)
+            )
 
-        calc_jacobian_compiled = torch.compile(calc_jacobian)
-
-        jacobian = calc_jacobian_compiled(alpha)
-        print(f"Jacobian: {(jacobian**2).sum()}")
+        # calc_jacobian_compiled = torch.compile(calc_jacobian)
+        print("Calculating jacobian")
+        jacobian = calc_jacobian(alpha)
+        # print(f"Jacobian: {(jacobian**2).sum()}")
 
         # def test_func(alpha):
         #     return functional_call(
@@ -566,300 +559,48 @@ def optimize(
         #     ),
         #     alpha,
         # ).squeeze(dim=-2)
-        print("Calculating topk mask")
-        attribs: Float[Tensor, "batch k"] = jacobian**2
-        topk_mask = calc_topk_mask(attribs, config.topk, batch_topk=config.batch_topk).float()
+        # print("Calculating topk mask")
+        attribs: Float[Tensor, "batch k"] = einops.reduce(
+            jacobian**2, "batch n_outputs k -> batch k", "sum"
+        )
+        topk_mask = calc_topk_mask(attribs, topk, batch_topk=False).float()
+        print(f"Attribs: {attribs.sum()}")
 
-        print("Calculating per sample topk forward")
+        # print("Calculating per sample topk forward")
 
         def per_sample_topk_forward(
             batch_i: Float[Tensor, " n_inputs"],
-            topk_mask_i: Float[Tensor, " k"],
+            topk_mask_i: Float[Tensor, " key"],
             k_params: dict[str, Float[Tensor, " ... k"]],
         ):
             masked_params = {
-                k: einops.einsum(v, topk_mask_i, "k ..., k -> ...") for k, v in k_params.items()
+                key: einops.einsum(value, topk_mask_i, "k ..., k -> ...")
+                for key, value in k_params.items()
             }
             return functional_call(pretrained_model, masked_params, batch_i)
 
         per_sample_topk_forward_p = partial(per_sample_topk_forward, k_params=k_params)
         out_recon = torch.vmap(per_sample_topk_forward_p)(batch, topk_mask)
-        print("Calculating recon loss")
-        recon_loss = calc_recon_mse(out_recon, pretrained_out, has_instance_dim=False)
+        recon_loss = (out_recon - pretrained_out).pow(2).mean()
 
-        l2_loss = calc_topk_l2_full_rank(
-            subnetwork_params=list(k_params.values()), topk_mask=topk_mask
-        )
-        print("Calculating param match loss")
-        param_match_loss = calc_param_match_loss(
-            pretrained_params,
-            {k: einops.einsum(v, "k ... -> ...") for k, v in k_params.items()},
-            param_map,
-        )
-        print("Backward pass")
-        loss = (
-            config.topk_recon_coeff * recon_loss
-            + config.param_match_coeff * param_match_loss
-            + config.topk_l2_coeff * l2_loss
-        )
+        param_match_loss = 0.0
+        for key, value in k_params.items():
+            param_match_loss += (value - pretrained_params[key]).pow(2).mean()
+
+        l2_loss = 0.0
+        for _, value in k_params.items():
+            l2_loss += (
+                einops.einsum(
+                    topk_mask,
+                    value,
+                    "b k, k ... -> ...",
+                )
+                .pow(2)
+                .mean()
+            )
+
+        loss = recon_loss + param_match_loss + l2_loss
         loss.backward()
         opt.step()
         opt.zero_grad(set_to_none=True)
-        print(f"Loss: {loss.item()}")
-
-        pass
-
-    model.to(device=device)
-
-    has_instance_dim = hasattr(model, "n_instances")
-
-    # Note that we expect weight decay to be problematic for spd
-    opt = torch.optim.AdamW(model.parameters(), lr=config.lr, weight_decay=0.0)
-
-    lr_schedule_fn = get_lr_schedule_fn(config.lr_schedule, config.lr_exponential_halflife)
-
-    step_lp_sparsity_coeff = None
-    step_topk_recon_coeff = None
-    epoch = 0
-    total_samples = 0
-    data_iter = iter(dataloader)
-    for step in tqdm(range(config.steps + 1), ncols=0):
-        if config.unit_norm_matrices:
-            assert isinstance(model, SPDModel), "Can only norm matrices in SPDModel instances"
-            model.set_matrices_to_unit_norm()
-
-        step_lr = get_lr_with_warmup(
-            step=step,
-            steps=config.steps,
-            lr=config.lr,
-            lr_schedule_fn=lr_schedule_fn,
-            lr_warmup_pct=config.lr_warmup_pct,
-        )
-        for group in opt.param_groups:
-            group["lr"] = step_lr
-
-        step_pnorm = None
-
-        opt.zero_grad(set_to_none=True)
-        try:
-            batch, labels = next(data_iter)
-        except StopIteration:
-            tqdm.write(f"Epoch {epoch} finished, starting new epoch")
-            epoch += 1
-            data_iter = iter(dataloader)
-            batch, labels = next(data_iter)
-
-        batch = batch.to(device=device)
-        labels = labels.to(device=device)
-
-        if pretrained_model is not None:
-            pretrained_model.requires_grad_(False)
-            pretrained_model.to(device=device)
-            with torch.inference_mode():
-                labels = pretrained_model(batch)
-
-        total_samples += batch.shape[0]
-
-        if config.topk_recon_coeff is not None:
-            step_topk_recon_coeff = get_sparsity_coeff_linear_warmup(
-                step=step,
-                steps=config.steps,
-                max_sparsity_coeff=config.topk_recon_coeff,
-                sparsity_warmup_pct=config.sparsity_warmup_pct,
-            )
-        if config.lp_sparsity_coeff is not None:
-            step_lp_sparsity_coeff = get_sparsity_coeff_linear_warmup(
-                step=step,
-                steps=config.steps,
-                max_sparsity_coeff=config.lp_sparsity_coeff,
-                sparsity_warmup_pct=config.sparsity_warmup_pct,
-            )
-
-        # Do a forward pass with all subnetworks
-        out, layer_acts, inner_acts = model(batch)
-        assert len(inner_acts) == model.n_param_matrices
-
-        # Calculate losses
-        out_recon_loss = calc_recon_mse(out, labels, has_instance_dim)
-
-        orthog_loss = None
-        if config.orthog_coeff is not None:
-            assert config.full_rank, "Orthogonality loss only works in full rank models"
-            orthog_loss = calc_orthog_loss_full_rank(list(model.all_subnetwork_params().values()))
-
-        param_match_loss = None
-        if config.param_match_coeff is not None:
-            assert pretrained_model is not None, "Need a pretrained model for param_match loss"
-            assert param_map is not None, "Need a param_map for param_match loss"
-            param_match_loss = calc_param_match_loss(
-                pretrained_weights=pretrained_model.all_decomposable_params(),
-                subnetwork_params_summed=model.all_subnetwork_params_summed(),
-                param_map=param_map,
-            )
-
-        lp_sparsity_loss = None
-        if config.lp_sparsity_coeff is not None:
-            step_pnorm = config.pnorm or get_step_pnorm(step, config.steps, config.pnorm_end)
-            if config.full_rank:
-                lp_sparsity_loss = calc_lp_sparsity_loss_full_rank(
-                    out=out, layer_acts=layer_acts, inner_acts=inner_acts, step_pnorm=step_pnorm
-                )
-            else:
-                lp_sparsity_loss = calc_lp_sparsity_loss_rank_one(
-                    out=out,
-                    layer_acts=layer_acts,
-                    inner_acts=inner_acts,
-                    layer_out_params=[tup[1] for tup in model.all_As_and_Bs()],
-                    step_pnorm=step_pnorm,
-                )
-
-        out_topk, topk_l2_loss, topk_recon_loss, topk_mask = None, None, None, None
-        if config.topk is not None:
-            if config.ablation_attributions:
-                attribution_scores = calc_ablation_attributions(model=model, batch=batch, out=out)
-            else:
-                if config.full_rank:
-                    attribution_scores = calc_attributions_full_rank(
-                        out=out, inner_acts=inner_acts, layer_acts=layer_acts
-                    )
-                else:
-                    attribution_scores = calc_attributions_rank_one(out=out, inner_acts=inner_acts)
-
-            topk_mask = calc_topk_mask(
-                attribution_scores, config.topk, batch_topk=config.batch_topk
-            )
-
-            # Do a forward pass with only the topk subnetworks
-            out_topk, _, inner_acts_topk = model.forward_topk(batch, topk_mask=topk_mask)
-            assert len(inner_acts_topk) == model.n_param_matrices
-
-            if config.topk_l2_coeff is not None:
-                if config.full_rank:
-                    assert isinstance(model, SPDFullRankModel)
-                    topk_l2_loss = calc_topk_l2_full_rank(
-                        subnetwork_params=list(model.all_subnetwork_params().values()),
-                        topk_mask=topk_mask,
-                    )
-                else:
-                    topk_l2_loss = calc_topk_l2_rank_one(
-                        all_As_and_Bs=model.all_As_and_Bs(), topk_mask=topk_mask
-                    )
-
-            if config.topk_recon_coeff is not None:
-                assert out_topk is not None
-                topk_recon_loss = calc_recon_mse(out_topk, labels, has_instance_dim)
-
-        # Add up the loss terms
-        loss = torch.tensor(0.0, device=device)
-        if orthog_loss is not None:
-            assert config.orthog_coeff is not None
-            loss = loss + config.orthog_coeff * orthog_loss.mean()
-        if param_match_loss is not None:
-            assert config.param_match_coeff is not None
-            loss = loss + config.param_match_coeff * param_match_loss.mean()
-        if config.out_recon_coeff is not None:
-            loss = loss + config.out_recon_coeff * out_recon_loss.mean()
-        if lp_sparsity_loss is not None:
-            assert step_lp_sparsity_coeff is not None
-            loss = loss + step_lp_sparsity_coeff * lp_sparsity_loss.mean()
-        if topk_recon_loss is not None:
-            assert step_topk_recon_coeff is not None
-            loss = loss + step_topk_recon_coeff * topk_recon_loss.mean()
-        if topk_l2_loss is not None:
-            assert config.topk_l2_coeff is not None
-            loss = loss + config.topk_l2_coeff * topk_l2_loss.mean()
-
-        # Logging
-        if step % config.print_freq == 0:
-            # If using multiple instances, print the losses as tensors in new lines
-            nl = "\n" if has_instance_dim else " "
-            tqdm.write(f"Step {step}")
-            tqdm.write(f"Total loss: {loss.item()}")
-            if step_pnorm is not None:
-                tqdm.write(f"Current pnorm:{nl}{step_pnorm}")
-            if lp_sparsity_loss is not None:
-                tqdm.write(f"LP sparsity loss:{nl}{lp_sparsity_loss}")
-            if topk_recon_loss is not None:
-                tqdm.write(f"Topk recon loss:{nl}{topk_recon_loss}")
-            tqdm.write(f"Out recon loss:{nl}{out_recon_loss}")
-            if topk_l2_loss is not None:
-                tqdm.write(f"topk l2 loss:{nl}{topk_l2_loss}")
-            if param_match_loss is not None:
-                tqdm.write(f"Param match loss:{nl}{param_match_loss}")
-            if orthog_loss is not None:
-                tqdm.write(f"Orthog loss:{nl}{orthog_loss}")
-            if config.wandb_project:
-                wandb.log(
-                    {
-                        "pnorm": step_pnorm,
-                        "lr": step_lr,
-                        "total_loss": loss.mean().item(),
-                        "lp_sparsity_loss": lp_sparsity_loss.mean().item()
-                        if lp_sparsity_loss is not None
-                        else None,
-                        "topk_recon_loss": topk_recon_loss.mean().item()
-                        if topk_recon_loss is not None
-                        else None,
-                        "recon_loss": out_recon_loss.mean().item(),
-                        "param_match_loss": param_match_loss.mean().item()
-                        if param_match_loss is not None
-                        else None,
-                        "topk_l2_loss": topk_l2_loss.mean().item()
-                        if topk_l2_loss is not None
-                        else None,
-                        "orthog_loss": orthog_loss.mean().item()
-                        if orthog_loss is not None
-                        else None,
-                    },
-                    step=step,
-                )
-
-        if (
-            plot_results_fn is not None
-            and config.image_freq is not None
-            and step % config.image_freq == 0
-            and (step > 0 or not config.slow_images)
-        ):
-            fig_dict = plot_results_fn(
-                model=model,
-                target_model=pretrained_model,
-                step=step,
-                out_dir=out_dir,
-                device=device,
-                config=config,
-                topk_mask=topk_mask,
-            )
-            if config.wandb_project:
-                wandb.log(
-                    {k: wandb.Image(v) for k, v in fig_dict.items()},
-                    step=step,
-                )
-
-        if (
-            config.save_freq is not None
-            and step % config.save_freq == 0
-            and step > 0
-            and out_dir is not None
-        ):
-            torch.save(model.state_dict(), out_dir / f"model_{step}.pth")
-            tqdm.write(f"Saved model to {out_dir / f'model_{step}.pth'}")
-            with open(out_dir / "config.json", "w") as f:
-                json.dump(config.model_dump(), f, indent=4)
-            tqdm.write(f"Saved config to {out_dir / 'config.json'}")
-
-        # Skip gradient step if we are at the last step (last step just for plotting and logging)
-        if step != config.steps:
-            loss.backward()
-
-            if step % config.print_freq == 0 and config.wandb_project:
-                # Calculate gradient norm
-                grad_norm: float = 0.0
-                for param in model.parameters():
-                    if param.grad is not None:
-                        grad_norm += param.grad.data.norm()  # type: ignore
-                    wandb.log({"grad_norm": grad_norm}, step=step)
-
-            if config.unit_norm_matrices:
-                assert isinstance(model, SPDModel), "Can only norm matrices in SPDModel instances"
-                model.fix_normalized_adam_gradients()
-            opt.step()
+        print(f"Loss: {loss.item()} Attribs: {attribs.sum()}")
