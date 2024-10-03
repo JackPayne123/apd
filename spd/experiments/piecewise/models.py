@@ -234,11 +234,17 @@ class MLP(nn.Module):
         self.output_layer.weight.data = torch.zeros(self.d_model, self.d_mlp)
         self.output_layer.bias.data = torch.zeros(self.d_model)
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        x = self.input_layer(x)
-        x = self.relu(x)
-        x = self.output_layer(x)
-        return x
+    def forward(
+        self, x: Float[Tensor, "... d_model"]
+    ) -> tuple[
+        Float[Tensor, "... d_model"],
+        tuple[Float[Tensor, "... d_model"], Float[Tensor, "... d_mlp"]],
+        tuple[Float[Tensor, "... d_mlp"], Float[Tensor, "... d_model"]],
+    ]:
+        out1 = self.input_layer(x)
+        post_relu = self.relu(out1)
+        out2 = self.output_layer(post_relu)
+        return out2, (x, out1), (post_relu, out2)
 
 
 class ControlledResNet(nn.Module):
@@ -359,7 +365,7 @@ class ControlledResNet(nn.Module):
 
         assert x.shape[1] == self.d_model
         for i in range(self.n_layers):
-            x = x + self.mlps[i](x)
+            x = x + self.mlps[i](x)[0]
         return x
 
     def partial_forward(
@@ -462,11 +468,24 @@ class PiecewiseFunctionTransformer(Model):
 
         self.mlps = nn.ModuleList([MLP(d_model=self.d_embed, d_mlp=d_mlp) for _ in range(n_layers)])
 
-    def forward(self, x: Tensor) -> Tensor:
+    def forward(
+        self, x: Float[Tensor, "batch d_model_in"]
+    ) -> tuple[
+        Float[Tensor, "batch d_model_out"],
+        dict[str, Float[Tensor, " d_model"] | Float[Tensor, " d_mlp"]],
+        dict[str, Float[Tensor, " d_model"] | Float[Tensor, " d_mlp"]],
+    ]:
+        layer_pre_acts = {}
+        layer_post_acts = {}
         residual = self.W_E(x)
-        for layer in self.mlps:
-            residual = residual + layer(residual)
-        return self.W_U(residual)
+        for i, layer in enumerate(self.mlps):
+            out, input_layer_acts_i, output_layer_acts_i = layer(residual)
+            layer_pre_acts[f"mlp_{i}.input_layer.weight"] = input_layer_acts_i[0]
+            layer_post_acts[f"mlp_{i}.input_layer.weight"] = input_layer_acts_i[1]
+            layer_pre_acts[f"mlp_{i}.output_layer.weight"] = output_layer_acts_i[0]
+            layer_post_acts[f"mlp_{i}.output_layer.weight"] = output_layer_acts_i[1]
+            residual = residual + out
+        return self.W_U(residual), layer_pre_acts, layer_post_acts
 
     def all_decomposable_params(
         self,
@@ -568,7 +587,7 @@ class PiecewiseFunctionTransformer(Model):
         labels = torch.einsum("bo,bo->b", control_bits_expanded, function_outputs)
 
         axs.plot(x, labels, label="f(x)")
-        outputs = self.forward(inputs_with_control)
+        outputs = self.forward(inputs_with_control)[0]
         axs.plot(x, outputs[:, 0].detach().numpy(), label="NN(x)")
         axs.legend()
         axs.set_title("Piecewise Linear Approximation of function")

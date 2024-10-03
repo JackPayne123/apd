@@ -581,7 +581,7 @@ def optimize(
             pretrained_model.requires_grad_(False)
             pretrained_model.to(device=device)
             with torch.inference_mode():
-                labels = pretrained_model(batch)
+                labels, layer_pre_acts, layer_post_acts = pretrained_model(batch)
 
         total_samples += batch.shape[0]
 
