@@ -600,7 +600,7 @@ def optimize(
                     )
                 else:
                     attribution_scores = calc_attributions_rank_one(
-                        out=out, inner_acts_list=list(inner_acts.values())
+                        out=out, inner_acts_vals=list(inner_acts.values())
                     )
 
             topk_mask = calc_topk_mask(

@@ -142,7 +142,7 @@ def plot_components(
     out, layer_acts, inner_acts = model(x)
     # Calculate attribution scores
     attribution_scores = calc_attributions_rank_one(
-        out=out, inner_acts_list=list(inner_acts.values())
+        out=out, inner_acts_vals=list(inner_acts.values())
     )
     attribution_scores_normed = attribution_scores / attribution_scores.std(dim=1, keepdim=True)
     # Get As and Bs and ABs
@@ -283,7 +283,7 @@ def run_spd_forward_pass(
             )
         else:
             attribution_scores = calc_attributions_rank_one(
-                out=model_output_spd, inner_acts_list=list(inner_acts.values())
+                out=model_output_spd, inner_acts_vals=list(inner_acts.values())
             )
     topk_mask = calc_topk_mask(attribution_scores, topk, batch_topk=batch_topk)
     model_output_spd_topk, layer_acts_topk, inner_acts_topk = spd_model.forward_topk(
