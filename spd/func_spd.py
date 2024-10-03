@@ -70,6 +70,27 @@ def calc_lp_loss(attribs: Float[Tensor, "batch k"], p: float) -> Float[Tensor, "
     return ((attribs.abs() + 1e-16) ** (p * 0.5)).sum(dim=-1).mean(dim=0)
 
 
+def calc_topk_param_attrib_loss(
+    k_params: dict[str, Float[Tensor, " k ... d"]],
+    topk_mask: Float[Tensor, " batch k"],
+    pretrained_params: dict[str, Float[Tensor, " ... d"]],
+    pretrained_param_grads: dict[str, Float[Tensor, " batch ... d"]],
+    batch_size: int,
+    device: str,
+) -> Float[Tensor, ""]:
+    loss = torch.zeros(batch_size, device=device)
+    for key, value in k_params.items():
+        param_diff: Float[Tensor, " ... d"] = (
+            einops.einsum(topk_mask, value, "batch k, k ... d -> batch ... d")
+            - pretrained_params[key]
+        )
+        param_grad: Float[Tensor, " batch ... d"] = pretrained_param_grads[key]
+        # print(f"Shapes: {value.shape} {param_diff.shape} {param_grad.shape}")
+        param_attrib = param_diff * param_grad
+        loss += einops.reduce(param_attrib, "batch ... d -> batch", "mean")
+    return (loss**2).mean(dim=0)
+
+
 def optimize(
     model: SPDModel | SPDFullRankModel,
     config: Config,
@@ -89,7 +110,6 @@ def optimize(
     # We don't need no SPDModel. We just take the state dict of the pretrained model and duplicate
     # it k times. Just optimize this dictionary of parameters.
     pretrained_model.to(device=device)
-    pretrained_model.requires_grad_(False)  # TODO OK?
     pretrained_params = pretrained_model.state_dict()
     decomposable_params = ["mlps.0.input_layer.weight", "mlps.0.output_layer.weight"]
     k_params = {}
@@ -126,20 +146,32 @@ def optimize(
         }
         return functional_call(pretrained_model, summed_params, single_batch)
 
-    def model_func_attrib(
+    def model_func_sq(
         mask: Float[Tensor, "k"],
         single_batch: Float[Tensor, " n_inputs"],
         k_params: dict[str, Float[Tensor, " k ..."]],
-    ) -> float:
-        return model_func(mask, single_batch, k_params).pow(2).mean(dim=-1).item()
+    ) -> Float[Tensor, ""]:
+        return model_func(mask, single_batch, k_params).pow(2).mean(dim=-1)
 
     def single_attrib(
         single_batch: Float[Tensor, " n_inputs"],
         k_params: dict[str, Float[Tensor, " k ..."]],
     ) -> Float[Tensor, " k"]:
         single_mask = torch.ones(k, device=device)
-        return grad(model_func_attrib, argnums=0)(single_mask, single_batch, k_params) ** 2
+        return grad(model_func_sq, argnums=0)(single_mask, single_batch, k_params) ** 2
 
+    def model_func_0(  # TODO: Take output dims into account
+        single_batch: Float[Tensor, " n_inputs"],
+        summed_params: dict[str, Float[Tensor, " k ..."]],
+    ) -> Float[Tensor, ""]:
+        return functional_call(pretrained_model, summed_params, single_batch)[0]
+
+    def single_param_grads(
+        single_batch: Float[Tensor, " n_inputs"],
+    ) -> Float[Tensor, ""]:
+        return grad(model_func_0, argnums=2)(single_batch, pretrained_params)
+
+    batched_param_grads = vmap(single_param_grads, in_dims=(0,))
     batched_model_func = vmap(model_func, in_dims=(0, 0, None))
     batched_attrib = vmap(single_attrib, in_dims=(0, None))
 
@@ -190,9 +222,15 @@ def optimize(
                 sparsity_warmup_pct=config.sparsity_warmup_pct,
             )
 
+        pretrained_param_grads = batched_param_grads(batch, device)
+
         attribs = batched_attrib(batch, k_params)
         topk_mask = calc_topk_mask(attribs, topk=config.topk, batch_topk=config.batch_topk).float()
         topk_out = batched_model_func(topk_mask, batch, k_params)
+
+        topk_param_attrib_loss = calc_topk_param_attrib_loss(
+            k_params, topk_mask, pretrained_params, pretrained_param_grads, batch.shape[0], device
+        )
 
         topk_recon_loss = calc_recon_loss(topk_out, labels)
 
@@ -216,6 +254,8 @@ def optimize(
             loss = loss + step_topk_recon_coeff * topk_recon_loss.mean()
         if config.topk_l2_coeff is not None:
             loss = loss + config.topk_l2_coeff * topk_l2_loss.mean()
+        if config.topk_param_attrib_coeff is not None:
+            loss = loss + config.topk_param_attrib_coeff * topk_param_attrib_loss.mean()
 
         # Logging
         if step % config.print_freq == 0:

@@ -90,6 +90,7 @@ class Config(BaseModel):
     slow_images: bool = False
     save_freq: PositiveInt | None = None
     lr: PositiveFloat
+    topk_param_attrib_coeff: NonNegativeFloat | None = None
     orthog_coeff: NonNegativeFloat | None = None
     out_recon_coeff: NonNegativeFloat | None = None
     param_match_coeff: NonNegativeFloat | None = 1.0
