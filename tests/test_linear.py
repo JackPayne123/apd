@@ -164,14 +164,14 @@ def test_train_linear_happy_path() -> None:
 
     # Calculate initial loss
     batch, labels = next(iter(dataloader))
-    initial_out = model(batch.to(device))
+    initial_out = model(batch.to(device))[0]
     initial_loss = torch.mean((labels.to(device) - initial_out) ** 2).item()
 
     # Train the model
     train(config, model, dataloader, device, out_dir=None)
 
     # Calculate final loss
-    final_out = model(batch.to(device))
+    final_out = model(batch.to(device))[0]
     final_loss = torch.mean((labels.to(device) - final_out) ** 2).item()
 
     assert (

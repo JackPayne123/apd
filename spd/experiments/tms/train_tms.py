@@ -64,7 +64,7 @@ def train(
                 group["lr"] = step_lr
             opt.zero_grad(set_to_none=True)
             batch, labels = next(data_iter)
-            out = model(batch)
+            out = model(batch)[0]
             error = importance * (labels.abs() - out) ** 2
             loss = einops.reduce(error, "b i f -> i", "mean").sum()
             loss.backward()

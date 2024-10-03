@@ -46,7 +46,7 @@ def train(
         optimizer.zero_grad()
         batch = batch.to(device)
         labels = labels.to(device)
-        loss = F.mse_loss(model(batch), labels)
+        loss = F.mse_loss(model(batch)[0], labels)
         loss.backward()
         optimizer.step()
         final_loss = loss.item()

@@ -219,7 +219,7 @@ def test_piecewise_batch_topk_rank_one_simple_bias_false_loss_stable() -> None:
     batch = next(iter(dataloader))[0]
     batch = batch.to(device=device)
     with torch.inference_mode():
-        labels = piecewise_model(batch)
+        labels = piecewise_model(batch)[0]
 
     out, _, inner_acts = piecewise_model_spd(batch)
 
