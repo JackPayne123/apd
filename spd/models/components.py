@@ -159,11 +159,9 @@ class MLPComponents(nn.Module):
             in_dim=d_mlp, out_dim=d_embed, k=k, resid_component=output_component, resid_dim=1
         )
 
-        if input_bias is None:
-            self.bias1 = nn.Parameter(torch.zeros(k, d_mlp))
-        else:
-            self.bias1 = nn.Parameter(torch.zeros(d_mlp))
-            self.bias1.data = input_bias.detach().clone()
+        self.bias1 = nn.Parameter(torch.zeros(d_mlp))
+        if input_bias is not None:
+            self.bias1.data[:] = input_bias.detach().clone()
 
     def forward(
         self, x: Float[Tensor, "... d_embed"]
