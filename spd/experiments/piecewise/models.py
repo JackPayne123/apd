@@ -925,7 +925,11 @@ class PiecewiseFunctionSPDFullRankTransformer(SPDFullRankModel):
             # mlp.linear1.subnetwork_params that are all zeros and mask these out.
             zero_vals: Bool[Tensor, "k d_out"] = mlp.linear1.subnetwork_params.sum(dim=-2).bool()
             target_bias: Float[Tensor, " d_out"] = target_transformer.mlps[i].bias1
-            mlp.linear1.bias.data[:] = zero_vals * target_bias  # broadcast along the k dimension
+            mlp.linear1.bias.data[:, :] = einops.einsum(
+                zero_vals, target_bias, "k d_out, d_out -> k d_out"
+            )
+
+            # Check that the sum of the biases in each subnetwork is equal to the target bias
             assert torch.allclose(mlp.linear1.bias.data.sum(dim=0), target_bias)
 
     def all_subnetwork_params(self) -> dict[str, Float[Tensor, "..."]]:
