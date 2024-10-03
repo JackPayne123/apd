@@ -459,6 +459,15 @@ def calc_topk_mask(
     batch_size = attribution_scores.shape[0]
     topk = int(topk * batch_size) if batch_topk else int(topk)
 
+    # Add some noise to avoid pathological sorting if some attribution scores are equivalent. This
+    # happens e.g. when many scores are 0, and then the indices are based on the order of scores
+    # which systematically prefers the first or last (pytorch 4.2.0 vs 4.2.1) subnetwork(s).
+    # Choosing a noise scale 1e-5 times the smallest non-zero score (or 1e-5 if all zero).
+    non_zero = attribution_scores > 0
+    smallest_non_zero = attribution_scores[non_zero].min() if torch.any(non_zero) else 1.0
+    noise = 1e-5 * smallest_non_zero * torch.randn_like(attribution_scores)
+    attribution_scores = attribution_scores + noise
+
     if batch_topk:
         attribution_scores = einops.rearrange(attribution_scores, "b ... k -> ... (b k)")
 
