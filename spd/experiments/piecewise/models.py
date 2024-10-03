@@ -666,7 +666,7 @@ class PiecewiseFunctionSPDTransformer(SPDModel):
             )
         return params
 
-    def set_handcoded_params(self, target_transformer: PiecewiseFunctionTransformer):
+    def set_handcoded_spd_params(self, target_transformer: PiecewiseFunctionTransformer):
         assert self.n_inputs == target_transformer.n_inputs
         assert self.n_layers == target_transformer.n_layers
         assert self.d_embed == target_transformer.d_embed
@@ -901,7 +901,7 @@ class PiecewiseFunctionSPDFullRankTransformer(SPDFullRankModel):
             [MLPComponentsFullRank(d_embed=self.d_embed, d_mlp=d_mlp, k=k) for _ in range(n_layers)]
         )
 
-    def set_handcoded_params(self, target_transformer: PiecewiseFunctionSPDTransformer):
+    def set_handcoded_spd_params(self, target_transformer: PiecewiseFunctionSPDTransformer):
         assert self.n_inputs == target_transformer.n_inputs
         assert self.n_layers == target_transformer.n_layers
         assert self.d_embed == target_transformer.d_embed

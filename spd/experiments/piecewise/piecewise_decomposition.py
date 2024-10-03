@@ -202,8 +202,8 @@ def get_model_and_dataloader(
                 k=config.task_config.k,
                 input_biases=input_biases,
             )
-            rank_one_spd_model.set_handcoded_params(piecewise_model)
-            piecewise_model_spd.set_handcoded_params(rank_one_spd_model)
+            rank_one_spd_model.set_handcoded_spd_params(piecewise_model)
+            piecewise_model_spd.set_handcoded_spd_params(rank_one_spd_model)
     else:
         piecewise_model_spd = PiecewiseFunctionSPDTransformer(
             n_inputs=piecewise_model.n_inputs,
@@ -214,7 +214,7 @@ def get_model_and_dataloader(
         )
         if config.task_config.handcoded_AB:
             logger.info("Setting handcoded A and B matrices (!)")
-            piecewise_model_spd.set_handcoded_params(piecewise_model)
+            piecewise_model_spd.set_handcoded_spd_params(piecewise_model)
 
     piecewise_model_spd.to(device)
 
