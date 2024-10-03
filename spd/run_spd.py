@@ -281,9 +281,9 @@ def calc_topk_l2_rank_one(
         # topk_mask: [batch, k] or [batch, n_instances, k]
         A_topk = torch.einsum("...fk,b...k ->b...fk", A, topk_mask)
         AB_topk = torch.einsum("b...fk,...kh->b...fh", A_topk, B)
-        topk_l2_penalty = topk_l2_penalty + ((AB_topk) ** 2).mean(dim=(-2, -1))
-    # Mean over batch_dim and divide by number of parameter matrices we iterated over
-    return topk_l2_penalty.mean(dim=0) / len(all_As_and_Bs)
+        topk_l2_penalty = topk_l2_penalty + ((AB_topk) ** 2).mean(dim=(0, -2, -1))
+
+    return topk_l2_penalty / len(all_As_and_Bs)
 
 
 def calc_topk_l2_full_rank(
@@ -323,21 +323,21 @@ def calc_topk_l2_full_rank(
             # subnetwork_param_val: [k, d_in, d_out] or [k, d_out] (if bias param)
             # topk_mask: [batch, k]
             ein_str = "k ... d_out, batch k -> batch ... d_out"
-            # output dimensions to mean over
+            # mean over all dims
             assert subnetwork_param_val.ndim in (3, 2), "Invalid number of dimensions"
-            mean_dims = (-2, -1) if subnetwork_param_val.ndim == 3 else (-1,)
+            mean_dims = tuple(range(subnetwork_param_val.ndim))
         else:
             # subnetwork_param_val: [n_instances, k, d_in, d_out] or [n_instances, k, d_out]
             # topk_mask: [batch, n_instances, k]
             ein_str = "n_instances k ... d_out, batch n_instances k -> batch n_instances ... d_out"
-            # output dimensions to mean over
+            # mean over all dims except the n_instances dim
             assert subnetwork_param_val.ndim in (4, 3), "Invalid number of dimensions"
-            mean_dims = (-2, -1) if subnetwork_param_val.ndim == 4 else (-1,)
+            mean_dims = (0, -2, -1) if subnetwork_param_val.ndim == 4 else (0, -1)
 
         topk_params = einops.einsum(subnetwork_param_val, topk_mask, ein_str)
         topk_l2_penalty = topk_l2_penalty + ((topk_params) ** 2).mean(dim=mean_dims)
 
-    return topk_l2_penalty.mean(dim=0) / len(subnetwork_params)
+    return topk_l2_penalty / len(subnetwork_params)
 
 
 def calc_param_match_loss(
