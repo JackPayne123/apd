@@ -6,9 +6,13 @@ from pathlib import Path
 
 import einops
 import matplotlib.pyplot as plt
+import matplotlib.ticker as tkr
+import numpy as np
 import torch
 import wandb
 from jaxtyping import Float
+from matplotlib.colors import CenteredNorm
+from mpl_toolkits.axes_grid1 import make_axes_locatable
 from torch import Tensor
 from torch.func import functional_call, grad, vmap
 from torch.utils.data import DataLoader
@@ -25,6 +29,56 @@ from spd.run_spd import (
 from spd.utils import (
     calc_topk_mask,
 )
+
+
+def plot_matrix(
+    ax: plt.Axes,
+    matrix: torch.Tensor,
+    title: str,
+    xlabel: str,
+    ylabel: str,
+    colorbar_format: str = "%.0f",
+) -> None:
+    # Useful to have bigger text for small matrices
+    fontsize = 8 if matrix.numel() < 50 else 4
+    im = ax.matshow(matrix.detach().cpu().numpy(), cmap="coolwarm", norm=CenteredNorm())
+    for (j, i), label in np.ndenumerate(matrix.detach().cpu().numpy()):
+        ax.text(i, j, f"{label:.2f}", ha="center", va="center", fontsize=fontsize)
+    ax.set_xlabel(xlabel)
+    if ylabel != "":
+        ax.set_ylabel(ylabel)
+    else:
+        ax.set_yticklabels([])
+    ax.set_title(title)
+    divider = make_axes_locatable(ax)
+    cax = divider.append_axes("right", size="1%", pad=0.05)
+    fig = ax.get_figure()
+    assert fig is not None
+    fig.colorbar(im, cax=cax, format=tkr.FormatStrFormatter(colorbar_format))
+    if ylabel == "Function index":
+        n_functions = matrix.shape[0]
+        ax.set_yticks(range(n_functions))
+        ax.set_yticklabels([f"{L:.0f}" for L in range(1, n_functions + 1)])
+
+
+def plot_param_dict(
+    param_dict: dict[str, torch.Tensor],
+    prefix: str = "",
+) -> dict[str, plt.Figure]:
+    # n_params = len(param_dict)
+    fig_dict = {}
+    for key, param in param_dict.items():
+        k = param.shape[0]
+        fig, axes = plt.subplots(nrows=k + 1, ncols=1, figsize=(8, 6 * k), constrained_layout=True)
+        axes = np.atleast_1d(axes)  # type: ignore
+        fig.suptitle(f"{prefix}{key}")
+        plot_matrix(axes[0], param.sum(dim=0), "", "", "")
+        axes[0].set_ylabel("Sum")
+        for ki in range(k):
+            plot_matrix(axes[ki + 1], param[ki], key, "x", "y")
+            axes[ki + 1].set_ylabel(f"k={ki}")
+        fig_dict[f"{prefix}{key}"] = fig
+    return fig_dict
 
 
 def calc_param_match_loss(
@@ -78,7 +132,7 @@ def calc_topk_param_attrib_loss(
     batch_size: int,
     device: str,
 ) -> Float[Tensor, ""]:
-    loss = torch.zeros(batch_size, device=device)
+    loss: Float[Tensor, " batch"] = torch.zeros(batch_size, device=device)
     for key, value in k_params.items():
         param_diff: Float[Tensor, " ... d"] = (
             einops.einsum(topk_mask, value, "batch k, k ... d -> batch ... d")
@@ -166,12 +220,10 @@ def optimize(
     ) -> Float[Tensor, ""]:
         return functional_call(pretrained_model, summed_params, single_batch)[0]
 
-    def single_param_grads(
-        single_batch: Float[Tensor, " n_inputs"],
-    ) -> Float[Tensor, ""]:
-        return grad(model_func_0, argnums=2)(single_batch, pretrained_params)
+    def single_param_grads(single_batch: Float[Tensor, " n_inputs"]) -> Float[Tensor, ""]:
+        return grad(model_func_0, argnums=1)(single_batch, pretrained_params)
 
-    batched_param_grads = vmap(single_param_grads, in_dims=(0,))
+    batched_param_grads = vmap(single_param_grads, in_dims=0)
     batched_model_func = vmap(model_func, in_dims=(0, 0, None))
     batched_attrib = vmap(single_attrib, in_dims=(0, None))
 
@@ -222,7 +274,7 @@ def optimize(
                 sparsity_warmup_pct=config.sparsity_warmup_pct,
             )
 
-        pretrained_param_grads = batched_param_grads(batch, device)
+        pretrained_param_grads = batched_param_grads(batch)
 
         attribs = batched_attrib(batch, k_params)
         topk_mask = calc_topk_mask(attribs, topk=config.topk, batch_topk=config.batch_topk).float()
@@ -241,6 +293,24 @@ def optimize(
         lp_sparsity_loss = calc_lp_loss(attribs, step_pnorm)
 
         orthog_loss = None  # TODO
+
+        if (
+            True
+            and config.image_freq is not None
+            and step % config.image_freq == 0
+            and (step > 0 or not config.slow_images)
+        ):
+            # Plot gradients
+            (config.topk_param_attrib_coeff * topk_param_attrib_loss).backward(retain_graph=True)
+            grads = {k: v.grad for k, v in k_params.items() if v.grad is not None}
+            fig_dict = plot_param_dict(grads, prefix="grad_")
+            if config.wandb_project:
+                wandb.log(
+                    {k: wandb.Image(v) for k, v in fig_dict.items()},
+                    step=step,
+                )
+                plt.close("all")
+            opt.zero_grad(set_to_none=True)
 
         # Add up the loss terms
         loss = torch.tensor(0.0, device=device)
@@ -267,6 +337,7 @@ def optimize(
             tqdm.write(f"Topk recon loss:{nl}{topk_recon_loss}")
             tqdm.write(f"topk l2 loss:{nl}{topk_l2_loss}")
             tqdm.write(f"param match loss:{nl}{param_match_loss}")
+            tqdm.write(f"topk param attrib loss:{nl}{topk_param_attrib_loss}")
             # tqdm.write(f"Orthog loss:{nl}{orthog_loss}")
             if config.wandb_project:
                 wandb.log(
@@ -278,31 +349,24 @@ def optimize(
                         "topk_recon_loss": topk_recon_loss.mean().item(),
                         "param_match_loss": param_match_loss.mean().item(),
                         "topk_l2_loss": topk_l2_loss.mean().item(),
+                        "topk_param_attrib_loss": topk_param_attrib_loss.mean().item(),
                     },
                     step=step,
                 )
 
-        # if (
-        #     plot_results_fn is not None
-        #     and config.image_freq is not None
-        #     and step % config.image_freq == 0
-        #     and (step > 0 or not config.slow_images)
-        # ):
-        #     fig_dict = plot_results_fn(
-        #         model=model,
-        #         target_model=pretrained_model,
-        #         step=step,
-        #         out_dir=out_dir,
-        #         device=device,
-        #         config=config,
-        #         topk_mask=topk_mask,
-        #     )
-        #     if config.wandb_project:
-        #         wandb.log(
-        #             {k: wandb.Image(v) for k, v in fig_dict.items()},
-        #             step=step,
-        #         )
-
+        if (
+            True
+            and config.image_freq is not None
+            and step % config.image_freq == 0
+            and (step > 0 or not config.slow_images)
+        ):
+            fig_dict = plot_param_dict(k_params)
+            if config.wandb_project:
+                wandb.log(
+                    {k: wandb.Image(v) for k, v in fig_dict.items()},
+                    step=step,
+                )
+                plt.close("all")
         # if (
         #     config.save_freq is not None
         #     and step % config.save_freq == 0
