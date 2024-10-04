@@ -77,10 +77,7 @@ class PiecewiseLinear(nn.Module):
         ), f"{len(biases)=}, num_neurons = {self.neurons_per_function}, {biases=}"
 
         self.input_layer.bias.data = torch.tensor(biases, dtype=torch.float32)
-        # -torch.tensor(
-        #     np.linspace(start-self.interval, end, num_neurons), dtype=torch.float32
-        # )[:-1] + self.interval
-        # print("neuron bias", self.neurons.bias.data)
+
         self.input_layer.weight.data = torch.ones(self.neurons_per_function, 1, dtype=torch.float32)
 
         self.output_layer.bias.data = torch.tensor(0, dtype=torch.float32)
@@ -238,13 +235,29 @@ class MLP(nn.Module):
         self, x: Float[Tensor, "... d_model"]
     ) -> tuple[
         Float[Tensor, "... d_model"],
-        tuple[Float[Tensor, "... d_model"], Float[Tensor, "... d_mlp"]],
-        tuple[Float[Tensor, "... d_mlp"], Float[Tensor, "... d_model"]],
+        dict[str, Float[Tensor, "... d_model"] | Float[Tensor, "... d_mlp"] | None],
+        dict[str, Float[Tensor, "... d_model"] | Float[Tensor, "... d_mlp"]],
     ]:
-        out1 = self.input_layer(x)
-        post_relu = self.relu(out1)
-        out2 = self.output_layer(post_relu)
-        return out2, (x, out1), (post_relu, out2)
+        """Run a forward pass and cache pre and post activations for each parameter.
+
+        Note that we don't need to cache pre activations for the biases. We also don't care about
+        the output bias which is always zero.
+        """
+        out1_pre_relu = self.input_layer(x)
+        out1 = self.relu(out1_pre_relu)
+        out2 = self.output_layer(out1)
+
+        pre_acts = {
+            "input_layer.weight": x,
+            "input_layer.bias": None,
+            "output_layer.weight": out1,
+        }
+        post_acts = {
+            "input_layer.weight": out1_pre_relu,
+            "input_layer.bias": out1_pre_relu,
+            "output_layer.weight": out2,
+        }
+        return out2, pre_acts, post_acts
 
 
 class ControlledResNet(nn.Module):
@@ -479,11 +492,11 @@ class PiecewiseFunctionTransformer(Model):
         layer_post_acts = {}
         residual = self.W_E(x)
         for i, layer in enumerate(self.mlps):
-            out, input_layer_acts_i, output_layer_acts_i = layer(residual)
-            layer_pre_acts[f"mlp_{i}.input_layer.weight"] = input_layer_acts_i[0]
-            layer_post_acts[f"mlp_{i}.input_layer.weight"] = input_layer_acts_i[1]
-            layer_pre_acts[f"mlp_{i}.output_layer.weight"] = output_layer_acts_i[0]
-            layer_post_acts[f"mlp_{i}.output_layer.weight"] = output_layer_acts_i[1]
+            out, pre_acts_i, post_acts_i = layer(residual)
+            for k, v in pre_acts_i.items():
+                layer_pre_acts[f"mlp_{i}.{k}"] = v
+            for k, v in post_acts_i.items():
+                layer_post_acts[f"mlp_{i}.{k}"] = v
             residual = residual + out
         return self.W_U(residual), layer_pre_acts, layer_post_acts
 
