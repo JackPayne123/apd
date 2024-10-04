@@ -3,31 +3,32 @@ wandb_run_name: null
 wandb_run_name_prefix: "func_"
 full_rank: true
 unit_norm_matrices: false
-seed: 0
-topk: 1.078125
-batch_topk: true
-topk_param_attrib_coeff: 1000
-param_match_coeff: 0.0
-topk_recon_coeff: 0.0
-topk_l2_coeff: 0.0
+seed: 1
+topk: 1
+batch_topk: false
+topk_param_attrib_coeff: 0 #1 #1000
+param_match_coeff: 0 #1e-7 #.01
+topk_recon_coeff: 1 #0.01
+topk_l2_coeff: 0 #1e-7 #0.001
 lp_sparsity_coeff: null
-lr: 0.01
-batch_size: 2048
+lr: 0.001
+batch_size: 2000
 steps: 50_000
-print_freq: 500
-image_freq: 1000
-slow_images: true
+print_freq: 5_000
+image_freq: 10_000
+slow_images: false
 save_freq: 50_000
 lr_warmup_pct: 0.004
 lr_schedule: cosine
+initialize_spd: xavier
 task_config:
   task_name: piecewise
   n_functions: 2
   neurons_per_function: 3
   n_layers: 1
-  feature_probability: 0.5
+  feature_probability: 0.25
   range_min: 0
   range_max: 5
-  k: 2
+  k: 1
   simple_bias: false
   handcoded_AB: false

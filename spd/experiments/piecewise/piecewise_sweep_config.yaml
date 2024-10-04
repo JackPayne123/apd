@@ -5,10 +5,13 @@ metric:
   goal: minimize
 parameters:
   lr:
-    values: [3e-2, 1e-1]
+    # values: [1e-4, 1e-3, 1e-2, 1e-1]
+    values: [1e-3, 3e-3, 1e-2]
+  topk_l2_coeff:
+    values: [1e-6, 1e-4, 1e-2]
 
 command:
 - ${env}
-- ${interpreter}
+- /data/stefan_heimersheim/miniconda3/envs/spd/bin/python
 - ${program}
-- spd/experiments/piecewise/piecewise_lp_config.yaml
+- spd/experiments/piecewise/piecewise_topk_full_rank_config.yaml
