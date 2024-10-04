@@ -41,8 +41,9 @@ def plot_matrix(
 ) -> None:
     # Useful to have bigger text for small matrices
     fontsize = 8 if matrix.numel() < 50 else 4
-    im = ax.matshow(matrix.detach().cpu().numpy(), cmap="coolwarm", norm=CenteredNorm())
-    for (j, i), label in np.ndenumerate(matrix.detach().cpu().numpy()):
+    matrix = np.atleast_2d(matrix.detach().cpu().numpy())
+    im = ax.matshow(matrix, cmap="coolwarm", norm=CenteredNorm())
+    for (j, i), label in np.ndenumerate(matrix):
         ax.text(i, j, f"{label:.2f}", ha="center", va="center", fontsize=fontsize)
     ax.set_xlabel(xlabel)
     if ylabel != "":
@@ -165,7 +166,11 @@ def optimize(
     # it k times. Just optimize this dictionary of parameters.
     pretrained_model.to(device=device)
     pretrained_params = pretrained_model.state_dict()
-    decomposable_params = ["mlps.0.input_layer.weight", "mlps.0.output_layer.weight"]
+    decomposable_params = [
+        "mlps.0.input_layer.weight",
+        "mlps.0.output_layer.weight",
+        "mlps.0.input_layer.bias",
+    ]
     k_params = {}
     k = config.task_config.k
     assert config.topk is not None, "Need topk"
@@ -182,12 +187,19 @@ def optimize(
     # transposed.
     model.to(device=device)
     spd_params = model.state_dict()
-    spd_param_map = {
-        "mlps.0.input_layer.weight": "mlps.0.linear1.subnetwork_params",
-        "mlps.0.output_layer.weight": "mlps.0.linear2.subnetwork_params",
-    }
-    for key, spd_key in spd_param_map.items():
-        k_params[key].data = spd_params[spd_key].data.transpose(-2, -1)
+    spd_param_map = [
+        ("mlps.0.input_layer.weight", "mlps.0.linear1.subnetwork_params", True),
+        ("mlps.0.output_layer.weight", "mlps.0.linear2.subnetwork_params", True),
+        ("mlps.0.input_layer.bias", "mlps.0.linear1.bias", False),
+        # ("mlps.0.output_layer.bias", "mlps.0.linear2.bias", False),
+    ]
+    for key, spd_key, transpose in spd_param_map:
+        if transpose:
+            k_params[key].data[:] = spd_params[spd_key].data.sum(dim=0).transpose(-2, -1)
+        else:
+            k_params[key].data[:] = spd_params[spd_key].data.sum(dim=0)
+        k_params[key].data[:] = k_params[key].data + torch.randn_like(k_params[key].data) * 1e-2
+        pass
     del model, spd_params, spd_param_map
 
     def model_func(
