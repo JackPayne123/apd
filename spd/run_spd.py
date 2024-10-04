@@ -573,10 +573,11 @@ def calc_act_recon_loss(
                     dout_d_post_acts[i].detach(), param_diff, target_layer_pre_acts[k], ein_str
                 )
 
-            loss_out_idx = loss_out_idx + loss_k
+            # Accumulate loss (normalized by number of params)
+            loss_out_idx = loss_out_idx + loss_k / target_params[k].numel()
 
         loss = loss + loss_out_idx**2
-    loss = (loss / target_out.shape[-1]).sqrt()
+    loss = (loss / target_out.shape[-1] + 1e-16).sqrt()
     return loss
 
 
