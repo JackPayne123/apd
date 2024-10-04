@@ -36,6 +36,7 @@ def get_piecewise_config(
         k=6,
         handcoded_AB=handcoded_AB,
         simple_bias=simple_bias,
+        decompose_bias=False,
     )
 
 
@@ -251,6 +252,7 @@ def test_piecewise_batch_topk_rank_one_simple_bias_false_loss_stable() -> None:
         pretrained_weights=pretrained_weights,
         subnetwork_params_summed=piecewise_model_spd.all_subnetwork_params_summed(),
         param_map=param_map,
+        has_instance_dim=False,
     )
 
     # Rank 1 so layer_acts is None
@@ -280,6 +282,7 @@ def test_piecewise_batch_topk_rank_one_simple_bias_false_loss_stable() -> None:
         pretrained_weights=pretrained_weights,
         subnetwork_params_summed=piecewise_model_spd.all_subnetwork_params_summed(),
         param_map=param_map,
+        has_instance_dim=False,
     )
 
     out, _, inner_acts = piecewise_model_spd(batch)
