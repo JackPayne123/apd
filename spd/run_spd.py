@@ -107,6 +107,7 @@ class Config(BaseModel):
     sparsity_warmup_pct: Probability = 0.0
     unit_norm_matrices: bool = True
     ablation_attributions: bool = False
+    initialize_spd: Literal["xavier", "oldSPD", "fullcopies"] = "xavier"
     task_config: DeepLinearConfig | PiecewiseConfig | TMSConfig = Field(
         ..., discriminator="task_name"
     )

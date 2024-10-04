@@ -41,7 +41,7 @@ def plot_matrix(
 ) -> None:
     # Useful to have bigger text for small matrices
     fontsize = 8 if matrix.numel() < 50 else 4
-    matrix = np.atleast_2d(matrix.detach().cpu().numpy())
+    matrix = np.atleast_2d(matrix.detach().cpu().numpy())  # type: ignore
     im = ax.matshow(matrix, cmap="coolwarm", norm=CenteredNorm())
     for (j, i), label in np.ndenumerate(matrix):
         ax.text(i, j, f"{label:.2f}", ha="center", va="center", fontsize=fontsize)
@@ -179,28 +179,38 @@ def optimize(
         if key in decomposable_params:
             shape = [k, *value.shape]
             k_params[key] = torch.empty(shape, device=device, dtype=value.dtype, requires_grad=True)
-            torch.nn.init.xavier_uniform_(k_params[key])
 
     # Okay now for piecewise I want to use the handcoded SPD initialization so I am gonna use the
     # SPD model after all, but literally only to get the initialization params. Also, it's annoying
     # that SPD model uses different parameter names so we're using this map. Also, the params are
     # transposed.
-    model.to(device=device)
-    spd_params = model.state_dict()
-    spd_param_map = [
-        ("mlps.0.input_layer.weight", "mlps.0.linear1.subnetwork_params", True),
-        ("mlps.0.output_layer.weight", "mlps.0.linear2.subnetwork_params", True),
-        ("mlps.0.input_layer.bias", "mlps.0.linear1.bias", False),
-        # ("mlps.0.output_layer.bias", "mlps.0.linear2.bias", False),
-    ]
-    for key, spd_key, transpose in spd_param_map:
-        if transpose:
-            k_params[key].data[:] = spd_params[spd_key].data.sum(dim=0).transpose(-2, -1)
-        else:
-            k_params[key].data[:] = spd_params[spd_key].data.sum(dim=0)
-        k_params[key].data[:] = k_params[key].data + torch.randn_like(k_params[key].data) * 1e-2
-        pass
-    del model, spd_params, spd_param_map
+    if config.initialize_spd == "oldSPD":
+        model.to(device=device)
+        spd_params = model.state_dict()
+        spd_param_map = [
+            ("mlps.0.input_layer.weight", "mlps.0.linear1.subnetwork_params", True),
+            ("mlps.0.output_layer.weight", "mlps.0.linear2.subnetwork_params", True),
+            ("mlps.0.input_layer.bias", "mlps.0.linear1.bias", False),
+        ]
+        for key, spd_key, transpose in spd_param_map:
+            if transpose:
+                k_params[key].data[:] = spd_params[spd_key].data.sum(dim=0).transpose(-2, -1)
+            else:
+                k_params[key].data[:] = spd_params[spd_key].data.sum(dim=0)
+            k_params[key].data[:] = k_params[key].data + torch.randn_like(k_params[key].data) * 1e-2
+            pass
+        del model, spd_params, spd_param_map
+    elif config.initialize_spd == "fullcopies":
+        for key in k_params:
+            k_params[key].data[:] = (
+                pretrained_params[key].data + torch.randn_like(k_params[key].data) * 1e-2
+            )
+            pass
+    elif config.initialize_spd == "xavier":
+        for key in decomposable_params:
+            torch.nn.init.xavier_uniform_(k_params[key], gain=0.01)
+    else:
+        raise ValueError(f"Invalid initialize_spd: {config.initialize_spd}")
 
     def model_func(
         single_mask: Float[Tensor, " k"],
