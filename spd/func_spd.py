@@ -207,7 +207,7 @@ def optimize(
             pass
     elif config.initialize_spd == "xavier":
         for key in decomposable_params:
-            torch.nn.init.xavier_uniform_(k_params[key], gain=0.01)
+            torch.nn.init.xavier_uniform_(k_params[key])
     else:
         raise ValueError(f"Invalid initialize_spd: {config.initialize_spd}")
 
