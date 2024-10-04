@@ -194,16 +194,15 @@ def optimize(
         ]
         for key, spd_key, transpose in spd_param_map:
             if transpose:
-                k_params[key].data[:] = spd_params[spd_key].data.sum(dim=0).transpose(-2, -1)
+                k_params[key].data[:] = spd_params[spd_key].transpose(-2, -1)
             else:
-                k_params[key].data[:] = spd_params[spd_key].data.sum(dim=0)
-            k_params[key].data[:] = k_params[key].data + torch.randn_like(k_params[key].data) * 1e-2
+                k_params[key].data[:] = spd_params[spd_key]
             pass
         del model, spd_params, spd_param_map
     elif config.initialize_spd == "fullcopies":
         for key in k_params:
             k_params[key].data[:] = (
-                pretrained_params[key].data + torch.randn_like(k_params[key].data) * 1e-2
+                pretrained_params[key].data + torch.randn_like(k_params[key].data) * 1e0
             )
             pass
     elif config.initialize_spd == "xavier":
@@ -316,24 +315,6 @@ def optimize(
 
         orthog_loss = None  # TODO
 
-        if (
-            True
-            and config.image_freq is not None
-            and step % config.image_freq == 0
-            and (step > 0 or not config.slow_images)
-        ):
-            # Plot gradients
-            (config.topk_param_attrib_coeff * topk_param_attrib_loss).backward(retain_graph=True)
-            grads = {k: v.grad for k, v in k_params.items() if v.grad is not None}
-            fig_dict = plot_param_dict(grads, prefix="grad_")
-            if config.wandb_project:
-                wandb.log(
-                    {k: wandb.Image(v) for k, v in fig_dict.items()},
-                    step=step,
-                )
-                plt.close("all")
-            opt.zero_grad(set_to_none=True)
-
         # Add up the loss terms
         loss = torch.tensor(0.0, device=device)
         # if config.orthog_coeff is not None:
@@ -383,6 +364,10 @@ def optimize(
             and (step > 0 or not config.slow_images)
         ):
             fig_dict = plot_param_dict(k_params)
+            # Plot gradients
+            grads = {k: v.grad for k, v in k_params.items() if v.grad is not None}
+            fig_dict_grads = plot_param_dict(grads, prefix="grad_")
+            fig_dict = {**fig_dict, **fig_dict_grads}
             if config.wandb_project:
                 wandb.log(
                     {k: wandb.Image(v) for k, v in fig_dict.items()},
