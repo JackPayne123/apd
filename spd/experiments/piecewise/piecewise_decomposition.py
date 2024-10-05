@@ -134,6 +134,8 @@ def get_run_name(config: Config) -> str:
             run_suffix += f"topkl2_{config.topk_l2_coeff:.2e}_"
         if config.act_recon_coeff is not None:
             run_suffix += f"actrecon_{config.act_recon_coeff:.2e}_"
+        if config.distil_subnet_l2_coeff is not None:
+            run_suffix += f"distil_{config.distil_subnet_l2_coeff:.2e}_"
         if config.task_config.handcoded_AB:
             run_suffix += "hAB_"
         run_suffix += f"lr{config.lr:.2e}_"
@@ -206,6 +208,10 @@ def get_model_and_dataloader(
             )
             rank_one_spd_model.set_handcoded_spd_params(piecewise_model)
             piecewise_model_spd.set_handcoded_spd_params(rank_one_spd_model)
+            # piecewise_model_spd.set_handcoded_spd_params_from_full(piecewise_model)
+        if config.distil_subnet_l2_coeff is not None:
+            piecewise_model_spd.set_subnet_to_target(piecewise_model)
+
     else:
         piecewise_model_spd = PiecewiseFunctionSPDTransformer(
             n_inputs=piecewise_model.n_inputs,
