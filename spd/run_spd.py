@@ -665,6 +665,14 @@ def optimize(
         layer_pre_acts = None
         layer_post_acts = None
         if pretrained_model is not None:
+            if config.param_match_coeff is not None:
+                assert param_map is not None, "Need a param_map for param_match loss"
+                # Check that our param_map contains all the decomposable param names
+                assert set(param_map.keys()) == set(
+                    pretrained_model.all_decomposable_params().keys()
+                )
+                assert set(param_map.values()) == set(model.all_subnetwork_params_summed().keys())
+
             pretrained_model.to(device=device)
             labels, layer_pre_acts, layer_post_acts = pretrained_model(batch)
 
