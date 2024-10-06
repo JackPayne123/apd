@@ -18,6 +18,12 @@ from spd.utils import DatasetGeneratedDataLoader, set_seed
 class TMSTrainConfig(BaseModel):
     n_features: PositiveInt
     n_hidden: PositiveInt
+    n_instances: int
+    feature_probability: float
+    batch_size: int
+    steps: int
+    seed: int
+    hidden_relu: bool = False  # New option
 
     # We optimize n_instances models in a single training loop
     # to let us sweep over sparsity or importance curves
@@ -126,6 +132,7 @@ if __name__ == "__main__":
         batch_size=1024,
         steps=5_000,
         seed=0,
+        hidden_relu=True,  # Set the default value here
     )
 
     set_seed(config.seed)
@@ -135,6 +142,7 @@ if __name__ == "__main__":
         n_features=config.n_features,
         n_hidden=config.n_hidden,
         device=device,
+        hidden_relu=config.hidden_relu,  # Pass the new option to the model
     )
 
     dataset = TMSDataset(
@@ -148,7 +156,8 @@ if __name__ == "__main__":
 
     run_name = (
         f"tms_n-features{config.n_features}_n-hidden{config.n_hidden}_"
-        f"n-instances{config.n_instances}_seed{config.seed}.pth"
+        f"n-instances{config.n_instances}_seed{config.seed}"
+        f"_hidden_relu{config.hidden_relu}.pth"
     )
     out_dir = Path(__file__).parent / "out" / run_name
     out_dir.mkdir(parents=True, exist_ok=True)

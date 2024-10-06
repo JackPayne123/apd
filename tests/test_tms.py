@@ -16,6 +16,7 @@ TMS_TASK_CONFIG = TMSConfig(
     train_bias=True,
     bias_val=0.0,
     pretrained_model_path=None,  # We'll create this later
+    hidden_relu=False,
 )
 
 
@@ -155,7 +156,13 @@ def test_train_tms_happy_path():
     set_seed(0)
     # Set up a small configuration
     config = TMSTrainConfig(
-        n_features=3, n_hidden=2, n_instances=2, feature_probability=0.1, batch_size=32, steps=5
+        n_features=3,
+        n_hidden=2,
+        n_instances=2,
+        feature_probability=0.1,
+        batch_size=32,
+        steps=5,
+        seed=0,
     )
 
     # Initialize model, dataset, and dataloader

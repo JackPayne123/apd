@@ -27,4 +27,6 @@ task_config:
   train_bias: true
   feature_probability: 0.05
   # File obtained by running spd/experiments/tms/train_tms.py
-  pretrained_model_path: spd/experiments/tms/out/tms_n-features5_n-hidden2_n-instances12_seed0.pth/model.pth
+  pretrained_model_path:
+    /data/jake_mendel/SPD/spd/spd/experiments/tms/out/tms_n-features5_n-hidden2_n-instances12_seed0_hidden_reluTrue.pth/model.pth
+  hidden_relu: true

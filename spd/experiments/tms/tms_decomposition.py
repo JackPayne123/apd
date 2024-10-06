@@ -49,6 +49,7 @@ def get_run_name(config: Config, task_config: TMSConfig) -> str:
         run_suffix += f"bs{config.batch_size}_"
         run_suffix += f"ft{task_config.n_features}_"
         run_suffix += f"hid{task_config.n_hidden}"
+        run_suffix += f"_hidden_relu{task_config.hidden_relu}"
     return config.wandb_run_name_prefix + run_suffix
 
 
@@ -149,6 +150,7 @@ def main(
             train_bias=task_config.train_bias,
             bias_val=task_config.bias_val,
             device=device,
+            hidden_relu=task_config.hidden_relu,
         )
     else:
         model = TMSSPDModel(
@@ -159,6 +161,7 @@ def main(
             train_bias=task_config.train_bias,
             bias_val=task_config.bias_val,
             device=device,
+            hidden_relu=task_config.hidden_relu,
         )
 
     pretrained_model = None
@@ -168,7 +171,18 @@ def main(
             n_features=task_config.n_features,
             n_hidden=task_config.n_hidden,
             device=device,
+            hidden_relu=task_config.hidden_relu,
         )
+        # assert that if 'hidden_reluFalse' is a substring of config_path, then
+        # task_config.hidden_relu is False
+        if "hidden_reluFalse" in str(task_config.pretrained_model_path):
+            assert (
+                not task_config.hidden_relu
+            ), "Pretrained model must have the same hidden relu as task config"
+        else:
+            assert (
+                task_config.hidden_relu
+            ), "Pretrained model must have the same hidden relu as task config"
         pretrained_model.load_state_dict(
             torch.load(task_config.pretrained_model_path, map_location=device)
         )

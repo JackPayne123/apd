@@ -2,7 +2,6 @@ import torch
 from einops import rearrange
 from jaxtyping import Bool, Float
 from torch import Tensor, nn
-from torch.nn import functional as F
 
 from spd.models.base import Model, SPDFullRankModel, SPDModel
 from spd.types import RootPath
@@ -16,22 +15,30 @@ class TMSModel(Model):
         n_features: int,
         n_hidden: int,
         device: str = "cuda",
+        hidden_relu: bool = False,
     ):
         super().__init__()
         self.n_instances = n_instances
         self.n_features = n_features
         self.n_hidden = n_hidden
+        self.hidden_relu = hidden_relu
         self.W = nn.Parameter(torch.empty((n_instances, n_features, n_hidden), device=device))
         nn.init.xavier_normal_(self.W)
         self.b_final = nn.Parameter(torch.zeros((n_instances, n_features), device=device))
+
+        # Create ReLU layers
+        self.hidden_relu_layer = nn.ReLU() if self.hidden_relu else None
+        self.output_relu_layer = nn.ReLU()
 
     def forward(self, features: torch.Tensor) -> torch.Tensor:
         # features: [..., instance, n_features]
         # W: [instance, n_features, n_hidden]
         hidden = torch.einsum("...if,ifh->...ih", features, self.W)
+        if self.hidden_relu_layer:  # Apply ReLU to hidden layer if specified
+            hidden = self.hidden_relu_layer(hidden)
         out = torch.einsum("...ih,ifh->...if", hidden, self.W)
         out = out + self.b_final
-        out = F.relu(out)
+        out = self.output_relu_layer(out)
         return out
 
     def all_decomposable_params(self) -> dict[str, Float[Tensor, "n_instances d_in d_out"]]:
@@ -49,6 +56,7 @@ class TMSSPDModel(SPDModel):
         bias_val: float,
         train_bias: bool,
         device: str = "cuda",
+        hidden_relu: bool = False,
     ):
         super().__init__()
         self.n_instances = n_instances
@@ -57,6 +65,7 @@ class TMSSPDModel(SPDModel):
         self.k = k if k is not None else n_features
         self.bias_val = bias_val
         self.train_bias = train_bias
+        self.hidden_relu = hidden_relu
 
         self.A = nn.Parameter(torch.empty((n_instances, n_features, self.k), device=device))
         self.B = nn.Parameter(torch.empty((n_instances, self.k, n_hidden), device=device))
@@ -73,6 +82,10 @@ class TMSSPDModel(SPDModel):
         nn.init.xavier_normal_(self.B)
 
         self.n_param_matrices = 2  # Two W matrices (even though they're tied)
+
+        # Create ReLU layers
+        self.hidden_relu_layer = nn.ReLU() if self.hidden_relu else None
+        self.output_relu_layer = nn.ReLU()
 
     def all_As_and_Bs(
         self,
@@ -98,12 +111,14 @@ class TMSSPDModel(SPDModel):
     ]:
         inner_act_0 = torch.einsum("...if,ifk->...ik", x, self.A)
         layer_act_0 = torch.einsum("...ik,ikh->...ih", inner_act_0, self.B)
+        if self.hidden_relu_layer:  # Apply ReLU to hidden layer if specified
+            layer_act_0 = self.hidden_relu_layer(layer_act_0)
 
         inner_act_1 = torch.einsum("...ih,ikh->...ik", layer_act_0, self.B)
         layer_act_1 = torch.einsum("...ik,ifk->...if", inner_act_1, self.A)
         pre_relu = layer_act_1 + self.b_final
 
-        out = F.relu(pre_relu)
+        out = self.output_relu_layer(pre_relu)
         # Can pass layer_act_1 or pre_relu to layer_acts[1] as they're the same for the gradient
         # operations we care about (dout/d(inner_act_1)).
         return out, [layer_act_0, layer_act_1], [inner_act_0, inner_act_1]
@@ -122,6 +137,8 @@ class TMSSPDModel(SPDModel):
         assert topk_mask.shape == inner_act_0.shape
         inner_act_0_topk = inner_act_0 * topk_mask
         layer_act_0 = torch.einsum("...ik,ikh->...ih", inner_act_0_topk, self.B)
+        if self.hidden_relu_layer:  # Apply ReLU to hidden layer if specified
+            layer_act_0 = self.hidden_relu_layer(layer_act_0)
 
         inner_act_1 = torch.einsum("...ih,ikh->...ik", layer_act_0, self.B)
         assert topk_mask.shape == inner_act_1.shape
@@ -129,7 +146,7 @@ class TMSSPDModel(SPDModel):
         layer_act_1 = torch.einsum("...ik,ifk->...if", inner_act_1_topk, self.A)
 
         pre_relu = layer_act_1 + self.b_final
-        out = F.relu(pre_relu)
+        out = self.output_relu_layer(pre_relu)
         return out, [layer_act_0, layer_act_1], [inner_act_0_topk, inner_act_1_topk]
 
     @classmethod
@@ -169,6 +186,7 @@ class TMSSPDFullRankModel(SPDFullRankModel):
         bias_val: float,
         train_bias: bool,
         device: str = "cuda",
+        hidden_relu: bool = False,
     ):
         super().__init__()
         self.n_instances = n_instances
@@ -177,6 +195,7 @@ class TMSSPDFullRankModel(SPDFullRankModel):
         self.k = k if k is not None else n_features
         self.bias_val = bias_val
         self.train_bias = train_bias
+        self.hidden_relu = hidden_relu
 
         self.subnetwork_params = nn.Parameter(
             torch.empty((n_instances, self.k, n_features, n_hidden), device=device)
@@ -188,6 +207,10 @@ class TMSSPDFullRankModel(SPDFullRankModel):
         nn.init.xavier_normal_(self.subnetwork_params)
 
         self.n_param_matrices = 2  # Two W matrices (even though they're tied)
+
+        # Create ReLU layers
+        self.hidden_relu_layer = nn.ReLU() if self.hidden_relu else None
+        self.output_relu_layer = nn.ReLU()
 
     def all_subnetwork_params(
         self,
@@ -213,12 +236,14 @@ class TMSSPDFullRankModel(SPDFullRankModel):
     ]:
         inner_act_0 = torch.einsum("...if,ikfh->...ikh", x, self.subnetwork_params)
         layer_act_0 = torch.einsum("...ikh->...ih", inner_act_0)
+        if self.hidden_relu_layer:  # Apply ReLU to hidden layer if specified
+            layer_act_0 = self.hidden_relu_layer(layer_act_0)
 
         inner_act_1 = torch.einsum("...ih,ikfh->...ikf", layer_act_0, self.subnetwork_params)
         layer_act_1 = torch.einsum("...ikf->...if", inner_act_1)
         pre_relu = layer_act_1 + self.b_final
 
-        out = F.relu(pre_relu)
+        out = self.output_relu_layer(pre_relu)
         # Can pass layer_act_1 or pre_relu to layer_acts[1] as they're the same for the gradient
         # operations we care about (dout/d(inner_act_1)).
         return out, [layer_act_0, layer_act_1], [inner_act_0, inner_act_1]
@@ -238,6 +263,8 @@ class TMSSPDFullRankModel(SPDFullRankModel):
         assert topk_mask.shape == inner_act_0.shape[:-1]
         inner_act_0_topk = torch.einsum("...ikh,...ik->...ikh", inner_act_0, topk_mask)
         layer_act_0 = torch.einsum("...ikh->...ih", inner_act_0_topk)
+        if self.hidden_relu_layer:  # Apply ReLU to hidden layer if specified
+            layer_act_0 = self.hidden_relu_layer(layer_act_0)
 
         inner_act_1 = torch.einsum("...ih,ikfh->...ikf", layer_act_0, self.subnetwork_params)
         assert topk_mask.shape == inner_act_1.shape[:-1]
@@ -245,7 +272,7 @@ class TMSSPDFullRankModel(SPDFullRankModel):
         layer_act_1 = torch.einsum("...ikf->...if", inner_act_1_topk)
 
         pre_relu = layer_act_1 + self.b_final
-        out = F.relu(pre_relu)
+        out = self.output_relu_layer(pre_relu)
         return out, [layer_act_0, layer_act_1], [inner_act_0_topk, inner_act_1_topk]
 
     @classmethod
