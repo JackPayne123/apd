@@ -210,7 +210,7 @@ def get_model_and_dataloader(
             rank_one_spd_model.set_handcoded_spd_params(piecewise_model)
             piecewise_model_spd.set_handcoded_spd_params(rank_one_spd_model)
             # piecewise_model_spd.set_handcoded_spd_params_from_full(piecewise_model)
-        if config.distil_subnet_l2_coeff is not None:
+        if config.distil:
             piecewise_model_spd.set_subnet_to_target(piecewise_model)
 
     else:

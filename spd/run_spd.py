@@ -99,6 +99,7 @@ class Config(BaseModel):
     lp_sparsity_coeff: NonNegativeFloat | None = None
     act_recon_coeff: NonNegativeFloat | None = None
     distil_subnet_l2_coeff: NonNegativeFloat | None = None
+    distil: bool = False
     pnorm: PositiveFloat | None = None
     pnorm_end: PositiveFloat | None = None
     lr_schedule: Literal["linear", "constant", "cosine", "exponential"] = "constant"
@@ -197,6 +198,9 @@ class Config(BaseModel):
 
         if self.act_recon_coeff is not None and not isinstance(self.task_config, PiecewiseConfig):
             raise ValueError("act_recon_coeff is currenlty only suppported for piecewise")
+
+        if self.distil_subnet_l2_coeff and not self.distil:
+            raise ValueError("distil_subnet_l2_coeff is only available when distil is True")
 
         return self
 
@@ -704,8 +708,7 @@ def optimize(
         if config.orthog_coeff is not None:
             assert config.full_rank, "Orthogonality loss only works in full rank models"
             orthog_loss = calc_orthog_loss_full_rank(
-                list(model.all_subnetwork_params().values()),
-                distil=config.distil_subnet_l2_coeff is not None,
+                list(model.all_subnetwork_params().values()), distil=config.distil
             )
 
         param_match_loss = None
@@ -757,10 +760,7 @@ def optimize(
                     )
 
             topk_mask = calc_topk_mask(
-                attribution_scores,
-                config.topk,
-                batch_topk=config.batch_topk,
-                distil=config.distil_subnet_l2_coeff is not None,
+                attribution_scores, config.topk, batch_topk=config.batch_topk, distil=config.distil
             )
 
             # Do a forward pass with only the topk subnetworks
