@@ -209,8 +209,6 @@ def get_model_and_dataloader(
             )
             rank_one_spd_model.set_handcoded_spd_params(piecewise_model)
             piecewise_model_spd.set_handcoded_spd_params(rank_one_spd_model)
-        if config.distil:
-            piecewise_model_spd.set_subnet_to_target(piecewise_model)
 
     else:
         piecewise_model_spd = PiecewiseFunctionSPDTransformer(
