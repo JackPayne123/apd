@@ -99,7 +99,6 @@ class Config(BaseModel):
     topk_l2_coeff: NonNegativeFloat | None = None
     lp_sparsity_coeff: NonNegativeFloat | None = None
     act_recon_coeff: NonNegativeFloat | None = None
-    distil_subnet_l2_coeff: NonNegativeFloat | None = None
     distil: bool = False
     pnorm: PositiveFloat | None = None
     pnorm_end: PositiveFloat | None = None
@@ -199,9 +198,6 @@ class Config(BaseModel):
 
         if self.act_recon_coeff is not None and not isinstance(self.task_config, PiecewiseConfig):
             raise ValueError("act_recon_coeff is currenlty only suppported for piecewise")
-
-        if self.distil_subnet_l2_coeff and not self.distil:
-            raise ValueError("distil_subnet_l2_coeff is only available when distil is True")
 
         return self
 
@@ -598,22 +594,6 @@ def calc_act_recon_loss(
     return loss
 
 
-def calc_distil_subnet_l2_loss(
-    subnet_param_vals: list[Float[Tensor, "k ..."] | Float[Tensor, "k n_instances ..."]],
-    has_instance_dim: bool,
-) -> Float[Tensor, ""]:
-    """Get the l2 loss of the final dimension of each parameter matrix."""
-    loss = torch.tensor(0.0, device=subnet_param_vals[0].device)
-    for param in subnet_param_vals:
-        if has_instance_dim:
-            # Mean over all but the first (n_instances) dim
-            param_loss = (param[-1] ** 2).mean(dim=tuple(range(1, param.ndim)))
-        else:
-            param_loss = (param[-1] ** 2).mean()
-        loss = loss + param_loss
-    return loss / len(subnet_param_vals)
-
-
 def optimize(
     model: SPDModel | SPDFullRankModel,
     config: Config,
@@ -745,8 +725,7 @@ def optimize(
             topk_recon_loss,
             topk_mask,
             act_recon_loss,
-            distil_subnet_l2_loss,
-        ) = None, None, None, None, None, None
+        ) = None, None, None, None, None
         if config.topk is not None:
             if config.ablation_attributions:
                 attribution_scores = calc_ablation_attributions(model=model, batch=batch, out=out)
@@ -797,11 +776,6 @@ def optimize(
                     target_layer_post_acts=layer_post_acts,
                     has_instance_dim=has_instance_dim,
                 )
-            if config.distil_subnet_l2_coeff is not None:
-                distil_subnet_l2_loss = calc_distil_subnet_l2_loss(
-                    subnet_param_vals=list(model.all_subnetwork_params().values()),
-                    has_instance_dim=has_instance_dim,
-                )
 
         # Add up the loss terms
         loss = torch.tensor(0.0, device=device)
@@ -825,9 +799,6 @@ def optimize(
         if act_recon_loss is not None:
             assert config.act_recon_coeff is not None
             loss = loss + config.act_recon_coeff * act_recon_loss.mean()
-        if distil_subnet_l2_loss is not None:
-            assert config.distil_subnet_l2_coeff is not None
-            loss = loss + config.distil_subnet_l2_coeff * distil_subnet_l2_loss.mean()
 
         # Logging
         if step % config.print_freq == 0:
@@ -850,8 +821,6 @@ def optimize(
                 tqdm.write(f"Orthog loss:{nl}{orthog_loss}")
             if act_recon_loss is not None:
                 tqdm.write(f"Act recon loss:{nl}{act_recon_loss}")
-            if distil_subnet_l2_loss is not None:
-                tqdm.write(f"Distil subnet l2 loss:{nl}{distil_subnet_l2_loss}")
             if config.wandb_project:
                 wandb.log(
                     {
@@ -876,9 +845,6 @@ def optimize(
                         else None,
                         "act_recon_loss": act_recon_loss.mean().item()
                         if act_recon_loss is not None
-                        else None,
-                        "distil_l2_loss": distil_subnet_l2_loss.mean().item()
-                        if distil_subnet_l2_loss is not None
                         else None,
                     },
                     step=step,
