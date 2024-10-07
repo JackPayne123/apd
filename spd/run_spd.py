@@ -98,7 +98,7 @@ class Config(BaseModel):
     topk_recon_coeff: NonNegativeFloat | None = None
     topk_l2_coeff: NonNegativeFloat | None = None
     lp_sparsity_coeff: NonNegativeFloat | None = None
-    act_recon_coeff: NonNegativeFloat | None = None
+    topk_param_attrib_coeff: NonNegativeFloat | None = None
     distil: bool = False
     pnorm: PositiveFloat | None = None
     pnorm_end: PositiveFloat | None = None
@@ -196,7 +196,9 @@ class Config(BaseModel):
         ):
             raise ValueError("Cannot decompose bias in rank 1 case")
 
-        if self.act_recon_coeff is not None and not isinstance(self.task_config, PiecewiseConfig):
+        if self.topk_param_attrib_coeff is not None and not isinstance(
+            self.task_config, PiecewiseConfig
+        ):
             raise ValueError("act_recon_coeff is currenlty only suppported for piecewise")
 
         return self
@@ -538,7 +540,7 @@ def calc_lp_sparsity_loss_full_rank(
     return lp_sparsity_loss
 
 
-def calc_act_recon_loss(
+def calc_topk_param_attrib_loss(
     target_out: Float[Tensor, "batch n_instances d_model_out"] | Float[Tensor, "batch d_model_out"],
     target_params: dict[str, Tensor],
     subnetwork_params: dict[str, Tensor],
@@ -547,7 +549,35 @@ def calc_act_recon_loss(
     target_layer_post_acts: dict[str, Tensor],
     has_instance_dim: bool,
 ) -> Float[Tensor, ""] | Float[Tensor, " n_instances"]:
-    """Calculate the reconstruction loss on the layer activations."""
+    """Reconstruction loss between the parameters of the topk subnets between the SPD and target
+    models.
+
+    The loss is weighted by the gradient of the true model w.r.t the true activations at
+    the same position.
+
+    Formula:
+        d(f(x, theta)) / d(a(x, theta)) * (theta - spd_theta) * p(x, theta)
+    where
+    - a(x, theta) are the activations after the parameter matrix is applied in the target model,
+    - p(x, theta) are the activations before the parameter matrix is applied in the SPD model (
+        this is set to 1 if theta is a bias parameter)
+    - f(x, theta) is the output of the target model.
+
+    Args:
+        target_out: The output of the target model for the batch.
+        target_params: The parameters of the target model which are decomposable.
+        subnetwork_params: The parameters of the SPD model.
+        topk_mask: The topk mask for the SPD model on the batch.
+        target_layer_pre_acts: The activations before the parameter matrix is applied in the target
+            model.
+        target_layer_post_acts: The activations after the parameter matrix is applied in the target
+            model.
+        has_instance_dim: Whether the model has an n_instances dimension.
+
+    Returns:
+        The topk parameter attribution loss. Will have an n_instances dimension if the model has an
+            n_instances dimension.
+    """
     assert target_params.keys() == target_layer_pre_acts.keys() == target_layer_post_acts.keys()
     # Every parameter that we are decomposing must have an entry in target_params
     assert set(target_params.keys()) <= set(subnetwork_params.keys())
@@ -721,7 +751,7 @@ def optimize(
             topk_l2_loss,
             topk_recon_loss,
             topk_mask,
-            act_recon_loss,
+            topk_param_attrib_loss,
         ) = None, None, None, None, None
         if config.topk is not None:
             if config.ablation_attributions:
@@ -761,10 +791,10 @@ def optimize(
                 assert out_topk is not None
                 topk_recon_loss = calc_recon_mse(out_topk, labels, has_instance_dim)
 
-            if config.act_recon_coeff is not None:
+            if config.topk_param_attrib_coeff is not None:
                 assert pretrained_model is not None, "Need a pretrained model for act_recon loss"
                 assert layer_pre_acts is not None and layer_post_acts is not None
-                act_recon_loss = calc_act_recon_loss(
+                topk_param_attrib_loss = calc_topk_param_attrib_loss(
                     target_out=labels,
                     target_params=pretrained_model.all_decomposable_params(),
                     subnetwork_params=model.all_subnetwork_params(),
@@ -793,9 +823,9 @@ def optimize(
         if topk_l2_loss is not None:
             assert config.topk_l2_coeff is not None
             loss = loss + config.topk_l2_coeff * topk_l2_loss.mean()
-        if act_recon_loss is not None:
-            assert config.act_recon_coeff is not None
-            loss = loss + config.act_recon_coeff * act_recon_loss.mean()
+        if topk_param_attrib_loss is not None:
+            assert config.topk_param_attrib_coeff is not None
+            loss = loss + config.topk_param_attrib_coeff * topk_param_attrib_loss.mean()
 
         # Logging
         if step % config.print_freq == 0:
@@ -816,8 +846,8 @@ def optimize(
                 tqdm.write(f"Param match loss:{nl}{param_match_loss}")
             if orthog_loss is not None:
                 tqdm.write(f"Orthog loss:{nl}{orthog_loss}")
-            if act_recon_loss is not None:
-                tqdm.write(f"Act recon loss:{nl}{act_recon_loss}")
+            if topk_param_attrib_loss is not None:
+                tqdm.write(f"Topk param attrib loss:{nl}{topk_param_attrib_loss}")
             if config.wandb_project:
                 wandb.log(
                     {
@@ -840,8 +870,8 @@ def optimize(
                         "orthog_loss": orthog_loss.mean().item()
                         if orthog_loss is not None
                         else None,
-                        "act_recon_loss": act_recon_loss.mean().item()
-                        if act_recon_loss is not None
+                        "topk_param_attrib_loss": topk_param_attrib_loss.mean().item()
+                        if topk_param_attrib_loss is not None
                         else None,
                     },
                     step=step,
