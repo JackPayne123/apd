@@ -175,6 +175,7 @@ def get_model_and_dataloader(
         range_max=config.task_config.range_max,
         seed=config.seed,
         simple_bias=config.task_config.simple_bias,
+        decompose_bias=config.task_config.decompose_bias,
     ).to(device)
     piecewise_model.eval()
 
@@ -191,6 +192,7 @@ def get_model_and_dataloader(
             d_mlp=piecewise_model.d_mlp,
             n_layers=piecewise_model.n_layers,
             k=config.task_config.k,
+            init_scale=config.task_config.init_scale,
             decompose_bias=config.task_config.decompose_bias,
         )
         if config.task_config.handcoded_AB:
@@ -200,6 +202,7 @@ def get_model_and_dataloader(
                 d_mlp=piecewise_model.d_mlp,
                 n_layers=piecewise_model.n_layers,
                 k=config.task_config.k,
+                init_scale=config.task_config.init_scale,
                 input_biases=input_biases,
             )
             rank_one_spd_model.set_handcoded_spd_params(piecewise_model)
@@ -210,6 +213,7 @@ def get_model_and_dataloader(
             d_mlp=piecewise_model.d_mlp,
             n_layers=piecewise_model.n_layers,
             k=config.task_config.k,
+            init_scale=config.task_config.init_scale,
             input_biases=input_biases,
         )
         if config.task_config.handcoded_AB:
@@ -311,6 +315,8 @@ def main(
     param_map = {}
     for i in range(piecewise_model_spd.n_layers):
         param_map[f"mlp_{i}.input_layer.weight"] = f"mlp_{i}.input_layer.weight"
+        if config.full_rank and config.task_config.decompose_bias:
+            param_map[f"mlp_{i}.input_layer.bias"] = f"mlp_{i}.input_layer.bias"
         param_map[f"mlp_{i}.output_layer.weight"] = f"mlp_{i}.output_layer.weight"
 
     optimize(

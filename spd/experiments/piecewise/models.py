@@ -492,6 +492,7 @@ class PiecewiseFunctionTransformer(Model):
         suppression_size: float | None = None,
         seed: int | None = None,
         simple_bias: bool = False,
+        decompose_bias: bool = True,
     ) -> "PiecewiseFunctionTransformer":
         if seed is not None:
             # Create local random number generators
@@ -506,7 +507,9 @@ class PiecewiseFunctionTransformer(Model):
         neurons_per_function = neurons_per_function
         d_mlp = neurons_per_function * len(functions) // n_layers
         d_embed = n_inputs + 1
-        model = cls(n_inputs=n_inputs, d_mlp=d_mlp, n_layers=n_layers)
+        model = cls(
+            n_inputs=n_inputs, d_mlp=d_mlp, n_layers=n_layers, decompose_bias=decompose_bias
+        )
 
         assert len(functions) == d_embed - 2
         assert len(functions) == n_inputs - 1
@@ -597,6 +600,7 @@ class PiecewiseFunctionSPDTransformer(SPDModel):
         d_mlp: int,
         n_layers: int,
         k: int,
+        init_scale: float,
         input_biases: list[Float[Tensor, " d_mlp"]] | None = None,
         d_embed: int | None = None,
     ):
@@ -630,6 +634,7 @@ class PiecewiseFunctionSPDTransformer(SPDModel):
                     d_embed=self.d_embed,
                     d_mlp=d_mlp,
                     k=k,
+                    init_scale=init_scale,
                     input_bias=input_biases[i] if input_biases is not None else None,
                     input_component=self.input_component,  # type: ignore
                     output_component=self.output_component,  # type: ignore
@@ -839,6 +844,7 @@ class PiecewiseFunctionSPDTransformer(SPDModel):
             d_mlp=config["d_mlp"],
             n_layers=config["n_layers"],
             k=config["k"],
+            init_scale=config["init_scale"],
             d_embed=config["d_embed"],
         )
         model.load_state_dict(params)
@@ -895,6 +901,7 @@ class PiecewiseFunctionSPDFullRankTransformer(SPDFullRankModel):
         d_mlp: int,
         n_layers: int,
         k: int,
+        init_scale: float,
         d_embed: int | None = None,
         decompose_bias: bool = True,
     ):
@@ -919,7 +926,10 @@ class PiecewiseFunctionSPDFullRankTransformer(SPDFullRankModel):
         initialize_embeds(self.W_E, self.W_U, n_inputs, self.d_embed, self.superposition)
 
         self.mlps = nn.ModuleList(
-            [MLPComponentsFullRank(d_embed=self.d_embed, d_mlp=d_mlp, k=k) for _ in range(n_layers)]
+            [
+                MLPComponentsFullRank(d_embed=self.d_embed, d_mlp=d_mlp, k=k, init_scale=init_scale)
+                for _ in range(n_layers)
+            ]
         )
 
     def set_handcoded_spd_params(self, target_transformer: PiecewiseFunctionSPDTransformer):
@@ -1069,6 +1079,7 @@ class PiecewiseFunctionSPDFullRankTransformer(SPDFullRankModel):
             d_mlp=config["d_mlp"],
             n_layers=config["n_layers"],
             k=config["k"],
+            init_scale=config["init_scale"],
             d_embed=config["d_embed"],
         )
         model.load_state_dict(params)
