@@ -995,38 +995,6 @@ class PiecewiseFunctionSPDFullRankTransformer(SPDFullRankModel):
             # Check that the sum of the biases in each subnetwork is equal to the target bias
             assert torch.allclose(mlp.linear1.bias.data.sum(dim=0), target_bias)
 
-    def set_handcoded_spd_params_from_full(
-        self, target_transformer: PiecewiseFunctionTransformer, noise_scale: float = 0.1
-    ):
-        # For all params in target_transformer, set the corresponding params in self to the same
-        # value for all subnetworks
-        for i, mlp in enumerate(self.mlps):
-            # Repeat over the first dim and transpose (because target uses a linear layer which
-            # has transposed weights).
-            # Also add some gaussian noise
-            mlp.linear1.subnetwork_params.data[:, :, :] = (
-                einops.repeat(
-                    target_transformer.mlps[i].input_layer.weight,
-                    "d_model d_mlp -> k d_mlp d_model",
-                    k=self.k,
-                )
-                + torch.randn_like(mlp.linear1.subnetwork_params.data) * noise_scale
-            )
-            mlp.linear1.bias.data[:, :] = (
-                einops.repeat(
-                    target_transformer.mlps[i].input_layer.bias, "d_mlp -> k d_mlp", k=self.k
-                )
-                + torch.randn_like(mlp.linear1.bias.data) * noise_scale
-            )
-            mlp.linear2.subnetwork_params.data[:, :, :] = (
-                einops.repeat(
-                    target_transformer.mlps[i].output_layer.weight,
-                    "d_mlp d_model -> k d_model d_mlp",
-                    k=self.k,
-                )
-                + torch.randn_like(mlp.linear2.subnetwork_params.data) * noise_scale
-            )
-
     def set_subnet_to_target(self, target_transformer: PiecewiseFunctionTransformer):
         """Set the final subnetwork to the target transformer."""
         for i, mlp in enumerate(self.mlps):
