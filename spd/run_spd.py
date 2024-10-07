@@ -99,6 +99,7 @@ class Config(BaseModel):
     topk_l2_coeff: NonNegativeFloat | None = None
     lp_sparsity_coeff: NonNegativeFloat | None = None
     act_recon_coeff: NonNegativeFloat | None = None
+    distil: bool = False
     pnorm: PositiveFloat | None = None
     pnorm_end: PositiveFloat | None = None
     lr_schedule: Literal["linear", "constant", "cosine", "exponential"] = "constant"
@@ -401,6 +402,7 @@ def calc_orthog_loss_full_rank(
         | Float[Tensor, "n_instances k d_in d_out"]
     ],
     has_instance_dim: bool = False,
+    distil: bool = False,
 ) -> Float[Tensor, ""] | Float[Tensor, " n_instances"]:
     """Calculate the sum of the absolute values of inner products of different subnets.
 
@@ -410,6 +412,7 @@ def calc_orthog_loss_full_rank(
     Args:
         subnetwork_params: The parameters of the SPDModel.
         has_instance_dim: Whether the model has an n_instances dimension.
+        distil: Whether to include the final subnetwork index in the orthogonality loss.
 
     Returns:
         The orthogonality loss of shape [n_instances] if the model has an n_instances dimension,
@@ -420,16 +423,22 @@ def calc_orthog_loss_full_rank(
         # params: [n_instances, k, d_out] or [n_instances, k, d_in, d_out]
         assert all(param.ndim in (3, 4) for param in subnetwork_params), "Invalid number of dims"
         k = first_param.shape[1]
-        dot_prods = torch.zeros((first_param.shape[0], k, k), device=first_param.device)
+        final_k_dims = (k - 1, k - 1) if distil else (k, k)
+        dot_prods = torch.zeros((first_param.shape[0], *final_k_dims), device=first_param.device)
+        ein_str = "n_instances k1 ... d_out, n_instances k2 ... d_out -> n_instances k1 k2"
         ein_str = "n_instances k1 ... d_out, n_instances k2 ... d_out -> n_instances k1 k2"
     else:
         # params: [k, d_out] or [k, d_in, d_out]
         assert all(param.ndim in (2, 3) for param in subnetwork_params), "Invalid number of dims"
         k = first_param.shape[0]
-        dot_prods = torch.zeros((k, k), device=first_param.device)
+        final_k_dims = (k - 1, k - 1) if distil else (k, k)
+        dot_prods = torch.zeros(final_k_dims, device=first_param.device)
         ein_str = "k1 ... d_out, k2 ... d_out -> k1 k2"
 
     for subnet in subnetwork_params:
+        if distil:
+            # Remove the final subnetwork index from the orthogonality loss
+            subnet = subnet[:-1]
         dot_prods += einops.einsum(subnet, subnet, ein_str)
 
     # Multiply the k l diagonal by 0
@@ -676,7 +685,9 @@ def optimize(
         orthog_loss = None
         if config.orthog_coeff is not None:
             assert config.full_rank, "Orthogonality loss only works in full rank models"
-            orthog_loss = calc_orthog_loss_full_rank(list(model.all_subnetwork_params().values()))
+            orthog_loss = calc_orthog_loss_full_rank(
+                list(model.all_subnetwork_params().values()), distil=config.distil
+            )
 
         param_match_loss = None
         if config.param_match_coeff is not None:
@@ -726,7 +737,7 @@ def optimize(
                     )
 
             topk_mask = calc_topk_mask(
-                attribution_scores, config.topk, batch_topk=config.batch_topk
+                attribution_scores, config.topk, batch_topk=config.batch_topk, distil=config.distil
             )
 
             # Do a forward pass with only the topk subnetworks
