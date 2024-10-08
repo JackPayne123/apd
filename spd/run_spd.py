@@ -431,7 +431,6 @@ def calc_orthog_loss_full_rank(
         final_k_dims = (k - 1, k - 1) if distil else (k, k)
         dot_prods = torch.zeros((first_param.shape[0], *final_k_dims), device=first_param.device)
         ein_str = "n_instances k1 ... d_out, n_instances k2 ... d_out -> n_instances k1 k2"
-        ein_str = "n_instances k1 ... d_out, n_instances k2 ... d_out -> n_instances k1 k2"
     else:
         # params: [k, d_out] or [k, d_in, d_out]
         assert all(param.ndim in (2, 3) for param in subnetwork_params), "Invalid number of dims"
@@ -443,7 +442,7 @@ def calc_orthog_loss_full_rank(
     for subnet in subnetwork_params:
         if distil:
             # Remove the final subnetwork index from the orthogonality loss
-            subnet = subnet[:-1]
+            subnet = subnet[:, :-1] if has_instance_dim else subnet[:-1]
         dot_prods += einops.einsum(subnet, subnet, ein_str)
 
     # Multiply the k l diagonal by 0
