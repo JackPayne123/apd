@@ -201,6 +201,9 @@ class Config(BaseModel):
         ):
             raise ValueError("act_recon_coeff is currenlty only suppported for piecewise")
 
+        if self.distil and not isinstance(self.task_config, PiecewiseConfig):
+            raise ValueError("distil is currently only supported for piecewise")
+
         return self
 
 
