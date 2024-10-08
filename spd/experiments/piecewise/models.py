@@ -378,7 +378,8 @@ class ControlledResNet(nn.Module):
 
         assert x.shape[1] == self.d_model
         for i in range(self.n_layers):
-            x = x + self.mlps[i](x)[0]
+            mlp_out, _, _ = self.mlps[i](x)
+            x = x + mlp_out
         return x
 
     def partial_forward(
@@ -603,7 +604,7 @@ class PiecewiseFunctionTransformer(Model):
         labels = torch.einsum("bo,bo->b", control_bits_expanded, function_outputs)
 
         axs.plot(x, labels, label="f(x)")
-        outputs = self.forward(inputs_with_control)[0]
+        outputs, _, _ = self.forward(inputs_with_control)
         axs.plot(x, outputs[:, 0].detach().numpy(), label="NN(x)")
         axs.legend()
         axs.set_title("Piecewise Linear Approximation of function")

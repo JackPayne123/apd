@@ -303,7 +303,7 @@ def main(
     for i, (batch, labels) in enumerate(test_dataloader):
         if i >= n_batches:
             break
-        hardcoded_out = piecewise_model(batch.to(device))[0]
+        hardcoded_out, _, _ = piecewise_model(batch.to(device))
         loss += calc_recon_mse(hardcoded_out, labels.to(device))
     loss /= n_batches
     logger.info(f"Loss of hardcoded model on 5 batches: {loss}")
