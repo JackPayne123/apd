@@ -66,6 +66,7 @@ def piecewise_plot_results_fn(
             start=config.task_config.range_min,
             stop=config.task_config.range_max,
             print_info=False,
+            distil=config.distil,
         )
         fig_dict.update(fig_dict_functions)
         fig_dict_network = plot_piecewise_network(model)

@@ -769,9 +769,15 @@ def optimize(
                         out=out, inner_acts_vals=list(inner_acts.values())
                     )
 
-            topk_mask = calc_topk_mask(
-                attribution_scores, config.topk, batch_topk=config.batch_topk, distil=config.distil
-            )
+            # We always assume the final subnetwork is the one we want to distil
+            topk_attrs = attribution_scores[..., :-1] if config.distil else attribution_scores
+            topk_mask = calc_topk_mask(topk_attrs, config.topk, batch_topk=config.batch_topk)
+            if config.distil:
+                # Add back the final subnetwork index to the topk mask and set it to True
+                last_subnet_mask = torch.ones(
+                    (*topk_mask.shape[:-1], 1), dtype=torch.bool, device=device
+                )
+                topk_mask = torch.cat((topk_mask, last_subnet_mask), dim=-1)
 
             # Do a forward pass with only the topk subnetworks
             out_topk, _, inner_acts_topk = model.forward_topk(batch, topk_mask=topk_mask)

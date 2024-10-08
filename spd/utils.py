@@ -451,7 +451,6 @@ def calc_topk_mask(
     attribution_scores: Float[Tensor, "batch ... k"],
     topk: float,
     batch_topk: bool,
-    distil: bool = False,
 ) -> Float[Tensor, "batch ... k"]:
     """Calculate the top-k mask.
 
@@ -461,7 +460,6 @@ def calc_topk_mask(
             by the batch size to get the number of top-k elements over the whole batch.
         batch_topk: If True, the top-k mask is calculated over the concatenated batch and k
             dimensions.
-        distil: If True, always select the final subnetwork and ignore it when calculating topk.
 
     Returns:
         The top-k mask.
@@ -469,27 +467,15 @@ def calc_topk_mask(
     batch_size = attribution_scores.shape[0]
     topk = int(topk * batch_size) if batch_topk else int(topk)
 
-    topk_attribution_scores = attribution_scores
-    if distil:
-        # Take a slice of attribution scores to ignore the final subnetwork
-        topk_attribution_scores = attribution_scores[..., :-1]
-
     if batch_topk:
-        topk_attribution_scores = einops.rearrange(topk_attribution_scores, "b ... k -> ... (b k)")
+        attribution_scores = einops.rearrange(attribution_scores, "b ... k -> ... (b k)")
 
-    topk_indices = topk_attribution_scores.topk(topk, dim=-1).indices
-    topk_mask = torch.zeros_like(topk_attribution_scores, dtype=torch.bool)
+    topk_indices = attribution_scores.topk(topk, dim=-1).indices
+    topk_mask = torch.zeros_like(attribution_scores, dtype=torch.bool)
     topk_mask.scatter_(dim=-1, index=topk_indices, value=True)
 
     if batch_topk:
         topk_mask = einops.rearrange(topk_mask, "... (b k) -> b ... k", b=batch_size)
-
-    if distil:
-        # Add back the extra subnetwork index and set it to True
-        extra_subnetwork_mask = torch.ones(
-            (*topk_mask.shape[:-1], 1), dtype=torch.bool, device=topk_mask.device
-        )
-        topk_mask = torch.cat((topk_mask, extra_subnetwork_mask), dim=-1)
 
     return topk_mask
 
