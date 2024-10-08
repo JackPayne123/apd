@@ -219,6 +219,13 @@ def get_model_and_dataloader(
             piecewise_model_spd.set_handcoded_spd_params(rank_one_spd_model)
         if config.distil_from_target:
             piecewise_model_spd.set_subnet_to_target(piecewise_model)
+
+        for i in range(piecewise_model_spd.n_layers):
+            # Assert output bias is 0
+            assert torch.allclose(
+                piecewise_model_spd.mlps[i].linear2.bias,
+                torch.zeros_like(piecewise_model_spd.mlps[i].linear2.bias),
+            )
     else:
         piecewise_model_spd = PiecewiseFunctionSPDTransformer(
             n_inputs=piecewise_model.n_inputs,
@@ -240,11 +247,6 @@ def get_model_and_dataloader(
             piecewise_model_spd.mlps[i].linear1.bias.requires_grad_(False)
         elif not config.full_rank:
             piecewise_model_spd.mlps[i].bias1.requires_grad_(False)
-        # Assert that the output bias is 0
-        assert piecewise_model_spd.mlps[i].linear2.bias is None or torch.allclose(
-            piecewise_model_spd.mlps[i].linear2.bias,
-            torch.zeros_like(piecewise_model_spd.mlps[i].linear2.bias),
-        )
 
     piecewise_model_spd.W_E.requires_grad_(False)
     piecewise_model_spd.W_U.requires_grad_(False)
