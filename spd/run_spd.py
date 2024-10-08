@@ -99,7 +99,7 @@ class Config(BaseModel):
     topk_l2_coeff: NonNegativeFloat | None = None
     lp_sparsity_coeff: NonNegativeFloat | None = None
     topk_param_attrib_coeff: NonNegativeFloat | None = None
-    distil: bool = False
+    distil_from_target: bool = False
     pnorm: PositiveFloat | None = None
     pnorm_end: PositiveFloat | None = None
     lr_schedule: Literal["linear", "constant", "cosine", "exponential"] = "constant"
@@ -201,8 +201,8 @@ class Config(BaseModel):
         ):
             raise ValueError("act_recon_coeff is currenlty only suppported for piecewise")
 
-        if self.distil and not isinstance(self.task_config, PiecewiseConfig):
-            raise ValueError("distil is currently only supported for piecewise")
+        if self.distil_from_target and not isinstance(self.task_config, PiecewiseConfig):
+            raise ValueError("distil_from_target is currently only supported for piecewise")
 
         return self
 
@@ -407,7 +407,7 @@ def calc_orthog_loss_full_rank(
         | Float[Tensor, "n_instances k d_in d_out"]
     ],
     has_instance_dim: bool = False,
-    distil: bool = False,
+    distil_from_target: bool = False,
 ) -> Float[Tensor, ""] | Float[Tensor, " n_instances"]:
     """Calculate the sum of the absolute values of inner products of different subnets.
 
@@ -417,7 +417,7 @@ def calc_orthog_loss_full_rank(
     Args:
         subnetwork_params: The parameters of the SPDModel.
         has_instance_dim: Whether the model has an n_instances dimension.
-        distil: Whether to include the final subnetwork index in the orthogonality loss.
+        distil_from_target: Whether to include the final subnetwork index in the orthogonality loss.
 
     Returns:
         The orthogonality loss of shape [n_instances] if the model has an n_instances dimension,
@@ -428,19 +428,19 @@ def calc_orthog_loss_full_rank(
         # params: [n_instances, k, d_out] or [n_instances, k, d_in, d_out]
         assert all(param.ndim in (3, 4) for param in subnetwork_params), "Invalid number of dims"
         k = first_param.shape[1]
-        final_k_dims = (k - 1, k - 1) if distil else (k, k)
+        final_k_dims = (k - 1, k - 1) if distil_from_target else (k, k)
         dot_prods = torch.zeros((first_param.shape[0], *final_k_dims), device=first_param.device)
         ein_str = "n_instances k1 ... d_out, n_instances k2 ... d_out -> n_instances k1 k2"
     else:
         # params: [k, d_out] or [k, d_in, d_out]
         assert all(param.ndim in (2, 3) for param in subnetwork_params), "Invalid number of dims"
         k = first_param.shape[0]
-        final_k_dims = (k - 1, k - 1) if distil else (k, k)
+        final_k_dims = (k - 1, k - 1) if distil_from_target else (k, k)
         dot_prods = torch.zeros(final_k_dims, device=first_param.device)
         ein_str = "k1 ... d_out, k2 ... d_out -> k1 k2"
 
     for subnet in subnetwork_params:
-        if distil:
+        if distil_from_target:
             # Remove the final subnetwork index from the orthogonality loss
             subnet = subnet[:, :-1] if has_instance_dim else subnet[:-1]
         dot_prods += einops.einsum(subnet, subnet, ein_str)
@@ -718,7 +718,8 @@ def optimize(
         if config.orthog_coeff is not None:
             assert config.full_rank, "Orthogonality loss only works in full rank models"
             orthog_loss = calc_orthog_loss_full_rank(
-                list(model.all_subnetwork_params().values()), distil=config.distil
+                list(model.all_subnetwork_params().values()),
+                distil_from_target=config.distil_from_target,
             )
 
         param_match_loss = None
@@ -769,9 +770,11 @@ def optimize(
                     )
 
             # We always assume the final subnetwork is the one we want to distil
-            topk_attrs = attribution_scores[..., :-1] if config.distil else attribution_scores
+            topk_attrs = (
+                attribution_scores[..., :-1] if config.distil_from_target else attribution_scores
+            )
             topk_mask = calc_topk_mask(topk_attrs, config.topk, batch_topk=config.batch_topk)
-            if config.distil:
+            if config.distil_from_target:
                 # Add back the final subnetwork index to the topk mask and set it to True
                 last_subnet_mask = torch.ones(
                     (*topk_mask.shape[:-1], 1), dtype=torch.bool, device=device

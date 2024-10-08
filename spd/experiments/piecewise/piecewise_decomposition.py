@@ -66,7 +66,7 @@ def piecewise_plot_results_fn(
             start=config.task_config.range_min,
             stop=config.task_config.range_max,
             print_info=False,
-            distil=config.distil,
+            distil_from_target=config.distil_from_target,
         )
         fig_dict.update(fig_dict_functions)
         fig_dict_network = plot_piecewise_network(model)
@@ -210,7 +210,7 @@ def get_model_and_dataloader(
             )
             rank_one_spd_model.set_handcoded_spd_params(piecewise_model)
             piecewise_model_spd.set_handcoded_spd_params(rank_one_spd_model)
-        if config.distil:
+        if config.distil_from_target:
             piecewise_model_spd.set_subnet_to_target(piecewise_model)
     else:
         piecewise_model_spd = PiecewiseFunctionSPDTransformer(
