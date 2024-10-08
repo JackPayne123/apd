@@ -18,12 +18,12 @@ A_vocab_size = 100  # A ranges from 0 to 99
 B_vocab_size = 5  # B ranges from 0 to 4
 embedding_dim = 20
 hidden_dim = 50
-batch_size = 1024
 epochs = 200
 learning_rate = 0.1
 
 
 dataset = BigramDataset(A_vocab_size, B_vocab_size)
+batch_size = len(dataset)
 dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
 model = BigramModel(dataset.n_A, dataset.n_B, embedding_dim, hidden_dim)
 

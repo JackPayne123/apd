@@ -36,9 +36,6 @@ class BigramDataset(Dataset[tuple[Int[Tensor, "2"], Int[Tensor, ""]]]):
     def __getitem__(self, idx: int):
         return self.data[idx], self.labels[idx]
 
-    def get_vocab_sizes(self) -> tuple[int, int, int]:
-        return self.n_A, self.n_B, self.n_C
-
 
 # Define the neural network
 class BigramModel(nn.Module):
@@ -62,7 +59,7 @@ class BigramModel(nn.Module):
         x = einsum(
             self.W_E,
             inputs.float(),
-            "n_C d_embed, batch_size n_C -> batch_size d_embed",
+            "n_C d_embed, ... n_C -> ... d_embed",
         )
         x = self.fc1(x)
         x = self.activation(x)
