@@ -250,9 +250,9 @@ class BatchedDataLoader(DataLoader[Q], Generic[Q]):
 
 
 def calc_attributions_rank_one(
-    out: Float[Tensor, "... d_out"],
-    inner_acts_vals: list[Float[Tensor, "... k"]],
-) -> Float[Tensor, "... k"]:
+    out: Float[Tensor, "batch d_out"] | Float[Tensor, "batch n_instances d_out"],
+    inner_acts_vals: list[Float[Tensor, "batch k"] | Float[Tensor, "batch n_instances k"]],
+) -> Float[Tensor, "batch k"] | Float[Tensor, "batch n_instances k"]:
     """Calculate the sum of the (squared) attributions from each output dimension.
 
     An attribution is the element-wise product of the gradient of the output dimension w.r.t. the
@@ -272,12 +272,16 @@ def calc_attributions_rank_one(
     Returns:
         The sum of the (squared) attributions from each output dimension.
     """
-    attribution_scores: Float[Tensor, "... k"] = torch.zeros_like(inner_acts_vals[0])
+    attribution_scores: Float[Tensor, " k"] | Float[Tensor, "n_instances k"] = torch.zeros_like(
+        inner_acts_vals[0]
+    )
     for feature_idx in range(out.shape[-1]):
-        feature_attributions: Float[Tensor, "... k"] = torch.zeros_like(inner_acts_vals[0])
-        feature_grads: tuple[Float[Tensor, "... k"], ...] = torch.autograd.grad(
-            out[..., feature_idx].sum(), inner_acts_vals, retain_graph=True
+        feature_attributions: Float[Tensor, " k"] | Float[Tensor, "n_instances k"] = (
+            torch.zeros_like(inner_acts_vals[0])
         )
+        feature_grads: tuple[
+            Float[Tensor, "batch k"] | Float[Tensor, "batch n_instances k"], ...
+        ] = torch.autograd.grad(out[..., feature_idx].sum(), inner_acts_vals, retain_graph=True)
         assert len(feature_grads) == len(inner_acts_vals)
         for param_matrix_idx in range(len(inner_acts_vals)):
             feature_attributions += (

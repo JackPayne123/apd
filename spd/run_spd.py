@@ -459,7 +459,7 @@ def calc_lp_sparsity_loss_rank_one(
         layer_acts: Activations at the output of each layer (i.e. after both A and B transformations).
         inner_acts: The inner acts of the model (i.e. the set of subnetwork activations after the A
             transformation for each parameter matrix).
-        B_params: The output parameters of each layer.
+        B_params: The B matrix of each rank one layer.
         step_pnorm: The pnorm at the current step.
 
     Returns:
