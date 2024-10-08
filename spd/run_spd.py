@@ -540,19 +540,21 @@ def calc_topk_param_attrib_loss(
     target_layer_post_acts: dict[str, Tensor],
     has_instance_dim: bool,
 ) -> Float[Tensor, ""] | Float[Tensor, " n_instances"]:
-    """Reconstruction loss between the parameters of the topk subnets between the SPD and target
-    models.
+    """Attribution patching of original params to sum of active subnetwork params
 
-    The loss is weighted by the gradient of the true model w.r.t the true activations at
-    the same position.
+    This function is (an efficient implementation of) dout/dW_target * (W_spd - W_target) where
+    W_spd is the sum of currently-active (topk) subnetworks. The actual implementation is based on
+    activations to simplify (and maybe speed up) calculations. This is because activations
+    (i) have a batch dimension which makes autograd simpler and (ii) only have one not two embedding
+    dimensions dimensions.
 
     Formula:
-        d(f(x, theta)) / d(a(x, theta)) * (theta - spd_theta) * p(x, theta)
+        d(f(x, W)) / d(a(x, W)) * (W - spd_W) * p(x, W)
     where
-    - a(x, theta) are the activations after the parameter matrix is applied in the target model,
-    - p(x, theta) are the activations before the parameter matrix is applied in the SPD model (
-        this is set to 1 if theta is a bias parameter)
-    - f(x, theta) is the output of the target model.
+    - a(x, W) are the activations after the parameter matrix is applied in the target model,
+    - p(x, W) are the activations before the parameter matrix is applied in the SPD model (
+        this is set to 1 if W is a bias parameter)
+    - f(x, W) is the output of the target model.
 
     Args:
         target_out: The output of the target model for the batch.
@@ -581,35 +583,42 @@ def calc_topk_param_attrib_loss(
             target_out[..., out_idx].sum(), list(target_layer_post_acts.values()), retain_graph=True
         )
         loss_out_idx = torch.tensor(0.0, device=device)
-        for i, k in enumerate(subnetwork_params):
+        for i, param_name in enumerate(subnetwork_params):
             # Sum over the subnetwork dim
             ein_str = "k i ..., b i k -> b i ..." if has_instance_dim else "k ..., b k -> b ..."
-            topk_subnet = einops.einsum(
-                subnetwork_params[k], topk_mask.to(dtype=subnetwork_params[k].dtype), ein_str
+            topk_subnet_sum = einops.einsum(
+                subnetwork_params[param_name],
+                topk_mask.to(dtype=subnetwork_params[param_name].dtype),
+                ein_str,
             )
-            param_diff = target_params[k] - topk_subnet
+            param_diff = target_params[param_name] - topk_subnet_sum
 
-            if "bias" in k:
+            if "bias" in param_name:
                 # Derivative @ param_diff
-                ein_str = "b i d_out, b i d_out -> i" if has_instance_dim else "b d_out, b d_out ->"
-                loss_k = einops.einsum(dout_d_post_acts[i].detach(), param_diff, ein_str)
+                ein_str = (
+                    "b i d_out, b i d_out -> b i" if has_instance_dim else "b d_out, b d_out -> b"
+                )
+                param_loss = einops.einsum(dout_d_post_acts[i].detach(), param_diff, ein_str)
             else:
                 # Derivative @ param_diff @ pre_acts
                 ein_str = (
-                    "b i d_out, b i d_in d_out, b i d_in -> i"
+                    "b i d_out, b i d_in d_out, b i d_in -> b i"
                     if has_instance_dim
-                    else "b d_out, b d_in d_out, b d_in ->"
+                    else "b d_out, b d_in d_out, b d_in -> b"
                 )
-                loss_k = einops.einsum(
-                    dout_d_post_acts[i].detach(), param_diff, target_layer_pre_acts[k], ein_str
+                param_loss = einops.einsum(
+                    dout_d_post_acts[i].detach(),
+                    param_diff,
+                    target_layer_pre_acts[param_name],
+                    ein_str,
                 )
 
-            # Accumulate loss (normalized by number of params)
-            loss_out_idx = loss_out_idx + loss_k / (target_params[k].numel())
+            loss_out_idx = loss_out_idx + param_loss
 
-        loss = loss + (loss_out_idx / len(subnetwork_params)) ** 2
-    loss = (loss / target_out.shape[-1] + 1e-16).sqrt()
-    return loss
+        loss = loss + loss_out_idx**2
+    loss = (loss / target_out.shape[-1] + 1e-16).sum(dim=0)  # Sum over the batch dim
+    total_n_params = sum(p.numel() for p in target_params.values())
+    return loss / total_n_params
 
 
 def optimize(
