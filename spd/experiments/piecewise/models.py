@@ -227,6 +227,8 @@ class ControlledPiecewiseLinear(nn.Module):
         self.output_layer.weight.data = self.output_layer.weight.data * output_scale_factor
         self.output_layer.bias.data = self.output_layer.bias.data * output_scale_factor
 
+        self.input_scale_factor = input_scale_factor
+
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         control_bits = x[:, 1:]
         input_value = x[:, 0].unsqueeze(1)
@@ -365,6 +367,7 @@ class ControlledResNet(nn.Module):
             self.mlps[i].output_layer.weight.data[-1] = output_weights_summed[
                 self.neuron_permutations[i]
             ]
+        self.input_scale_factor = self.controlled_piecewise_linear.input_scale_factor
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         # concatenate x and control bits. The first residual stream dimension is x, and the last
@@ -714,7 +717,7 @@ class PiecewiseFunctionSPDTransformer(SPDModel):
             mlp.linear2.B.data[:, :] = 0.0
 
         simple_bias = target_transformer.controlled_resnet.simple_bias
-
+        input_scale_factor = target_transformer.controlled_resnet.input_scale_factor
         correct_k = self.d_embed - 1 if simple_bias else self.n_inputs - 1
         assert correct_k <= k, f"Require k >= {correct_k}, got k = {k}"
 
@@ -724,11 +727,14 @@ class PiecewiseFunctionSPDTransformer(SPDModel):
                 assert self.n_layers == 1, "Only implemented for n_layers = 1"
                 self.mlps[i].linear1.A.data[:correct_k, :correct_k] = torch.eye(correct_k)
                 self.mlps[i].linear1.A.data[:, correct_k:] = 1.0  # avoid division by zero
-                self.mlps[i].linear1.B.data[:correct_k, :] = target_transformer.mlps[
-                    i
-                ].input_layer.weight.T[:correct_k, :]
+                self.mlps[i].linear1.B.data[:correct_k, :] = (
+                    target_transformer.mlps[i].input_layer.weight.T[:correct_k, :]
+                    / input_scale_factor
+                )
                 # Output layer
-                original_Wout_last_col = target_transformer.mlps[i].output_layer.weight.T[:, -1]
+                original_Wout_last_col = (
+                    target_transformer.mlps[i].output_layer.weight.T[:, -1] * input_scale_factor
+                )
                 norm = torch.norm(original_Wout_last_col, dim=0)
                 self.mlps[i].linear2.A.data[:, 0] = original_Wout_last_col / norm
                 self.mlps[i].linear2.A.data[:, 1:] = 1.0  # avoid division by zero
@@ -745,6 +751,7 @@ class PiecewiseFunctionSPDTransformer(SPDModel):
                 self.mlps[i].linear1.B.data[:correct_k, :] = (
                     target_transformer.mlps[i].input_layer.weight.T[1 : correct_k + 1, :]
                     / suppression_size
+                    / input_scale_factor
                 )
                 # assert that every entry in B is 0 or 1
                 assert torch.all(
@@ -756,9 +763,10 @@ class PiecewiseFunctionSPDTransformer(SPDModel):
                 neuron_indices = target_transformer.controlled_resnet.neuron_indices[i]
                 for j, idx_list in enumerate(neuron_indices):
                     # current_device = self.mlps[i].linear2.A.device
-                    self.mlps[i].linear2.A.data[idx_list, j] = target_transformer.mlps[
-                        i
-                    ].output_layer.weight.data.T[idx_list, -1]
+                    self.mlps[i].linear2.A.data[idx_list, j] = (
+                        target_transformer.mlps[i].output_layer.weight.data.T[idx_list, -1]
+                        * input_scale_factor
+                    )
                 self.mlps[i].linear2.A.data[:, correct_k:] = 1.0  # avoid division by zero
                 all_norms = torch.norm(self.mlps[i].linear2.A, dim=0, keepdim=True)
                 self.mlps[i].linear2.A.data /= all_norms
@@ -769,14 +777,25 @@ class PiecewiseFunctionSPDTransformer(SPDModel):
             assert torch.allclose(
                 target_transformer.mlps[i].output_layer.bias, torch.tensor(0.0)
             ), "output layer bias should be 0"
-            if not torch.allclose(self.mlps[i].bias1, target_transformer.mlps[i].input_layer.bias):
+            if not torch.allclose(
+                self.mlps[i].bias1, target_transformer.mlps[i].input_layer.bias / input_scale_factor
+            ):
                 logger.warning("Input biases are not the same. Copying over from target model.")
-                self.mlps[i].bias1.data[:] = target_transformer.mlps[i].input_layer.bias
+                self.mlps[i].bias1.data[:] = (
+                    target_transformer.mlps[i].input_layer.bias / input_scale_factor
+                )
 
             AB_in = torch.einsum("ij,jk->ki", self.mlps[i].linear1.A, self.mlps[i].linear1.B)
-            assert torch.allclose(AB_in, target_transformer.mlps[i].input_layer.weight)
+            assert torch.allclose(
+                AB_in, target_transformer.mlps[i].input_layer.weight / input_scale_factor
+            )
             AB_out = torch.einsum("ij,jk->ki", self.mlps[i].linear2.A, self.mlps[i].linear2.B)
-            assert torch.allclose(AB_out, target_transformer.mlps[i].output_layer.weight)
+            assert torch.allclose(
+                AB_out, target_transformer.mlps[i].output_layer.weight * input_scale_factor
+            )
+
+            self.mlps[i].linear1.A.data *= input_scale_factor
+            self.mlps[i].linear2.B.data /= input_scale_factor
 
     def forward(
         self, x: Float[Tensor, "... inputs"]

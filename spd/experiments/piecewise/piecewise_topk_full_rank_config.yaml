@@ -13,8 +13,8 @@ lp_sparsity_coeff: null
 lr: 0.001
 batch_size: 2048
 steps: 50_000
-print_freq: 500
-image_freq: 50_000
+print_freq: 50
+image_freq: 50
 slow_images: true
 save_freq: 50_000
 lr_warmup_pct: 0.004
@@ -29,4 +29,4 @@ task_config:
   range_max: 5
   k: 10
   simple_bias: false
-  handcoded_AB: false
+  handcoded_AB: true
