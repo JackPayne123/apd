@@ -781,7 +781,7 @@ def optimize(
                 topk_recon_loss = calc_recon_mse(out_topk, labels, has_instance_dim)
 
             if config.topk_param_attrib_coeff is not None:
-                assert pretrained_model is not None, "Need a pretrained model for act_recon loss"
+                assert pretrained_model is not None, "Need target model for topk_param_attrib_loss"
                 assert layer_pre_acts is not None and layer_post_acts is not None
                 topk_param_attrib_loss = calc_topk_param_attrib_loss(
                     target_out=labels,
