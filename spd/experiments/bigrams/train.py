@@ -1,15 +1,20 @@
+import matplotlib.pyplot as plt
 import numpy as np
+import plotly.graph_objects as go
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from torch.utils.data import DataLoader
+from jaxtyping import Float, Int
+from sklearn.decomposition import PCA
+from torch import Tensor
+from torch.utils.data import DataLoader, Dataset
 from tqdm import tqdm
 
 from spd.experiments.bigrams.model import BigramDataset, BigramModel
 
 # Set random seed for reproducibility
-torch.manual_seed(0)
-np.random.seed(0)
+# torch.manual_seed(0)
+# np.random.seed(0)
 
 # Parameters
 A_vocab_size = 100  # A ranges from 0 to 99
@@ -17,8 +22,8 @@ B_vocab_size = 5  # B ranges from 0 to 4
 embedding_dim = 20
 hidden_dim = 50
 batch_size = 1024
-epochs = 2000
-learning_rate = 0.005
+epochs = 200
+learning_rate = 0.1
 
 
 dataset = BigramDataset(A_vocab_size, B_vocab_size)
@@ -33,9 +38,11 @@ optimizer = optim.Adam(model.parameters(), lr=learning_rate)
 for epoch in tqdm(range(1, epochs + 1)):
     total_loss = 0
     for batch_inputs, batch_targets in dataloader:
+        # print(batch_inputs[:3])
+        # print(batch_targets[0][:499])
         optimizer.zero_grad()
         outputs = model(batch_inputs)
-        loss = criterion(outputs, batch_targets)
+        loss = criterion(outputs, batch_targets.float())
         loss.backward()
         optimizer.step()
         total_loss += loss.item()
@@ -46,87 +53,88 @@ for epoch in tqdm(range(1, epochs + 1)):
 # Save model
 torch.save(model.state_dict(), "bigram_model.pt")
 
-# %% Load model
+# %%
+
+# Load model
 new_model = BigramModel(dataset.n_A, dataset.n_B, embedding_dim, hidden_dim)
 new_model.load_state_dict(torch.load("bigram_model.pt"))
-# Evaluate model
-batch_size = 12
+batch_size = 16
 dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
 for batch_inputs, batch_targets in dataloader:
     outputs = new_model(batch_inputs)
-    loss = criterion(outputs, batch_targets)
+    loss = criterion(outputs, batch_targets.float())
     print(loss.item())
 
 # %%
 
-# # Visualize embeddings coloured by B
-# # Get embeddings + colors for all 500 inputs
-# embeddings = []
-# As = []
-# Bs = []
-# for a in range(A_vocab_size):
-#     for b in range(B_vocab_size):
-#         x = model.embed(torch.tensor([[a, b]])).detach().numpy()
-#         embeddings.append(x[0])
-#         As.append(a)
-#         Bs.append(b)
-# embeddings = np.array(embeddings)
-# As = np.array(As)
-# Bs = np.array(Bs)
-# # PCA
-# pca = PCA(n_components=10)
-# embeddings_3d = pca.fit_transform(embeddings)
+# Visualize embeddings coloured by B
+# Get embeddings + colors for all 500 inputs
+embeddings = []
+As = []
+Bs = []
+for a in range(A_vocab_size):
+    for b in range(B_vocab_size):
+        x = model.W_E_A[a] + model.W_E_B[b]
+        embeddings.append(x.detach().cpu())
+        As.append(a)
+        Bs.append(b)
+embeddings = np.array(embeddings)
+As = np.array(As)
+Bs = np.array(Bs)
+# PCA
+pca = PCA(n_components=10)
+embeddings_3d = pca.fit_transform(embeddings)
 
-# # Figure for Bs coloring
-# fig_b = go.Figure(
-#     data=[
-#         go.Scatter3d(
-#             x=embeddings_3d[:, 0],
-#             y=embeddings_3d[:, 1],
-#             z=embeddings_3d[:, 2],
-#             mode="markers",
-#             marker=dict(size=5, color=Bs, colorscale="Viridis", opacity=0.8),
-#         )
-#     ]
-# )
+# Figure for Bs coloring
+fig_b = go.Figure(
+    data=[
+        go.Scatter3d(
+            x=embeddings_3d[:, 0],
+            y=embeddings_3d[:, 1],
+            z=embeddings_3d[:, 2],
+            mode="markers",
+            marker=dict(size=5, color=Bs, colorscale="Viridis", opacity=0.8),
+        )
+    ]
+)
 
-# fig_b.update_layout(
-#     title="3D Embedding Visualization (Colored by B)",
-#     scene=dict(
-#         xaxis_title="Embedding Dimension 1",
-#         yaxis_title="Embedding Dimension 2",
-#         zaxis_title="Embedding Dimension 3",
-#     ),
-#     width=900,
-#     height=700,
-# )
+fig_b.update_layout(
+    title="3D Embedding Visualization (Colored by B)",
+    scene=dict(
+        xaxis_title="Embedding Dimension 1",
+        yaxis_title="Embedding Dimension 2",
+        zaxis_title="Embedding Dimension 3",
+    ),
+    width=900,
+    height=700,
+)
 
-# fig_b.show()
+fig_b.show()
 
-# # Figure for As coloring
-# fig_a = go.Figure(
-#     data=[
-#         go.Scatter3d(
-#             x=embeddings_3d[:, 0 + 5],
-#             y=embeddings_3d[:, 1 + 5],
-#             z=embeddings_3d[:, 2 + 5],
-#             mode="markers",
-#             marker=dict(size=5, color=As, colorscale="Plasma", opacity=0.8),
-#         )
-#     ]
-# )
+# Figure for As coloring
+fig_a = go.Figure(
+    data=[
+        go.Scatter3d(
+            x=embeddings_3d[:, 0 + 5],
+            y=embeddings_3d[:, 1 + 5],
+            z=embeddings_3d[:, 2 + 5],
+            mode="markers",
+            marker=dict(size=5, color=As, colorscale="Plasma", opacity=0.8),
+        )
+    ]
+)
 
-# fig_a.update_layout(
-#     title="3D Embedding Visualization (Colored by A)",
-#     scene=dict(
-#         xaxis_title="Embedding Dimension 1",
-#         yaxis_title="Embedding Dimension 2",
-#         zaxis_title="Embedding Dimension 3",
-#     ),
-#     width=900,
-#     height=700,
-# )
+fig_a.update_layout(
+    title="3D Embedding Visualization (Colored by A)",
+    scene=dict(
+        xaxis_title="Embedding Dimension 1",
+        yaxis_title="Embedding Dimension 2",
+        zaxis_title="Embedding Dimension 3",
+    ),
+    width=900,
+    height=700,
+)
 
-# fig_a.show()
+fig_a.show()
 
 # %%
