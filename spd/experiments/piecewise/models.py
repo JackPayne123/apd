@@ -774,18 +774,10 @@ class PiecewiseFunctionSPDTransformer(SPDModel):
         for i, layer in enumerate(self.mlps):
             layer_out, layer_acts_i, inner_acts_i = layer(residual)
             residual = residual + layer_out
-            layer_acts.update(
-                {
-                    f"mlp_{i}.input_layer.weight": layer_acts_i[0],
-                    f"mlp_{i}.output_layer.weight": layer_acts_i[1],
-                }
-            )
-            inner_acts.update(
-                {
-                    f"mlp_{i}.input_layer.weight": inner_acts_i[0],
-                    f"mlp_{i}.output_layer.weight": inner_acts_i[1],
-                }
-            )
+            layer_acts[f"mlp_{i}.input_layer.weight"] = layer_acts_i[0]
+            layer_acts[f"mlp_{i}.output_layer.weight"] = layer_acts_i[1]
+            inner_acts[f"mlp_{i}.input_layer.weight"] = inner_acts_i[0]
+            inner_acts[f"mlp_{i}.output_layer.weight"] = inner_acts_i[1]
         return self.W_U(residual), layer_acts, inner_acts
 
     def forward_topk(
@@ -817,18 +809,10 @@ class PiecewiseFunctionSPDTransformer(SPDModel):
             assert isinstance(layer, MLPComponents)
             layer_out, layer_acts_i, inner_acts_i = layer.forward_topk(residual, topk_mask)
             residual = residual + layer_out
-            layer_acts.update(
-                {
-                    f"mlp_{i}.input_layer.weight": layer_acts_i[0],
-                    f"mlp_{i}.output_layer.weight": layer_acts_i[1],
-                }
-            )
-            inner_acts.update(
-                {
-                    f"mlp_{i}.input_layer.weight": inner_acts_i[0],
-                    f"mlp_{i}.output_layer.weight": inner_acts_i[1],
-                }
-            )
+            layer_acts[f"mlp_{i}.input_layer.weight"] = layer_acts_i[0]
+            layer_acts[f"mlp_{i}.output_layer.weight"] = layer_acts_i[1]
+            inner_acts[f"mlp_{i}.input_layer.weight"] = inner_acts_i[0]
+            inner_acts[f"mlp_{i}.output_layer.weight"] = inner_acts_i[1]
         return self.W_U(residual), layer_acts, inner_acts
 
     @classmethod
@@ -1006,19 +990,10 @@ class PiecewiseFunctionSPDFullRankTransformer(SPDFullRankModel):
             layer_out, layer_acts_i, inner_acts_i = layer(residual)
             assert len(layer_acts_i) == len(inner_acts_i) == 2
             residual = residual + layer_out
-
-            layer_acts.update(
-                {
-                    f"mlp_{i}.input_layer.weight": layer_acts_i[0],
-                    f"mlp_{i}.output_layer.weight": layer_acts_i[1],
-                }
-            )
-            inner_acts.update(
-                {
-                    f"mlp_{i}.input_layer.weight": inner_acts_i[0],
-                    f"mlp_{i}.output_layer.weight": inner_acts_i[1],
-                }
-            )
+            layer_acts[f"mlp_{i}.input_layer.weight"] = layer_acts_i[0]
+            layer_acts[f"mlp_{i}.output_layer.weight"] = layer_acts_i[1]
+            inner_acts[f"mlp_{i}.input_layer.weight"] = inner_acts_i[0]
+            inner_acts[f"mlp_{i}.output_layer.weight"] = inner_acts_i[1]
         return self.W_U(residual), layer_acts, inner_acts
 
     def forward_topk(
@@ -1051,19 +1026,10 @@ class PiecewiseFunctionSPDFullRankTransformer(SPDFullRankModel):
             assert isinstance(layer, MLPComponentsFullRank)
             layer_out, layer_acts_i, inner_acts_i = layer.forward_topk(residual, topk_mask)
             residual = residual + layer_out
-            layer_acts.update(
-                {
-                    f"mlp_{i}.input_layer.weight": layer_acts_i[0],
-                    f"mlp_{i}.output_layer.weight": layer_acts_i[1],
-                }
-            )
-            inner_acts.update(
-                {
-                    f"mlp_{i}.input_layer.weight": inner_acts_i[0],
-                    f"mlp_{i}.output_layer.weight": inner_acts_i[1],
-                }
-            )
-
+            layer_acts[f"mlp_{i}.input_layer.weight"] = layer_acts_i[0]
+            layer_acts[f"mlp_{i}.output_layer.weight"] = layer_acts_i[1]
+            inner_acts[f"mlp_{i}.input_layer.weight"] = inner_acts_i[0]
+            inner_acts[f"mlp_{i}.output_layer.weight"] = inner_acts_i[1]
         return self.W_U(residual), layer_acts, inner_acts
 
     @classmethod
