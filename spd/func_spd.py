@@ -45,8 +45,8 @@ def plot_matrix(
     fontsize = 8 if matrix.numel() < 50 else 4
     matrix = np.atleast_2d(matrix.detach().cpu().numpy())  # type: ignore
     im = ax.matshow(matrix, cmap="coolwarm", norm=CenteredNorm())
-    for (j, i), label in np.ndenumerate(matrix):
-        ax.text(i, j, f"{label:.2f}", ha="center", va="center", fontsize=fontsize)
+    # for (j, i), label in np.ndenumerate(matrix):
+    #     ax.text(i, j, f"{label:.2f}", ha="center", va="center", fontsize=fontsize)
     ax.set_xlabel(xlabel)
     if ylabel != "":
         ax.set_ylabel(ylabel)

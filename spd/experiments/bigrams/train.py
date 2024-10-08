@@ -3,6 +3,7 @@ import plotly.graph_objects as go
 import torch
 import torch.nn as nn
 import torch.optim as optim
+from jaxtyping import Float
 from sklearn.decomposition import PCA
 from torch.utils.data import DataLoader
 from tqdm import tqdm
@@ -18,8 +19,8 @@ A_vocab_size = 100  # A ranges from 0 to 99
 B_vocab_size = 5  # B ranges from 0 to 4
 embedding_dim = 20
 hidden_dim = 50
-epochs = 200
-learning_rate = 0.1
+epochs = 2000
+learning_rate = 0.01
 
 
 dataset = BigramDataset(A_vocab_size, B_vocab_size)
@@ -28,18 +29,16 @@ dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
 model = BigramModel(dataset.n_A, dataset.n_B, embedding_dim, hidden_dim)
 
 # Define loss function and optimizer
-criterion = nn.CrossEntropyLoss()
+criterion = nn.MSELoss()
 optimizer = optim.Adam(model.parameters(), lr=learning_rate)
 
 # Training loop
 for epoch in tqdm(range(1, epochs + 1)):
-    total_loss = 0
+    total_loss = 0.0
     for batch_inputs, batch_targets in dataloader:
-        # print(batch_inputs[:3])
-        # print(batch_targets[0][:499])
         optimizer.zero_grad()
-        outputs = model(batch_inputs)
-        loss = criterion(outputs, batch_targets.float())
+        outputs: Float[torch.Tensor, "batch B_vocab_size"] = model(batch_inputs)
+        loss: Float[torch.Tensor, ""] = criterion(outputs, batch_targets.float())
         loss.backward()
         optimizer.step()
         total_loss += loss.item()
@@ -58,8 +57,8 @@ new_model.load_state_dict(torch.load("bigram_model.pt", weights_only=True))
 batch_size = 16
 dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
 for batch_inputs, batch_targets in dataloader:
-    outputs = new_model(batch_inputs)
-    loss = criterion(outputs, batch_targets.float())
+    outputs: Float[torch.Tensor, "batch B_vocab_size"] = new_model(batch_inputs)
+    loss: Float[torch.Tensor, ""] = criterion(outputs, batch_targets.float())
     print(loss.item())
 
 # %%
@@ -71,7 +70,7 @@ As = []
 Bs = []
 for a in range(A_vocab_size):
     for b in range(B_vocab_size):
-        x = model.W_E[a] + model.W_E[b + A_vocab_size]
+        x: Float[torch.Tensor, " embedding_dim"] = model.W_E[a] + model.W_E[b + A_vocab_size]
         embeddings.append(x.detach().cpu())
         As.append(a)
         Bs.append(b)
