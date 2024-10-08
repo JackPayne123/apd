@@ -198,7 +198,7 @@ class Config(BaseModel):
         if self.topk_param_attrib_coeff is not None and not isinstance(
             self.task_config, PiecewiseConfig
         ):
-            raise ValueError("act_recon_coeff is currenlty only suppported for piecewise")
+            raise ValueError("topk_param_attrib_coeff is currenlty only suppported for piecewise")
 
         return self
 
