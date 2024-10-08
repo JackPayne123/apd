@@ -142,6 +142,7 @@ class ControlledPiecewiseLinear(nn.Module):
             self.num_functions * self.neurons_per_function, self.num_functions, bias=True
         )
         self.initialise_params(rng, torch_gen, simple_bias)
+        self.rescale_layers()
 
     def initialise_params(
         self,
@@ -200,6 +201,31 @@ class ControlledPiecewiseLinear(nn.Module):
             self.output_layer.weight.data[
                 i, i * self.neurons_per_function : (i + 1) * self.neurons_per_function
             ] = piecewise_linear.output_layer.weight.data.squeeze()
+
+    def rescale_layers(self):
+        # rescale the layers so that the squared L2 norm of input weights and biases are equal to
+        # squared L2 norm of output weights without changing the outputs
+
+        input_weights = self.input_layer.weight.data
+        input_biases = self.input_layer.bias.data
+        output_weights = self.output_layer.weight.data
+        output_biases = self.output_layer.bias.data
+
+        input_weights_norm = (input_weights**2).sum()
+        input_biases_norm = (input_biases**2).sum()
+        total_input_norm = (input_weights_norm + input_biases_norm) ** 0.5
+        output_weights_norm = (output_weights**2).sum()
+        output_biases_norm = (output_biases**2).sum()
+        total_output_norm = (output_weights_norm + output_biases_norm) ** 0.5
+
+        target_norm = (total_input_norm * total_output_norm) ** 0.5
+        input_scale_factor = target_norm / total_input_norm
+        output_scale_factor = target_norm / total_output_norm
+
+        self.input_layer.weight.data = self.input_layer.weight.data * input_scale_factor
+        self.input_layer.bias.data = self.input_layer.bias.data * input_scale_factor
+        self.output_layer.weight.data = self.output_layer.weight.data * output_scale_factor
+        self.output_layer.bias.data = self.output_layer.bias.data * output_scale_factor
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         control_bits = x[:, 1:]
