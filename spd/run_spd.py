@@ -35,6 +35,12 @@ from spd.utils import (
 )
 
 
+class MinimalTaskConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    task_name: Literal["bigram"] = "bigram"
+    k: PositiveInt
+
+
 class TMSConfig(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
     task_name: Literal["tms"] = "tms"
@@ -108,7 +114,7 @@ class Config(BaseModel):
     unit_norm_matrices: bool = True
     ablation_attributions: bool = False
     initialize_spd: Literal["xavier", "oldSPD", "fullcopies"] = "xavier"
-    task_config: DeepLinearConfig | PiecewiseConfig | TMSConfig = Field(
+    task_config: DeepLinearConfig | PiecewiseConfig | TMSConfig | MinimalTaskConfig = Field(
         ..., discriminator="task_name"
     )
 

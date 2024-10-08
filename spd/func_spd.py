@@ -18,6 +18,8 @@ from torch.func import functional_call, grad, vmap
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
+from spd.experiments.bigrams.model import BigramModel
+from spd.experiments.piecewise.models import PiecewiseFunctionTransformer
 from spd.models.base import Model, SPDFullRankModel, SPDModel
 from spd.run_spd import (
     Config,
@@ -140,14 +142,13 @@ def calc_topk_param_attrib_loss(
             - pretrained_params[key]
         )
         param_grad: Float[Tensor, " batch ... d"] = pretrained_param_grads[key]
-        # print(f"Shapes: {value.shape} {param_diff.shape} {param_grad.shape}")
         param_attrib = param_diff * param_grad
         loss += einops.reduce(param_attrib, "batch ... d -> batch", "mean")
     return (loss**2).mean(dim=0)
 
 
 def optimize(
-    model: SPDModel | SPDFullRankModel,
+    model: SPDModel | SPDFullRankModel | None,
     config: Config,
     device: str,
     dataloader: DataLoader[tuple[Float[Tensor, "... n_features"], Float[Tensor, "... n_features"]]],
@@ -166,11 +167,16 @@ def optimize(
     # it k times. Just optimize this dictionary of parameters.
     pretrained_model.to(device=device)
     pretrained_params = pretrained_model.state_dict()
-    decomposable_params = [
-        "mlps.0.input_layer.weight",
-        "mlps.0.output_layer.weight",
-        "mlps.0.input_layer.bias",
-    ]
+    if isinstance(pretrained_model, BigramModel):
+        decomposable_params = pretrained_params
+    elif isinstance(pretrained_model, PiecewiseFunctionTransformer):
+        decomposable_params = [
+            "mlps.0.input_layer.weight",
+            "mlps.0.output_layer.weight",
+            "mlps.0.input_layer.bias",
+        ]
+    else:
+        raise ValueError(f"Unsure how to decompose {pretrained_model}")
     k_params = {}
     k = config.task_config.k
     assert config.topk is not None, "Need topk"
@@ -185,6 +191,7 @@ def optimize(
     # that SPD model uses different parameter names so we're using this map. Also, the params are
     # transposed.
     if config.initialize_spd == "oldSPD":
+        assert isinstance(pretrained_model, PiecewiseFunctionTransformer)
         model.to(device=device)
         spd_params = model.state_dict()
         spd_param_map = [
