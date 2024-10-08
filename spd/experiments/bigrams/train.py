@@ -1,13 +1,10 @@
-import matplotlib.pyplot as plt
 import numpy as np
 import plotly.graph_objects as go
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from jaxtyping import Float, Int
 from sklearn.decomposition import PCA
-from torch import Tensor
-from torch.utils.data import DataLoader, Dataset
+from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 from spd.experiments.bigrams.model import BigramDataset, BigramModel
@@ -57,7 +54,7 @@ torch.save(model.state_dict(), "bigram_model.pt")
 
 # Load model
 new_model = BigramModel(dataset.n_A, dataset.n_B, embedding_dim, hidden_dim)
-new_model.load_state_dict(torch.load("bigram_model.pt"))
+new_model.load_state_dict(torch.load("bigram_model.pt", weights_only=True))
 batch_size = 16
 dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
 for batch_inputs, batch_targets in dataloader:
@@ -74,7 +71,7 @@ As = []
 Bs = []
 for a in range(A_vocab_size):
     for b in range(B_vocab_size):
-        x = model.W_E_A[a] + model.W_E_B[b]
+        x = model.W_E[a] + model.W_E[b + A_vocab_size]
         embeddings.append(x.detach().cpu())
         As.append(a)
         Bs.append(b)

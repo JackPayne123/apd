@@ -1,33 +1,8 @@
-import json
-from collections.abc import Callable
-from pathlib import Path
-from typing import Literal, Self
-
-import einops
-import matplotlib.pyplot as plt
-import numpy as np
-import plotly.graph_objects as go
 import torch
-import torch.nn as nn
-import torch.optim as optim
-import wandb
-from jaxtyping import Bool, Float, Int
-from pydantic import (
-    BaseModel,
-    ConfigDict,
-    Field,
-    NonNegativeFloat,
-    PositiveFloat,
-    PositiveInt,
-    model_validator,
-)
-from sklearn.decomposition import PCA
-from torch import Tensor
-from torch.utils.data import DataLoader, Dataset
-from tqdm import tqdm
+from torch.utils.data import DataLoader
 
 from spd.experiments.bigrams.model import BigramDataset, BigramModel
-from spd.func import optimize
+from spd.func_spd import optimize
 from spd.run_spd import Config, MinimalTaskConfig
 
 # Parameters
@@ -113,7 +88,7 @@ minimal_config = Config(
 # )
 
 optimize(
-    spd_model=None,
+    model=None,
     config=minimal_config,
     device="cpu",
     dataloader=dataloader,

@@ -1,15 +1,9 @@
-import matplotlib.pyplot as plt
-import numpy as np
-import plotly.graph_objects as go
 import torch
 import torch.nn as nn
-import torch.optim as optim
 from einops import einsum
 from jaxtyping import Float, Int
-from sklearn.decomposition import PCA
 from torch import Tensor
-from torch.utils.data import DataLoader, Dataset
-from tqdm import tqdm
+from torch.utils.data import Dataset
 
 
 # Create PyTorch Dataset class
@@ -55,27 +49,21 @@ class BigramModel(nn.Module):
         self.n_C = n_A * n_B
         self.d_embed = d_embed
         self.d_hidden = d_hidden
-        self.W_E_A = nn.Parameter(torch.randn(self.n_A, self.d_embed))
-        self.W_E_B = nn.Parameter(torch.randn(self.n_B, self.d_embed))
+        self.W_E = nn.Parameter(torch.empty(self.n_A + self.n_B, self.d_embed))
+        torch.nn.init.xavier_uniform_(self.W_E)
         self.fc1 = nn.Linear(self.d_embed, self.d_hidden)
         self.activation = nn.GELU()
         self.fc2 = nn.Linear(self.d_hidden, self.d_embed)
         self.unembed = nn.Linear(self.d_embed, self.n_C)
 
-    def forward(
-        self, inputs: Int[Tensor, "batch_size n_A + n_B"]
-    ) -> Float[Tensor, "batch_size d_embed"]:
-        xA = einsum(
-            self.W_E_A,
-            inputs[:, 0:100].float(),
-            "n_A d_embed, batch_size n_A -> batch_size d_embed",
+    def forward(self, inputs: Int[Tensor, "batch_size n_C"]) -> Float[Tensor, "batch_size d_embed"]:
+        # print(f"{inputs.shape=}")
+        # print(f"{self.W_E.shape=}")
+        x = einsum(
+            self.W_E,
+            inputs.float(),
+            "n_C d_embed, batch_size n_C -> batch_size d_embed",
         )
-        xB = einsum(
-            self.W_E_B,
-            inputs[:, 100:105].float(),
-            "n_B d_embed, batch_size n_B -> batch_size d_embed",
-        )
-        x = xA + xB
         x = self.fc1(x)
         x = self.activation(x)
         x = self.fc2(x)
