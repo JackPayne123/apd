@@ -181,6 +181,13 @@ def get_model_and_dataloader(
     ).to(device)
     piecewise_model.eval()
 
+    # Assert that the output bias is 0
+    for i in range(piecewise_model.n_layers):
+        assert torch.allclose(
+            piecewise_model.mlps[i].output_layer.bias,
+            torch.zeros_like(piecewise_model.mlps[i].output_layer.bias),
+        )
+
     # For rank 1, we initialise with the input biases from the original model
     input_biases = [
         piecewise_model.mlps[i].input_layer.bias.detach().clone()
@@ -231,6 +238,11 @@ def get_model_and_dataloader(
             piecewise_model_spd.mlps[i].linear1.bias.requires_grad_(False)
         elif not config.full_rank:
             piecewise_model_spd.mlps[i].bias1.requires_grad_(False)
+        # Assert that the output bias is 0
+        assert piecewise_model_spd.mlps[i].linear2.bias is None or torch.allclose(
+            piecewise_model_spd.mlps[i].linear2.bias,
+            torch.zeros_like(piecewise_model_spd.mlps[i].linear2.bias),
+        )
 
     piecewise_model_spd.W_E.requires_grad_(False)
     piecewise_model_spd.W_U.requires_grad_(False)
