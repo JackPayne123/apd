@@ -41,10 +41,11 @@ class TMSModel(Model):
         # features: [..., instance, n_features]
         # W: [instance, n_features, n_hidden]
         hidden = torch.einsum("...if,ifh->...ih", features, self.W)
-        out_pre_bias = torch.einsum("...ih,ifh->...if", hidden, self.W)
-        out = out_pre_bias + self.b_final
-        out = F.relu(out)
-        return out, {"W": features, "W_T": hidden}, {"W": hidden, "W_T": out_pre_bias}
+        out_pre_relu = torch.einsum("...ih,ifh->...if", hidden, self.W) + self.b_final
+        out = F.relu(out_pre_relu)
+        pre_acts = {"W": features, "W_T": hidden}
+        post_acts = {"W": hidden, "W_T": out_pre_relu}
+        return out, pre_acts, post_acts
 
     def all_decomposable_params(self) -> dict[str, Float[Tensor, "n_instances d_in d_out"]]:
         """Dictionary of all parameters which will be decomposed with SPD."""
