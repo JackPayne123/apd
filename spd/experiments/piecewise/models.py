@@ -378,7 +378,8 @@ class ControlledResNet(nn.Module):
 
         assert x.shape[1] == self.d_model
         for i in range(self.n_layers):
-            x = x + self.mlps[i](x)[0]
+            mlp_out, _, _ = self.mlps[i](x)
+            x = x + mlp_out
         return x
 
     def partial_forward(
@@ -603,7 +604,7 @@ class PiecewiseFunctionTransformer(Model):
         labels = torch.einsum("bo,bo->b", control_bits_expanded, function_outputs)
 
         axs.plot(x, labels, label="f(x)")
-        outputs = self.forward(inputs_with_control)[0]
+        outputs, _, _ = self.forward(inputs_with_control)
         axs.plot(x, outputs[:, 0].detach().numpy(), label="NN(x)")
         axs.legend()
         axs.set_title("Piecewise Linear Approximation of function")
@@ -806,18 +807,10 @@ class PiecewiseFunctionSPDTransformer(SPDModel):
         for i, layer in enumerate(self.mlps):
             layer_out, layer_acts_i, inner_acts_i = layer(residual)
             residual = residual + layer_out
-            layer_acts.update(
-                {
-                    f"mlp_{i}.input_layer.weight": layer_acts_i[0],
-                    f"mlp_{i}.output_layer.weight": layer_acts_i[1],
-                }
-            )
-            inner_acts.update(
-                {
-                    f"mlp_{i}.input_layer.weight": inner_acts_i[0],
-                    f"mlp_{i}.output_layer.weight": inner_acts_i[1],
-                }
-            )
+            layer_acts[f"mlp_{i}.input_layer.weight"] = layer_acts_i[0]
+            layer_acts[f"mlp_{i}.output_layer.weight"] = layer_acts_i[1]
+            inner_acts[f"mlp_{i}.input_layer.weight"] = inner_acts_i[0]
+            inner_acts[f"mlp_{i}.output_layer.weight"] = inner_acts_i[1]
         return self.W_U(residual), layer_acts, inner_acts
 
     def forward_topk(
@@ -849,18 +842,10 @@ class PiecewiseFunctionSPDTransformer(SPDModel):
             assert isinstance(layer, MLPComponents)
             layer_out, layer_acts_i, inner_acts_i = layer.forward_topk(residual, topk_mask)
             residual = residual + layer_out
-            layer_acts.update(
-                {
-                    f"mlp_{i}.input_layer.weight": layer_acts_i[0],
-                    f"mlp_{i}.output_layer.weight": layer_acts_i[1],
-                }
-            )
-            inner_acts.update(
-                {
-                    f"mlp_{i}.input_layer.weight": inner_acts_i[0],
-                    f"mlp_{i}.output_layer.weight": inner_acts_i[1],
-                }
-            )
+            layer_acts[f"mlp_{i}.input_layer.weight"] = layer_acts_i[0]
+            layer_acts[f"mlp_{i}.output_layer.weight"] = layer_acts_i[1]
+            inner_acts[f"mlp_{i}.input_layer.weight"] = inner_acts_i[0]
+            inner_acts[f"mlp_{i}.output_layer.weight"] = inner_acts_i[1]
         return self.W_U(residual), layer_acts, inner_acts
 
     @classmethod
@@ -1049,19 +1034,10 @@ class PiecewiseFunctionSPDFullRankTransformer(SPDFullRankModel):
             layer_out, layer_acts_i, inner_acts_i = layer(residual)
             assert len(layer_acts_i) == len(inner_acts_i) == 2
             residual = residual + layer_out
-
-            layer_acts.update(
-                {
-                    f"mlp_{i}.input_layer.weight": layer_acts_i[0],
-                    f"mlp_{i}.output_layer.weight": layer_acts_i[1],
-                }
-            )
-            inner_acts.update(
-                {
-                    f"mlp_{i}.input_layer.weight": inner_acts_i[0],
-                    f"mlp_{i}.output_layer.weight": inner_acts_i[1],
-                }
-            )
+            layer_acts[f"mlp_{i}.input_layer.weight"] = layer_acts_i[0]
+            layer_acts[f"mlp_{i}.output_layer.weight"] = layer_acts_i[1]
+            inner_acts[f"mlp_{i}.input_layer.weight"] = inner_acts_i[0]
+            inner_acts[f"mlp_{i}.output_layer.weight"] = inner_acts_i[1]
         return self.W_U(residual), layer_acts, inner_acts
 
     def forward_topk(
@@ -1094,19 +1070,10 @@ class PiecewiseFunctionSPDFullRankTransformer(SPDFullRankModel):
             assert isinstance(layer, MLPComponentsFullRank)
             layer_out, layer_acts_i, inner_acts_i = layer.forward_topk(residual, topk_mask)
             residual = residual + layer_out
-            layer_acts.update(
-                {
-                    f"mlp_{i}.input_layer.weight": layer_acts_i[0],
-                    f"mlp_{i}.output_layer.weight": layer_acts_i[1],
-                }
-            )
-            inner_acts.update(
-                {
-                    f"mlp_{i}.input_layer.weight": inner_acts_i[0],
-                    f"mlp_{i}.output_layer.weight": inner_acts_i[1],
-                }
-            )
-
+            layer_acts[f"mlp_{i}.input_layer.weight"] = layer_acts_i[0]
+            layer_acts[f"mlp_{i}.output_layer.weight"] = layer_acts_i[1]
+            inner_acts[f"mlp_{i}.input_layer.weight"] = inner_acts_i[0]
+            inner_acts[f"mlp_{i}.output_layer.weight"] = inner_acts_i[1]
         return self.W_U(residual), layer_acts, inner_acts
 
     @classmethod

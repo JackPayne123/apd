@@ -182,6 +182,13 @@ def get_model_and_dataloader(
     ).to(device)
     piecewise_model.eval()
 
+    # Assert that the output bias is 0
+    for i in range(piecewise_model.n_layers):
+        assert torch.allclose(
+            piecewise_model.mlps[i].output_layer.bias,
+            torch.zeros_like(piecewise_model.mlps[i].output_layer.bias),
+        )
+
     # For rank 1, we initialise with the input biases from the original model
     input_biases = [
         piecewise_model.mlps[i].input_layer.bias.detach().clone()
@@ -233,6 +240,11 @@ def get_model_and_dataloader(
             piecewise_model_spd.mlps[i].linear1.bias.requires_grad_(False)
         elif not config.full_rank:
             piecewise_model_spd.mlps[i].bias1.requires_grad_(False)
+        # Assert that the output bias is 0
+        assert piecewise_model_spd.mlps[i].linear2.bias is None or torch.allclose(
+            piecewise_model_spd.mlps[i].linear2.bias,
+            torch.zeros_like(piecewise_model_spd.mlps[i].linear2.bias),
+        )
 
     piecewise_model_spd.W_E.requires_grad_(False)
     piecewise_model_spd.W_U.requires_grad_(False)
@@ -305,7 +317,7 @@ def main(
     for i, (batch, labels) in enumerate(test_dataloader):
         if i >= n_batches:
             break
-        hardcoded_out = piecewise_model(batch.to(device))[0]
+        hardcoded_out, _, _ = piecewise_model(batch.to(device))
         loss += calc_recon_mse(hardcoded_out, labels.to(device))
     loss /= n_batches
     logger.info(f"Loss of hardcoded model on 5 batches: {loss}")
