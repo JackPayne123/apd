@@ -540,7 +540,7 @@ def calc_topk_param_attrib_loss(
     target_layer_post_acts: dict[str, Tensor],
     has_instance_dim: bool,
 ) -> Float[Tensor, ""] | Float[Tensor, " n_instances"]:
-    """Attribution patching of original params to sum of active subnetwork params
+    """Attribution patch loss of original params to sum of active subnetwork params.
 
     This function is (an efficient implementation of) dout/dW_target * (W_spd - W_target) where
     W_spd is the sum of currently-active (topk) subnetworks. The actual implementation is based on
