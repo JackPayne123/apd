@@ -127,7 +127,7 @@ class MultiTaskModel(nn.Module):
             task_probs = F.softmax(task_output, dim=-1)  # Apply softmax
             outputs.append(task_probs)
 
-        return outputs  # List of softmaxed outputs (probabilities) for each task
+        return torch.stack(outputs, dim=1)
 
 
 def train(
@@ -225,7 +225,7 @@ def train(
 
             loss = 0
             for i in range(len(tasks)):
-                task_outputs = outputs[i]  # Shape: [batch_size, num_classes]
+                task_outputs = outputs[:, i, :]  # Shape: [batch_size, num_classes]
                 task_target_probs = target_probs[:, i, :]  # Shape: [batch_size, num_classes]
 
                 # Compute log of predicted probabilities
