@@ -363,6 +363,13 @@ def optimize(
                     },
                     step=step,
                 )
+        if (
+            config.save_freq is not None
+            and step % config.save_freq == 0
+            and step > 0
+            and out_dir is not None
+        ):
+            torch.save(k_params, out_dir / f"k_params_step_{step}.pt")
 
         if (
             True
@@ -381,17 +388,6 @@ def optimize(
                     step=step,
                 )
                 plt.close("all")
-        # if (
-        #     config.save_freq is not None
-        #     and step % config.save_freq == 0
-        #     and step > 0
-        #     and out_dir is not None
-        # ):
-        #     torch.save(model.state_dict(), out_dir / f"model_{step}.pth")
-        #     tqdm.write(f"Saved model to {out_dir / f'model_{step}.pth'}")
-        #     with open(out_dir / "config.json", "w") as f:
-        #         json.dump(config.model_dump(), f, indent=4)
-        #     tqdm.write(f"Saved config to {out_dir / 'config.json'}")
 
         # Skip gradient step if we are at the last step (last step just for plotting and logging)
         if step != config.steps:
