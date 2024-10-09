@@ -1,15 +1,15 @@
+import os
+
+import fire
+import numpy as np
+import pandas as pd
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from torch.utils.data import Dataset, DataLoader, random_split
-import numpy as np
-import pandas as pd
-from tqdm import tqdm
 from sklearn.preprocessing import LabelEncoder
-from sklearn.model_selection import train_test_split
-from typing import Callable, Any
-import os
-import fire
+from torch.utils.data import DataLoader, Dataset, random_split
+from tqdm import tqdm
+
 
 # Custom Dataset class for Optical Recognition of Handwritten Letters
 class OpticalLettersDataset(Dataset):
@@ -31,6 +31,7 @@ class OpticalLettersDataset(Dataset):
     def __getitem__(self, idx: int):
         return torch.tensor(self.features[idx]), torch.tensor(self.labels[idx])
 
+
 # MLP Model Definition
 class OpticalLettersModel(nn.Module):
     def __init__(self, input_size: int, hidden_size: int, num_classes: int):
@@ -48,8 +49,9 @@ class OpticalLettersModel(nn.Module):
         out = self.fc3(out)
         return out
 
+
 def train(
-    data_file: str = './data/letter-recognition.data',
+    data_file: str = "./data/letter-recognition.data",
     input_size: int = 16,
     hidden_size: int = 512,
     num_classes: int = 26,  # 26 uppercase letters (A-Z)
@@ -59,7 +61,7 @@ def train(
     seed: int = 0,
     split_ratio: float = 0.8,
     log_interval: int = 1,
-    device: str = 'cuda' if torch.cuda.is_available() else 'cpu',
+    device: str = "cuda" if torch.cuda.is_available() else "cpu",
 ):
     torch.manual_seed(seed)
     np.random.seed(seed)
@@ -73,8 +75,12 @@ def train(
     train_dataset, val_dataset = random_split(full_dataset, [train_size, val_size])
 
     # Data loaders
-    train_loader = DataLoader(dataset=train_dataset, batch_size=batch_size, shuffle=True, num_workers=4)
-    val_loader = DataLoader(dataset=val_dataset, batch_size=batch_size, shuffle=False, num_workers=4)
+    train_loader = DataLoader(
+        dataset=train_dataset, batch_size=batch_size, shuffle=True, num_workers=4
+    )
+    val_loader = DataLoader(
+        dataset=val_dataset, batch_size=batch_size, shuffle=False, num_workers=4
+    )
 
     # Initialize model, loss function, optimizer
     model = OpticalLettersModel(input_size, hidden_size, num_classes).to(device)
@@ -87,7 +93,7 @@ def train(
         total_loss = 0
         correct = 0
         total = 0
-        loop = tqdm(train_loader, desc=f'Epoch [{epoch}/{num_epochs}]')
+        loop = tqdm(train_loader, desc=f"Epoch [{epoch}/{num_epochs}]")
         for features, labels in loop:
             features, labels = features.to(device), labels.to(device)
 
@@ -107,10 +113,10 @@ def train(
             correct += predicted.eq(labels).sum().item()
 
             # Update progress bar
-            loop.set_postfix(loss=loss.item(), accuracy=100.*correct/total)
+            loop.set_postfix(loss=loss.item(), accuracy=100.0 * correct / total)
 
         avg_loss = total_loss / len(train_loader)
-        accuracy = 100. * correct / total
+        accuracy = 100.0 * correct / total
 
         # Validation
         model.eval()
@@ -128,16 +134,19 @@ def train(
                 val_correct += predicted.eq(labels).sum().item()
 
         val_loss /= len(val_loader)
-        val_accuracy = 100. * val_correct / val_total
+        val_accuracy = 100.0 * val_correct / val_total
 
         if epoch % log_interval == 0:
-            print(f'Epoch [{epoch}/{num_epochs}], '
-                  f'Train Loss: {avg_loss:.4f}, Train Accuracy: {accuracy:.2f}%, '
-                  f'Val Loss: {val_loss:.4f}, Val Accuracy: {val_accuracy:.2f}%')
+            print(
+                f"Epoch [{epoch}/{num_epochs}], "
+                f"Train Loss: {avg_loss:.4f}, Train Accuracy: {accuracy:.2f}%, "
+                f"Val Loss: {val_loss:.4f}, Val Accuracy: {val_accuracy:.2f}%"
+            )
 
     # Save the model checkpoint
-    os.makedirs('models', exist_ok=True)
-    torch.save(model.state_dict(), 'models/optical_letters_model.pth')
+    os.makedirs("models", exist_ok=True)
+    torch.save(model.state_dict(), "models/optical_letters_model.pth")
+
 
 if __name__ == "__main__":
     fire.Fire(train)

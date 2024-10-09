@@ -1,13 +1,14 @@
+import os
+
+import fire
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader, random_split
 from torchvision import datasets, transforms
 from tqdm import tqdm
-import numpy as np
-import os
-from typing import Callable, Any
-import fire
+
 
 # MLP Model Definition
 class FashionMNISTModel(nn.Module):
@@ -17,7 +18,7 @@ class FashionMNISTModel(nn.Module):
         self.activation = nn.ReLU()
         self.fc2 = nn.Linear(hidden_size, hidden_size)
         self.fc3 = nn.Linear(hidden_size, num_classes)
-    
+
     def forward(self, x):
         out = self.fc1(x)
         out = self.activation(out)
@@ -26,8 +27,9 @@ class FashionMNISTModel(nn.Module):
         out = self.fc3(out)
         return out
 
+
 def train(
-    data_dir: str = './data',
+    data_dir: str = "./data",
     input_size: int = 28 * 28,
     hidden_size: int = 512,
     num_classes: int = 10,
@@ -37,16 +39,18 @@ def train(
     seed: int = 0,
     split_ratio: float = 0.8,
     log_interval: int = 1,
-    device: str = 'cuda' if torch.cuda.is_available() else 'cpu',
+    device: str = "cuda" if torch.cuda.is_available() else "cpu",
 ):
     torch.manual_seed(seed)
     np.random.seed(seed)
 
     # Data transformations
-    transform = transforms.Compose([
-        transforms.ToTensor(),
-        transforms.Normalize((0.5,), (0.5,)),
-    ])
+    transform = transforms.Compose(
+        [
+            transforms.ToTensor(),
+            transforms.Normalize((0.5,), (0.5,)),
+        ]
+    )
 
     # Load the Fashion-MNIST dataset
     full_dataset = datasets.FashionMNIST(
@@ -59,14 +63,20 @@ def train(
     train_dataset, val_dataset = random_split(full_dataset, [train_size, val_size])
 
     # Data loadersgit status
-    train_loader = DataLoader(dataset=train_dataset, batch_size=batch_size, shuffle=True, num_workers=4)
-    val_loader = DataLoader(dataset=val_dataset, batch_size=batch_size, shuffle=False, num_workers=4)
+    train_loader = DataLoader(
+        dataset=train_dataset, batch_size=batch_size, shuffle=True, num_workers=4
+    )
+    val_loader = DataLoader(
+        dataset=val_dataset, batch_size=batch_size, shuffle=False, num_workers=4
+    )
 
     # Test dataset and loader
     test_dataset = datasets.FashionMNIST(
         root=data_dir, train=False, download=True, transform=transform
     )
-    test_loader = DataLoader(dataset=test_dataset, batch_size=batch_size, shuffle=False, num_workers=4)
+    test_loader = DataLoader(
+        dataset=test_dataset, batch_size=batch_size, shuffle=False, num_workers=4
+    )
 
     # Initialize model, loss function, optimizer
     model = FashionMNISTModel(input_size, hidden_size, num_classes).to(device)
@@ -79,7 +89,7 @@ def train(
         total_loss = 0
         correct = 0
         total = 0
-        loop = tqdm(train_loader, desc=f'Epoch [{epoch}/{num_epochs}]')
+        loop = tqdm(train_loader, desc=f"Epoch [{epoch}/{num_epochs}]")
         for images, labels in loop:
             images = images.view(-1, input_size).to(device)
             labels = labels.to(device)
@@ -100,10 +110,10 @@ def train(
             correct += predicted.eq(labels).sum().item()
 
             # Update progress bar
-            loop.set_postfix(loss=loss.item(), accuracy=100.*correct/total)
+            loop.set_postfix(loss=loss.item(), accuracy=100.0 * correct / total)
 
         avg_loss = total_loss / len(train_loader)
-        accuracy = 100. * correct / total
+        accuracy = 100.0 * correct / total
 
         # Validation
         model.eval()
@@ -122,12 +132,14 @@ def train(
                 val_correct += predicted.eq(labels).sum().item()
 
         val_loss /= len(val_loader)
-        val_accuracy = 100. * val_correct / val_total
+        val_accuracy = 100.0 * val_correct / val_total
 
         if epoch % log_interval == 0:
-            print(f'Epoch [{epoch}/{num_epochs}], '
-                  f'Train Loss: {avg_loss:.4f}, Train Accuracy: {accuracy:.2f}%, '
-                  f'Val Loss: {val_loss:.4f}, Val Accuracy: {val_accuracy:.2f}%')
+            print(
+                f"Epoch [{epoch}/{num_epochs}], "
+                f"Train Loss: {avg_loss:.4f}, Train Accuracy: {accuracy:.2f}%, "
+                f"Val Loss: {val_loss:.4f}, Val Accuracy: {val_accuracy:.2f}%"
+            )
 
     # Testing on the test dataset
     model.eval()
@@ -146,13 +158,14 @@ def train(
             test_correct += predicted.eq(labels).sum().item()
 
     test_loss /= len(test_loader)
-    test_accuracy = 100. * test_correct / test_total
+    test_accuracy = 100.0 * test_correct / test_total
 
-    print(f'Test Loss: {test_loss:.4f}, Test Accuracy: {test_accuracy:.2f}%')
+    print(f"Test Loss: {test_loss:.4f}, Test Accuracy: {test_accuracy:.2f}%")
 
     # Save the model checkpoint
-    os.makedirs('models', exist_ok=True)
-    torch.save(model.state_dict(), 'models/fashion_mnist_model.pth')
+    os.makedirs("models", exist_ok=True)
+    torch.save(model.state_dict(), "models/fashion_mnist_model.pth")
+
 
 if __name__ == "__main__":
     fire.Fire(train)
