@@ -222,7 +222,7 @@ def get_model_and_dataloader(
 
         for i in range(piecewise_model_spd.n_layers):
             # Assert output bias is 0
-            assert torch.allclose(
+            assert piecewise_model_spd.mlps[i].linear2.bias is None or torch.allclose(
                 piecewise_model_spd.mlps[i].linear2.bias,
                 torch.zeros_like(piecewise_model_spd.mlps[i].linear2.bias),
             )
