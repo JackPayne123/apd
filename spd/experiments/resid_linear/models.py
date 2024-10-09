@@ -18,8 +18,9 @@ class ResidualLinearModel(Model):
         self.n_layers = n_layers
 
         self.W_E = nn.Parameter(torch.empty(n_features, d_resid))
-        # Make rows normalized to 1.
         init_param_(self.W_E)
+        # Make each feature have norm 1
+        self.W_E.data.div_(self.W_E.data.norm(dim=1, keepdim=True))
 
         self.layers = nn.ModuleList(
             [MLP(d_model=d_resid, d_mlp=d_mlp, act_fn="gelu") for _ in range(n_layers)]

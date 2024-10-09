@@ -101,7 +101,7 @@ if __name__ == "__main__":
         n_layers=1,
         feature_probability=0.2,
         batch_size=256,
-        steps=10_000,
+        steps=5_000,
         print_freq=100,
         lr=1e-2,
     )
