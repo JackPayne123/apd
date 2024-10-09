@@ -49,7 +49,7 @@ class OpticalLettersModel(nn.Module):
         return out
 
 def train(
-    data_file: str = './letter-recognition.data',
+    data_file: str = './data/letter-recognition.data',
     input_size: int = 16,
     hidden_size: int = 512,
     num_classes: int = 26,  # 26 uppercase letters (A-Z)
