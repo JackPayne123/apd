@@ -296,7 +296,7 @@ def run_spd_forward_pass(
                 out=model_output_spd, inner_acts_vals=list(inner_acts.values())
             )
     topk_mask = calc_topk_mask(attribution_scores, topk, batch_topk=batch_topk)
-    model_output_spd_topk, layer_acts_topk, inner_acts_topk = spd_model.forward_topk(
+    model_output_spd_topk, layer_acts_topk, inner_acts_topk = spd_model(
         input_array, topk_mask=topk_mask
     )
     assert len(inner_acts_topk) == spd_model.n_param_matrices

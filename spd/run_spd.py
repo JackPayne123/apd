@@ -667,7 +667,7 @@ def optimize(
             )
 
             # Do a forward pass with only the topk subnetworks
-            out_topk, _, inner_acts_topk = model.forward_topk(batch, topk_mask=topk_mask)
+            out_topk, _, inner_acts_topk = model(batch, topk_mask=topk_mask)
             assert len(inner_acts_topk) == model.n_param_matrices
 
             if config.topk_l2_coeff is not None:
