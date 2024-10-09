@@ -27,7 +27,7 @@ class Config(BaseModel):
     seed: int = 0
     label_fn_seed: int = 0
     n_features: PositiveInt
-    d_resid: PositiveInt
+    d_embed: PositiveInt
     d_mlp: PositiveInt
     n_layers: PositiveInt
     feature_probability: PositiveFloat
@@ -42,7 +42,7 @@ def train(
     model: ResidualLinearModel,
     trainable_params: list[nn.Parameter],
     dataloader: DatasetGeneratedDataLoader[Float[Tensor, "batch n_features"]],
-    label_fn: Callable[[Float[Tensor, "batch d_resid"]], Float[Tensor, "batch n_functions"]],
+    label_fn: Callable[[Float[Tensor, "batch d_embed"]], Float[Tensor, "batch n_functions"]],
     device: str,
     out_dir: Path | None = None,
 ) -> float | None:
@@ -63,7 +63,7 @@ def train(
         # We want our labels to be downprojected to the residual stream space because there is no
         # unembedding matrix.
         labels = einops.einsum(
-            model.W_E, raw_labels, "n_features d_resid, batch n_features -> batch d_resid"
+            model.W_E, raw_labels, "n_features d_embed, batch n_features -> batch d_embed"
         )
 
         loss = F.mse_loss(out, labels)
@@ -96,7 +96,7 @@ if __name__ == "__main__":
         seed=0,
         label_fn_seed=0,
         n_features=5,
-        d_resid=5,
+        d_embed=5,
         d_mlp=5,
         n_layers=1,
         feature_probability=0.2,
@@ -108,14 +108,14 @@ if __name__ == "__main__":
 
     set_seed(config.seed)
     run_name = (
-        f"resid_linear_n-features{config.n_features}_d-resid{config.d_resid}_"
+        f"resid_linear_n-features{config.n_features}_d-resid{config.d_embed}_"
         f"d-mlp{config.d_mlp}_n-layers{config.n_layers}_seed{config.seed}"
     )
     out_dir = Path(__file__).parent / "out" / run_name
 
     model = ResidualLinearModel(
         n_features=config.n_features,
-        d_resid=config.d_resid,
+        d_embed=config.d_embed,
         d_mlp=config.d_mlp,
         n_layers=config.n_layers,
     ).to(device)
@@ -129,7 +129,7 @@ if __name__ == "__main__":
         feature_probability=config.feature_probability,
         device=device,
     )
-    label_fn = create_label_function(config.d_resid, seed=config.label_fn_seed)
+    label_fn = create_label_function(config.d_embed, seed=config.label_fn_seed)
     dataloader = DatasetGeneratedDataLoader(dataset, batch_size=config.batch_size, shuffle=False)
     train(
         config=config,

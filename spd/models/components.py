@@ -48,7 +48,7 @@ class ParamComponents(nn.Module):
             in_dim: Input dimension of the parameter to be replaced with AB.
             out_dim: Output dimension of the parameter to be replaced with AB.
             k: Number of subnetworks.
-            resid_component: Predefined component matrix of shape (d_resid, k) if A or (k, d_resid)
+            resid_component: Predefined component matrix of shape (d_embed, k) if A or (k, d_embed)
                 if B.
             resid_dim: Dimension in which to use the predefined component.
         """

@@ -33,18 +33,18 @@ class ResidualLinearDataset(Dataset[Float[Tensor, " n_features"]]):
 
 
 def calc_labels(
-    coeffs: Float[Tensor, " d_resid"], residual: Float[Tensor, "batch d_resid"]
+    coeffs: Float[Tensor, " d_embed"], residual: Float[Tensor, "batch d_embed"]
 ) -> Float[Tensor, "batch n_functions"]:
-    pre_act_fn = einops.einsum(coeffs, residual, "d_resid, batch d_resid -> batch d_resid")
+    pre_act_fn = einops.einsum(coeffs, residual, "d_embed, batch d_embed -> batch d_embed")
     labels = F.gelu(pre_act_fn) + residual
     return labels
 
 
 def create_label_function(
-    d_resid: int,
+    d_embed: int,
     seed: int,
-) -> Callable[[Float[Tensor, " d_resid"]], Float[Tensor, " d_resid"]]:
+) -> Callable[[Float[Tensor, " d_embed"]], Float[Tensor, " d_embed"]]:
     gen = torch.Generator()
     gen.manual_seed(seed)
-    coeffs = torch.rand(d_resid, generator=gen)
+    coeffs = torch.rand(d_embed, generator=gen)
     return lambda residual: calc_labels(coeffs, residual)

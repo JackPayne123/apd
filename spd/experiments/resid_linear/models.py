@@ -11,32 +11,32 @@ from spd.utils import init_param_
 
 
 class ResidualLinearModel(Model):
-    def __init__(self, n_features: int, d_resid: int, d_mlp: int, n_layers: int):
+    def __init__(self, n_features: int, d_embed: int, d_mlp: int, n_layers: int):
         super().__init__()
-        self.d_resid = d_resid
+        self.d_embed = d_embed
         self.d_mlp = d_mlp
         self.n_layers = n_layers
 
-        self.W_E = nn.Parameter(torch.empty(n_features, d_resid))
+        self.W_E = nn.Parameter(torch.empty(n_features, d_embed))
         init_param_(self.W_E)
         # Make each feature have norm 1
         self.W_E.data.div_(self.W_E.data.norm(dim=1, keepdim=True))
 
         self.layers = nn.ModuleList(
-            [MLP(d_model=d_resid, d_mlp=d_mlp, act_fn="gelu") for _ in range(n_layers)]
+            [MLP(d_model=d_embed, d_mlp=d_mlp, act_fn="gelu") for _ in range(n_layers)]
         )
 
     def forward(
         self, x: Float[Tensor, "batch n_features"]
     ) -> tuple[
-        Float[Tensor, "batch d_resid"],
-        dict[str, Float[Tensor, "batch d_resid"] | Float[Tensor, "batch d_mlp"]],
-        dict[str, Float[Tensor, "batch d_resid"] | Float[Tensor, "batch d_mlp"]],
+        Float[Tensor, "batch d_embed"],
+        dict[str, Float[Tensor, "batch d_embed"] | Float[Tensor, "batch d_mlp"]],
+        dict[str, Float[Tensor, "batch d_embed"] | Float[Tensor, "batch d_mlp"]],
     ]:
         layer_pre_acts = {}
         layer_post_acts = {}
         residual = einops.einsum(
-            x, self.W_E, "batch n_features, n_features d_resid -> batch d_resid"
+            x, self.W_E, "batch n_features, n_features d_embed -> batch d_embed"
         )
         for i, layer in enumerate(self.layers):
             out, pre_acts_i, post_acts_i = layer(residual)
