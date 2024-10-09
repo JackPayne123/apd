@@ -789,8 +789,7 @@ def optimize(
                 topk_mask = torch.cat((topk_mask, last_subnet_mask), dim=-1)
 
             # Do a forward pass with only the topk subnetworks
-            out_topk, _, inner_acts_topk = model(batch, topk_mask=topk_mask)
-            assert len(inner_acts_topk) == model.n_param_matrices
+            out_topk, _, _ = model(batch, topk_mask=topk_mask)
 
             if config.topk_l2_coeff is not None:
                 if config.full_rank:
