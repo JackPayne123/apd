@@ -51,7 +51,7 @@ embeddings = np.array(embeddings)
 As = np.array(As)
 Bs = np.array(Bs)
 # PCA
-pca = PCA(n_components=10)
+pca = PCA(n_components=embedding_dim)
 embeddings_3d = pca.fit_transform(embeddings)
 
 # Figure for Bs coloring

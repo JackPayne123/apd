@@ -38,26 +38,25 @@ from spd.utils import (
     set_seed,
 )
 
+wandb.require("core")
+
 
 def main():
-    # Parameters
-
-    A_vocab_size = 100  # A ranges from 0 to 99
-    B_vocab_size = 5  # B ranges from 0 to 4
-    embedding_dim = 20
-    hidden_dim = 50
-    batch_size = 1024
+    A_vocab_size = 100
+    B_vocab_size = 5
+    embedding_dim = 200
+    hidden_dim = 200
+    batch_size = 500
 
     dataset = BigramDataset(A_vocab_size, B_vocab_size)
-    new_model = BigramModel(dataset.n_A, dataset.n_B, embedding_dim, hidden_dim)
-    new_model.load_state_dict(torch.load("bigram_model.pt"))
-    # Evaluate model
-    batch_size = 12
     dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
+    model = BigramModel(dataset.n_A, dataset.n_B, embedding_dim, hidden_dim)
+    model.load_state_dict(torch.load("bigram_model.pt", weights_only=True))
 
     config = Config(
         wandb_project="spd-bigrams",
-        wandb_run_name="decompose",
+        wandb_run_name="k=5",
+        task_config=MinimalTaskConfig(k=5),
         wandb_run_name_prefix="bigrams",
         full_rank=True,
         seed=0,
@@ -66,13 +65,13 @@ def main():
         steps=10_000,
         print_freq=100,
         image_freq=1000,
+        save_freq=1000,
         lr=0.005,
-        task_config=MinimalTaskConfig(k=B_vocab_size),
         batch_size=batch_size,
-        topk_param_attrib_coeff=0.5,
-        param_match_coeff=1.0,
-        topk_recon_coeff=1.0,
-        topk_l2_coeff=0.01,
+        topk_param_attrib_coeff=1e0,
+        param_match_coeff=1e2,
+        topk_recon_coeff=1e4,
+        topk_l2_coeff=1e2,
         lp_sparsity_coeff=None,
         orthog_coeff=None,
         out_recon_coeff=None,
@@ -94,7 +93,7 @@ def main():
     set_seed(config.seed)
     logger.info(config)
 
-    run_name = "stefan_test_"
+    run_name = config.wandb_run_name
     if config.wandb_project:
         assert wandb.run, "wandb.run must be initialized before training"
         wandb.run.name = run_name
@@ -105,9 +104,10 @@ def main():
     optimize(
         model=None,
         config=config,
-        device="cpu",
+        device=device,
         dataloader=dataloader,
-        pretrained_model=new_model,
+        pretrained_model=model,
+        out_dir=Path("out2/"),
     )
 
     if config.wandb_project:
