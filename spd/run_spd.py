@@ -303,7 +303,7 @@ def calc_topk_l2_rank_one(
 
 
 def calc_topk_l2_full_rank(
-    subnetwork_params: list[
+    subnet_param_vals: list[
         Float[Tensor, "k d_out"]
         | Float[Tensor, "k d_in d_out"]
         | Float[Tensor, "n_instances k d_out"]
@@ -326,14 +326,14 @@ def calc_topk_l2_full_rank(
         The L2 penalty for the topk subnetworks. One value for each n_instance (used in tms and
             deep linear toy models).
     """
-    assert len(subnetwork_params) > 0, "No subnetwork parameters provided"
+    assert len(subnet_param_vals) > 0, "No subnetwork parameters provided"
 
     batch_size = topk_mask.shape[0]
     accumulate_shape = (batch_size,) if n_instances is None else (batch_size, n_instances)
 
-    topk_mask = topk_mask.to(subnetwork_params[0].dtype)
-    topk_l2_penalty = torch.zeros(accumulate_shape, device=subnetwork_params[0].device)
-    for subnetwork_param_val in subnetwork_params:
+    topk_mask = topk_mask.to(subnet_param_vals[0].dtype)
+    topk_l2_penalty = torch.zeros(accumulate_shape, device=subnet_param_vals[0].device)
+    for subnetwork_param_val in subnet_param_vals:
         if n_instances is None:
             # subnetwork_param_val: [k, d_in, d_out] or [k, d_out] (if bias param)
             # topk_mask: [batch, k]
@@ -352,7 +352,7 @@ def calc_topk_l2_full_rank(
         topk_params = einops.einsum(subnetwork_param_val, topk_mask, ein_str)
         topk_l2_penalty = topk_l2_penalty + ((topk_params) ** 2).mean(dim=mean_dims)
 
-    return topk_l2_penalty / len(subnetwork_params)
+    return topk_l2_penalty / len(subnet_param_vals)
 
 
 def calc_param_match_loss(
@@ -400,14 +400,13 @@ def calc_param_match_loss(
 
 
 def calc_orthog_loss_full_rank(
-    subnetwork_params: list[
+    subnet_param_vals: list[
         Float[Tensor, "k d_out"]
         | Float[Tensor, "k d_in d_out"]
         | Float[Tensor, "n_instances k d_out"]
         | Float[Tensor, "n_instances k d_in d_out"]
     ],
     has_instance_dim: bool = False,
-    distil_from_target: bool = False,
 ) -> Float[Tensor, ""] | Float[Tensor, " n_instances"]:
     """Calculate the sum of the absolute values of inner products of different subnets.
 
@@ -417,32 +416,26 @@ def calc_orthog_loss_full_rank(
     Args:
         subnetwork_params: The parameters of the SPDModel.
         has_instance_dim: Whether the model has an n_instances dimension.
-        distil_from_target: Whether to include the final subnetwork index in the orthogonality loss.
 
     Returns:
         The orthogonality loss of shape [n_instances] if the model has an n_instances dimension,
         otherwise of shape [].
     """
-    first_param = subnetwork_params[0]
+    first_param = subnet_param_vals[0]
     if has_instance_dim:
         # params: [n_instances, k, d_out] or [n_instances, k, d_in, d_out]
-        assert all(param.ndim in (3, 4) for param in subnetwork_params), "Invalid number of dims"
+        assert all(param.ndim in (3, 4) for param in subnet_param_vals), "Invalid number of dims"
         k = first_param.shape[1]
-        final_k_dims = (k - 1, k - 1) if distil_from_target else (k, k)
-        dot_prods = torch.zeros((first_param.shape[0], *final_k_dims), device=first_param.device)
+        dot_prods = torch.zeros((first_param.shape[0], k, k), device=first_param.device)
         ein_str = "n_instances k1 ... d_out, n_instances k2 ... d_out -> n_instances k1 k2"
     else:
         # params: [k, d_out] or [k, d_in, d_out]
-        assert all(param.ndim in (2, 3) for param in subnetwork_params), "Invalid number of dims"
+        assert all(param.ndim in (2, 3) for param in subnet_param_vals), "Invalid number of dims"
         k = first_param.shape[0]
-        final_k_dims = (k - 1, k - 1) if distil_from_target else (k, k)
-        dot_prods = torch.zeros(final_k_dims, device=first_param.device)
+        dot_prods = torch.zeros((k, k), device=first_param.device)
         ein_str = "k1 ... d_out, k2 ... d_out -> k1 k2"
 
-    for subnet in subnetwork_params:
-        if distil_from_target:
-            # Remove the final subnetwork index from the orthogonality loss
-            subnet = subnet[:, :-1] if has_instance_dim else subnet[:-1]
+    for subnet in subnet_param_vals:
         dot_prods += einops.einsum(subnet, subnet, ein_str)
 
     # Multiply the k l diagonal by 0
@@ -726,9 +719,14 @@ def optimize(
         orthog_loss = None
         if config.orthog_coeff is not None:
             assert config.full_rank, "Orthogonality loss only works in full rank models"
+            subnet_param_vals = list(model.all_subnetwork_params().values())
+            if config.distil_from_target:
+                # Remove the final subnetwork index from all params
+                subnet_param_vals = [
+                    param[:, :-1] if has_instance_dim else param[:-1] for param in subnet_param_vals
+                ]
             orthog_loss = calc_orthog_loss_full_rank(
-                list(model.all_subnetwork_params().values()),
-                distil_from_target=config.distil_from_target,
+                subnet_param_vals=subnet_param_vals,
             )
 
         param_match_loss = None
@@ -798,7 +796,7 @@ def optimize(
                 if config.full_rank:
                     assert isinstance(model, SPDFullRankModel)
                     topk_l2_loss = calc_topk_l2_full_rank(
-                        subnetwork_params=list(model.all_subnetwork_params().values()),
+                        subnet_param_vals=list(model.all_subnetwork_params().values()),
                         topk_mask=topk_mask,
                         n_instances=getattr(model, "n_instances", None),
                     )
