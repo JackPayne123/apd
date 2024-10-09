@@ -50,10 +50,10 @@ class ParamComponents(nn.Module):
         x: Float[Tensor, "batch dim1"],
         topk_mask: Bool[Tensor, "batch k"] | None = None,
     ) -> tuple[Float[Tensor, "batch dim2"], Float[Tensor, "batch k"]]:
-        inner_acts = torch.einsum("bf,fk->bk", x, self.A)
+        inner_acts = einops.einsum(x, self.A, "batch dim1, dim1 k -> batch k")
         if topk_mask is not None:
-            inner_acts *= topk_mask
-        out = torch.einsum("bk,kg->bg", inner_acts, self.B)
+            inner_acts = einops.einsum(inner_acts, topk_mask, "batch k, batch k -> batch k")
+        out = einops.einsum(inner_acts, self.B, "batch k, k dim2 -> batch dim2")
         return out, inner_acts
 
 
@@ -154,7 +154,8 @@ class MLPComponents(nn.Module):
         inner_acts.append(inner_acts_linear1)
         layer_acts.append(x)
 
-        x, inner_acts_linear2 = self.linear2(torch.nn.functional.relu(x), topk_mask)
+        x = torch.nn.functional.relu(x)
+        x, inner_acts_linear2 = self.linear2(x, topk_mask)
         inner_acts.append(inner_acts_linear2)
         layer_acts.append(x)
         return x, layer_acts, inner_acts
@@ -205,7 +206,8 @@ class MLPComponentsFullRank(nn.Module):
         inner_acts.append(inner_acts_linear1)
         layer_acts.append(x)
 
-        x, inner_acts_linear2 = self.linear2(torch.nn.functional.relu(x), topk_mask)
+        x = torch.nn.functional.relu(x)
+        x, inner_acts_linear2 = self.linear2(x, topk_mask)
         inner_acts.append(inner_acts_linear2)
         layer_acts.append(x)
         return x, layer_acts, inner_acts

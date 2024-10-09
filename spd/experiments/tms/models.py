@@ -101,13 +101,13 @@ class TMSSPDModel(SPDModel):
         inner_act_0 = torch.einsum("...if,ifk->...ik", x, self.A)
         if topk_mask is not None:
             assert topk_mask.shape == inner_act_0.shape
-            inner_act_0 *= topk_mask
+            inner_act_0 = torch.einsum("...ik,...ik->...ik", inner_act_0, topk_mask)
         layer_act_0 = torch.einsum("...ik,ikh->...ih", inner_act_0, self.B)
 
         inner_act_1 = torch.einsum("...ih,ikh->...ik", layer_act_0, self.B)
         if topk_mask is not None:
             assert topk_mask.shape == inner_act_1.shape
-            inner_act_1 *= topk_mask
+            inner_act_1 = torch.einsum("...ik,...ik->...ik", inner_act_1, topk_mask)
         layer_act_1 = torch.einsum("...ik,ifk->...if", inner_act_1, self.A)
         pre_relu = layer_act_1 + self.b_final
 

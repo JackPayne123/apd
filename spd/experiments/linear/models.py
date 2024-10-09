@@ -59,10 +59,22 @@ class DeepLinearParamComponents(nn.Module):
         x: Float[Tensor, "batch n_instances n_features"],
         topk_mask: Bool[Tensor, "batch n_instances k"] | None = None,
     ) -> tuple[Float[Tensor, "batch n_instances n_features"], Float[Tensor, "batch n_instances k"]]:
-        inner_acts = torch.einsum("bif,ifk->bik", x, self.A)
+        inner_acts = einops.einsum(
+            x,
+            self.A,
+            "batch n_instances n_features, n_instances n_features k -> batch n_instances k",
+        )
         if topk_mask is not None:
-            inner_acts = inner_acts * topk_mask
-        out = torch.einsum("bik,ikg->big", inner_acts, self.B)
+            inner_acts = einops.einsum(
+                inner_acts,
+                topk_mask,
+                "batch n_instances k, batch n_instances k -> batch n_instances k",
+            )
+        out = einops.einsum(
+            inner_acts,
+            self.B,
+            "batch n_instances k, n_instances k n_features -> batch n_instances n_features",
+        )
         return out, inner_acts
 
 
