@@ -201,13 +201,13 @@ class TMSSPDFullRankModel(SPDFullRankModel):
     ]:
         inner_act_0 = torch.einsum("...if,ikfh->...ikh", x, self.subnetwork_params)
         if topk_mask is not None:
-            assert topk_mask.shape == inner_act_0.shape
+            assert topk_mask.shape == inner_act_0.shape[:-1]
             inner_act_0 = torch.einsum("...ikh,...ik->...ikh", inner_act_0, topk_mask)
         layer_act_0 = torch.einsum("...ikh->...ih", inner_act_0)
 
         inner_act_1 = torch.einsum("...ih,ikfh->...ikf", layer_act_0, self.subnetwork_params)
         if topk_mask is not None:
-            assert topk_mask.shape == inner_act_1.shape
+            assert topk_mask.shape == inner_act_1.shape[:-1]
             inner_act_1 = torch.einsum("...ikf,...ik->...ikf", inner_act_1, topk_mask)
         layer_act_1 = torch.einsum("...ikf->...if", inner_act_1)
 
