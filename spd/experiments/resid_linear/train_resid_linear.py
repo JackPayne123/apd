@@ -1,10 +1,8 @@
 """Trains a residual linear model on one-hot input vectors."""
 
 import json
-from collections.abc import Callable
 from pathlib import Path
 
-import einops
 import torch
 import wandb
 from jaxtyping import Float
@@ -15,7 +13,6 @@ from torch.nn import functional as F
 from spd.experiments.resid_linear.models import ResidualLinearModel
 from spd.experiments.resid_linear.resid_linear_dataset import (
     ResidualLinearDataset,
-    create_label_function,
 )
 from spd.utils import DatasetGeneratedDataLoader, set_seed
 
@@ -41,8 +38,9 @@ def train(
     config: Config,
     model: ResidualLinearModel,
     trainable_params: list[nn.Parameter],
-    dataloader: DatasetGeneratedDataLoader[Float[Tensor, "batch n_features"]],
-    label_fn: Callable[[Float[Tensor, "batch d_embed"]], Float[Tensor, "batch n_functions"]],
+    dataloader: DatasetGeneratedDataLoader[
+        tuple[Float[Tensor, "batch n_features"], Float[Tensor, "batch d_resid"]]
+    ],
     device: str,
     out_dir: Path | None = None,
 ) -> float | None:
@@ -52,20 +50,12 @@ def train(
     optimizer = torch.optim.AdamW(trainable_params, lr=config.lr, weight_decay=0.0)
 
     final_loss = None
-    for step, (batch, _) in enumerate(dataloader):
+    for step, (batch, labels) in enumerate(dataloader):
         if step >= config.steps:
             break
         optimizer.zero_grad()
         batch = batch.to(device)
         out, _, _ = model(batch)
-
-        raw_labels: Float[Tensor, "batch n_features"] = label_fn(batch)
-        # We want our labels to be downprojected to the residual stream space because there is no
-        # unembedding matrix.
-        labels = einops.einsum(
-            model.W_E, raw_labels, "n_features d_embed, batch n_features -> batch d_embed"
-        )
-
         loss = F.mse_loss(out, labels)
         loss.backward()
         optimizer.step()
@@ -125,18 +115,18 @@ if __name__ == "__main__":
     trainable_params = [p for n, p in model.named_parameters() if "W_E" not in n]
 
     dataset = ResidualLinearDataset(
+        embed_matrix=model.W_E,
         n_features=config.n_features,
         feature_probability=config.feature_probability,
         device=device,
+        label_fn_seed=config.label_fn_seed,
     )
-    label_fn = create_label_function(config.d_embed, seed=config.label_fn_seed)
     dataloader = DatasetGeneratedDataLoader(dataset, batch_size=config.batch_size, shuffle=False)
     train(
         config=config,
         model=model,
         trainable_params=trainable_params,
         dataloader=dataloader,
-        label_fn=label_fn,
         device=device,
         out_dir=out_dir,
     )

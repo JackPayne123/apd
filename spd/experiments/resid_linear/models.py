@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 import einops
@@ -13,6 +14,7 @@ from spd.utils import init_param_
 class ResidualLinearModel(Model):
     def __init__(self, n_features: int, d_embed: int, d_mlp: int, n_layers: int):
         super().__init__()
+        self.n_features = n_features
         self.d_embed = d_embed
         self.d_mlp = d_mlp
         self.n_layers = n_layers
@@ -50,7 +52,17 @@ class ResidualLinearModel(Model):
 
     @classmethod
     def from_pretrained(cls, path: str | Path) -> "ResidualLinearModel":
-        raise NotImplementedError
+        params = torch.load(path, weights_only=True, map_location="cpu")
+        with open(Path(path).parent / "config.json") as f:
+            config = json.load(f)
+
+        n_features = config["n_features"]
+        d_embed = config["d_embed"]
+        d_mlp = config["d_mlp"]
+        n_layers = config["n_layers"]
+        model = cls(n_features, d_embed, d_mlp, n_layers)
+        model.load_state_dict(params)
+        return model
 
     def all_decomposable_params(
         self,
@@ -71,6 +83,7 @@ class ResidualLinearSPDFullRankModel(SPDFullRankModel):
         self, n_features: int, d_embed: int, d_mlp: int, n_layers: int, k: int, init_scale: float
     ):
         super().__init__()
+        self.n_features = n_features
         self.d_embed = d_embed
         self.d_mlp = d_mlp
         self.n_layers = n_layers
@@ -106,13 +119,7 @@ class ResidualLinearSPDFullRankModel(SPDFullRankModel):
     def all_subnetwork_params_summed(
         self,
     ) -> dict[str, Float[Tensor, "k d_out"] | Float[Tensor, "k d_in d_out"]]:  # bias or weight
-        params = {}
-        for i, mlp in enumerate(self.layers):
-            params[f"layers.{i}.input_layer.weight"] = mlp.linear1.subnetwork_params.sum(dim=0)
-            params[f"layers.{i}.input_layer.bias"] = mlp.linear1.bias.sum(dim=0)
-            params[f"layers.{i}.output_layer.weight"] = mlp.linear2.subnetwork_params.sum(dim=0)
-            params[f"layers.{i}.output_layer.bias"] = mlp.linear2.bias.sum(dim=0)
-        return params
+        return {p_name: p.sum(dim=0) for p_name, p in self.all_subnetwork_params().items()}
 
     def forward(
         self, x: Float[Tensor, "batch n_features"], topk_mask: Bool[Tensor, "batch k"] | None = None
@@ -142,3 +149,45 @@ class ResidualLinearSPDFullRankModel(SPDFullRankModel):
             inner_acts[f"layers.{i}.input_layer.weight"] = inner_acts_i[0]
             inner_acts[f"layers.{i}.output_layer.weight"] = inner_acts_i[1]
         return residual, layer_acts, inner_acts
+
+    @classmethod
+    def from_pretrained(cls, path: str | Path) -> "ResidualLinearSPDFullRankModel":
+        raise NotImplementedError
+
+    def set_subnet_to_zero(
+        self, subnet_idx: int
+    ) -> dict[str, Float[Tensor, " d_out"] | Float[Tensor, "d_in d_out"]]:  # bias or weight
+        stored_vals = {}
+        for i, mlp in enumerate(self.layers):
+            stored_vals[f"layers.{i}.input_layer.weight"] = (
+                mlp.linear1.subnetwork_params[subnet_idx, :, :].detach().clone()
+            )
+            stored_vals[f"layers.{i}.input_layer.bias"] = (
+                mlp.linear1.bias[subnet_idx, :].detach().clone()
+            )
+            stored_vals[f"layers.{i}.output_layer.weight"] = (
+                mlp.linear2.subnetwork_params[subnet_idx, :, :].detach().clone()
+            )
+            stored_vals[f"layers.{i}.output_layer.bias"] = (
+                mlp.linear2.bias[subnet_idx, :].detach().clone()
+            )
+            mlp.linear1.subnetwork_params[subnet_idx, :, :] = 0.0
+            mlp.linear1.bias[subnet_idx, :] = 0.0
+            mlp.linear2.subnetwork_params[subnet_idx, :, :] = 0.0
+            mlp.linear2.bias[subnet_idx, :] = 0.0
+        return stored_vals
+
+    def restore_subnet(
+        self,
+        subnet_idx: int,
+        stored_vals: dict[str, Float[Tensor, " d_out"] | Float[Tensor, "d_in d_out"]],
+    ) -> None:
+        for i, mlp in enumerate(self.layers):
+            mlp.linear1.subnetwork_params[subnet_idx, :, :] = stored_vals[
+                f"layers.{i}.input_layer.weight"
+            ]
+            mlp.linear1.bias[subnet_idx, :] = stored_vals[f"layers.{i}.input_layer.bias"]
+            mlp.linear2.subnetwork_params[subnet_idx, :, :] = stored_vals[
+                f"layers.{i}.output_layer.weight"
+            ]
+            mlp.linear2.bias[subnet_idx, :] = stored_vals[f"layers.{i}.output_layer.bias"]

@@ -76,6 +76,16 @@ class PiecewiseConfig(BaseModel):
     decompose_bias: bool = True
 
 
+class ResidualLinearConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    task_name: Literal["residual_linear"] = "residual_linear"
+    k: PositiveInt
+    feature_probability: Probability
+    init_scale: float = 1.0
+    label_fn_seed: int = 0
+    pretrained_model_path: RootPath
+
+
 class Config(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
     wandb_project: str | None = None
@@ -109,7 +119,7 @@ class Config(BaseModel):
     sparsity_warmup_pct: Probability = 0.0
     unit_norm_matrices: bool = True
     ablation_attributions: bool = False
-    task_config: DeepLinearConfig | PiecewiseConfig | TMSConfig = Field(
+    task_config: DeepLinearConfig | PiecewiseConfig | TMSConfig | ResidualLinearConfig = Field(
         ..., discriminator="task_name"
     )
 
@@ -709,7 +719,6 @@ def optimize(
 
         # Do a forward pass with all subnetworks
         out, layer_acts, inner_acts = model(batch)
-        assert len(inner_acts) == model.n_param_matrices
 
         # Calculate losses
         out_recon_loss = calc_recon_mse(out, labels, has_instance_dim)
