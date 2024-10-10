@@ -89,7 +89,8 @@ def main(
         init_scale=config.task_config.init_scale,
     ).to(device)
 
-    # Don't train the Embedding matrix
+    # Use the target_model's embedding matrix and don't train it further
+    model.W_E.data[:, :] = target_model.W_E.data.detach().clone()
     model.W_E.requires_grad = False
 
     param_map = {}

@@ -55,6 +55,7 @@ def train(
             break
         optimizer.zero_grad()
         batch = batch.to(device)
+        labels = labels.to(device)
         out, _, _ = model(batch)
         loss = F.mse_loss(out, labels)
         loss.backward()
@@ -74,9 +75,6 @@ def train(
         print(f"Saved config to {config_path}")
 
     print(f"Final loss: {final_loss}")
-    print("\nIn residual space (after embedding)")
-    print(f"labels[20:30]:\n{labels[20:30]}")  # type: ignore
-    print(f"out[20:30]:\n{out[20:30]}")  # type: ignore
     return final_loss
 
 
@@ -91,7 +89,7 @@ if __name__ == "__main__":
         n_layers=1,
         feature_probability=0.2,
         batch_size=256,
-        steps=5_000,
+        steps=20_000,
         print_freq=100,
         lr=1e-2,
     )

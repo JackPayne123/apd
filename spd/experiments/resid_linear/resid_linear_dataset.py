@@ -9,11 +9,19 @@ from torch.utils.data import Dataset
 
 
 def calc_labels(
-    coeffs: Float[Tensor, " d_embed"], residual: Float[Tensor, "batch d_embed"]
-) -> Float[Tensor, "batch n_functions"]:
-    pre_act_fn = einops.einsum(coeffs, residual, "d_embed, batch d_embed -> batch d_embed")
-    labels = F.gelu(pre_act_fn) + residual
-    return labels
+    coeffs: Float[Tensor, " n_functions"],
+    embed_matrix: Float[Tensor, "n_features d_embed"],
+    inputs: Float[Tensor, "batch n_functions"],
+) -> Float[Tensor, "batch d_embed"]:
+    """Calculate the corresponding labels for the inputs using W_E(gelu(coeffs*x) + x)."""
+    weighted_inputs = einops.einsum(
+        inputs, coeffs, "batch n_functions, n_functions -> batch n_functions"
+    )
+    raw_labels = F.gelu(weighted_inputs) + inputs
+    embedded_labels = einops.einsum(
+        raw_labels, embed_matrix, "batch n_functions, n_functions d_embed -> batch d_embed"
+    )
+    return embedded_labels
 
 
 class ResidualLinearDataset(
@@ -39,12 +47,12 @@ class ResidualLinearDataset(
 
     def create_label_function(
         self,
-    ) -> Callable[[Float[Tensor, " d_embed"]], Float[Tensor, " d_embed"]]:
-        """Create a function that takes in the embedded inputs and returns the labels"""
+    ) -> Callable[[Float[Tensor, "batch n_functions"]], Float[Tensor, "batch d_embed"]]:
+        """Create a function that takes in the raw inputs and returns the labels"""
         gen = torch.Generator()
         gen.manual_seed(self.label_fn_seed)
         coeffs = torch.rand(self.embed_matrix.shape[1], generator=gen)
-        return lambda residual: calc_labels(coeffs, residual)
+        return lambda inputs: calc_labels(coeffs, self.embed_matrix, inputs)
 
     def generate_batch(
         self, batch_size: int
@@ -53,8 +61,5 @@ class ResidualLinearDataset(
         batch = torch.rand(batch_size, self.n_features, device=self.device) * 2 - 1
         mask = torch.rand_like(batch) < self.feature_probability
         batch = batch * mask
-        embed = einops.einsum(
-            batch, self.embed_matrix, "batch n_features, n_features d_embed -> batch d_embed"
-        )
-        labels = self.label_fn(embed)
+        labels = self.label_fn(batch)
         return batch, labels
