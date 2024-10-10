@@ -331,6 +331,7 @@ def calc_topk_l2_full_rank(
 
     topk_mask = topk_mask.to(subnet_param_vals[0].dtype)
     topk_l2_penalty = torch.zeros(accumulate_shape, device=subnet_param_vals[0].device)
+    n_params = 0
     for subnetwork_param_val in subnet_param_vals:
         if n_instances is None:
             # subnetwork_param_val: [k, d_in, d_out] or [k, d_out] (if bias param)
@@ -348,9 +349,10 @@ def calc_topk_l2_full_rank(
             mean_dims = (0, -2, -1) if subnetwork_param_val.ndim == 4 else (0, -1)
 
         topk_params = einops.einsum(subnetwork_param_val, topk_mask, ein_str)
-        topk_l2_penalty = topk_l2_penalty + ((topk_params) ** 2).mean(dim=mean_dims)
+        topk_l2_penalty = topk_l2_penalty + ((topk_params) ** 2).sum(dim=mean_dims)
+        n_params += topk_params.numel()
 
-    return topk_l2_penalty / len(subnet_param_vals)
+    return topk_l2_penalty / len(subnet_param_vals) / n_params
 
 
 def calc_param_match_loss(
@@ -380,6 +382,7 @@ def calc_param_match_loss(
     """
     device = next(iter(subnetwork_params_summed.values())).device
     param_match_loss = torch.tensor(0.0, device=device)
+    n_params = 0
     for target_param_name, subnetwork_param_name in param_map.items():
         pretrained_weight = pretrained_weights[target_param_name]
         subnetwork_param = subnetwork_params_summed[subnetwork_param_name]
@@ -391,10 +394,11 @@ def calc_param_match_loss(
             # params: [d_out] or [d_in, d_out]
             assert pretrained_weight.ndim in (2, 1)
             mean_dims = (-2, -1) if pretrained_weight.ndim == 2 else (-1,)
-        param_match_loss = param_match_loss + ((subnetwork_param - pretrained_weight) ** 2).mean(
+        param_match_loss = param_match_loss + ((subnetwork_param - pretrained_weight) ** 2).sum(
             dim=mean_dims
         )
-    return param_match_loss / len(subnetwork_params_summed)
+        n_params += subnetwork_param[0].numel() if has_instance_dim else subnetwork_param.numel()
+    return param_match_loss / n_params
 
 
 def calc_orthog_loss_full_rank(
@@ -408,8 +412,9 @@ def calc_orthog_loss_full_rank(
 ) -> Float[Tensor, ""] | Float[Tensor, " n_instances"]:
     """Calculate the sum of the absolute values of inner products of different subnets.
 
-    NOTE: We could and maybe should try L2 instead of absolute, as well as cosine sim rather than
-    dot product.
+    NOTE: We could and maybe should try L2 instead of absolute. Note that it is important that we
+    use the dot product rather than the cosine sim normalized by layer (though we may normalize
+    at the end).
 
     Args:
         subnetwork_params: The parameters of the SPDModel.
