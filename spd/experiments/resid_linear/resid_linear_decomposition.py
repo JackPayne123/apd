@@ -1,16 +1,22 @@
 """Residual Linear decomposition script."""
 
+from functools import partial
 from pathlib import Path
 
 import fire
+import matplotlib.pyplot as plt
 import torch
 import wandb
+from jaxtyping import Float
+from torch import Tensor
+from tqdm import tqdm
 
 from spd.experiments.resid_linear.models import ResidualLinearModel, ResidualLinearSPDFullRankModel
 from spd.experiments.resid_linear.resid_linear_dataset import (
     ResidualLinearDataset,
 )
 from spd.log import logger
+from spd.plotting import plot_subnetwork_attributions_statistics, plot_subnetwork_correlations
 from spd.run_spd import Config, ResidualLinearConfig, optimize
 from spd.utils import (
     DatasetGeneratedDataLoader,
@@ -45,6 +51,45 @@ def get_run_name(config: Config, n_features: int, n_layers: int, d_resid: int, d
         run_suffix += f"bs{config.batch_size}_"
         run_suffix += f"ft{n_features}_lay{n_layers}_resid{d_resid}_mlp{d_mlp}"
     return config.wandb_run_name_prefix + run_suffix
+
+
+def resid_linear_plot_results_fn(
+    model: ResidualLinearSPDFullRankModel,
+    step: int,
+    out_dir: Path | None,
+    device: str,
+    config: Config,
+    topk_mask: Float[Tensor, " batch_size k"] | None,
+    dataloader: DatasetGeneratedDataLoader[
+        tuple[Float[Tensor, "batch n_features"], Float[Tensor, "batch d_embed"]]
+    ]
+    | None = None,
+    **_,
+) -> dict[str, plt.Figure]:
+    assert isinstance(config.task_config, ResidualLinearConfig)
+    fig_dict = {}
+
+    if config.topk is not None:
+        if dataloader is not None:
+            fig_dict_correlations = plot_subnetwork_correlations(
+                dataloader=dataloader,
+                spd_model=model,
+                config=config,
+                device=device,
+            )
+            fig_dict.update(fig_dict_correlations)
+
+        assert topk_mask is not None
+        fig_dict_attributions = plot_subnetwork_attributions_statistics(topk_mask=topk_mask)
+        fig_dict.update(fig_dict_attributions)
+
+    # Save plots to files
+    if out_dir:
+        for k, v in fig_dict.items():
+            out_file = out_dir / f"{k}_s{step}.png"
+            v.savefig(out_file, dpi=200)
+            tqdm.write(f"Saved plot to {out_file}")
+    return fig_dict
 
 
 def main(
@@ -111,6 +156,7 @@ def main(
     )
     dataloader = DatasetGeneratedDataLoader(dataset, batch_size=config.batch_size, shuffle=False)
 
+    plot_results_fn = partial(resid_linear_plot_results_fn, dataloader=dataloader)
     optimize(
         model=model,
         config=config,
@@ -119,6 +165,7 @@ def main(
         pretrained_model=target_model,
         param_map=param_map,
         out_dir=out_dir,
+        plot_results_fn=plot_results_fn,
     )
 
     if config.wandb_project:

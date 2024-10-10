@@ -4,7 +4,7 @@ import time
 from collections.abc import Iterator
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from typing import Any, Generic, TypeVar
+from typing import Any, Generic, NamedTuple, TypeVar
 
 import einops
 import numpy as np
@@ -18,7 +18,7 @@ from pydantic.v1.utils import deep_update
 from torch import Tensor
 from torch.utils.data import DataLoader, Dataset
 
-from spd.models.base import SPDFullRankModel, SPDModel
+from spd.models.base import Model, SPDFullRankModel, SPDModel
 from spd.settings import REPO_ROOT
 
 T = TypeVar("T", bound=BaseModel)
@@ -537,3 +537,70 @@ def remove_grad_parallel_to_subnetwork_vecs(
     """
     parallel_component = einops.einsum(A_grad, A, "... d_in k, ... d_in k -> ... k")
     A_grad -= einops.einsum(parallel_component, A, "... k, ... d_in k -> ... d_in k")
+
+
+class SPDoutputs(NamedTuple):
+    target_model_output: torch.Tensor | None
+    spd_model_output: torch.Tensor
+    spd_topk_model_output: torch.Tensor
+    layer_acts: dict[str, torch.Tensor]
+    inner_acts: dict[str, torch.Tensor]
+    attribution_scores: torch.Tensor
+    topk_mask: torch.Tensor
+
+
+def run_spd_forward_pass(
+    spd_model: SPDModel | SPDFullRankModel,
+    target_model: Model | None,
+    input_array: torch.Tensor,
+    full_rank: bool,
+    ablation_attributions: bool,
+    batch_topk: bool,
+    topk: float,
+    distil_from_target: bool,
+) -> SPDoutputs:
+    # non-SPD model, and SPD-model non-topk forward pass
+    if target_model is not None:
+        model_output_hardcoded, _, _ = target_model(input_array)
+    else:
+        model_output_hardcoded = None
+
+    model_output_spd, layer_acts, inner_acts = spd_model(input_array)
+
+    if ablation_attributions:
+        attribution_scores = calc_ablation_attributions(
+            model=spd_model, batch=input_array, out=model_output_spd
+        )
+    else:
+        if full_rank:
+            attribution_scores = calc_attributions_full_rank(
+                out=model_output_spd,
+                inner_acts=inner_acts,
+                layer_acts=layer_acts,
+            )
+        else:
+            attribution_scores = calc_attributions_rank_one(
+                out=model_output_spd, inner_acts_vals=list(inner_acts.values())
+            )
+
+    # We always assume the final subnetwork is the one we want to distil
+    topk_attrs = attribution_scores[..., :-1] if distil_from_target else attribution_scores
+    topk_mask = calc_topk_mask(topk_attrs, topk, batch_topk=batch_topk)
+    if distil_from_target:
+        # Add back the final subnetwork index to the topk mask and set it to True
+        last_subnet_mask = torch.ones(
+            (*topk_mask.shape[:-1], 1), dtype=torch.bool, device=attribution_scores.device
+        )
+        topk_mask = torch.cat((topk_mask, last_subnet_mask), dim=-1)
+
+    model_output_spd_topk, _, _ = spd_model(input_array, topk_mask=topk_mask)
+    attribution_scores = attribution_scores.cpu().detach()
+    return SPDoutputs(
+        target_model_output=model_output_hardcoded,
+        spd_model_output=model_output_spd,
+        spd_topk_model_output=model_output_spd_topk,
+        layer_acts=layer_acts,
+        inner_acts=inner_acts,
+        attribution_scores=attribution_scores,
+        topk_mask=topk_mask,
+    )
