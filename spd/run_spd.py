@@ -290,15 +290,18 @@ def calc_topk_l2_rank_one(
     accumulate_shape = (n_instances,) if n_instances is not None else ()
 
     topk_l2_penalty = torch.zeros(accumulate_shape, device=As_and_Bs_vals[0][0].device)
+    n_params = 0
+    batch_size = topk_mask.shape[0]
     for A, B in As_and_Bs_vals:
         # A: [d_in, k] or [n_instances, d_in, k]
         # B: [k, d_out] or [n_instances, k, d_out]
         # topk_mask: [batch, k] or [batch, n_instances, k]
         A_topk = torch.einsum("...fk,b...k ->b...fk", A, topk_mask)
         AB_topk = torch.einsum("b...fk,...kh->b...fh", A_topk, B)
-        topk_l2_penalty = topk_l2_penalty + ((AB_topk) ** 2).mean(dim=(0, -2, -1))
+        topk_l2_penalty = topk_l2_penalty + ((AB_topk) ** 2).sum(dim=(0, -2, -1))
+        n_params += AB_topk.shape[-2] * AB_topk.shape[-1]
 
-    return topk_l2_penalty / len(As_and_Bs_vals)
+    return topk_l2_penalty / len(As_and_Bs_vals) / n_params / batch_size
 
 
 def calc_topk_l2_full_rank(
@@ -332,6 +335,7 @@ def calc_topk_l2_full_rank(
     topk_mask = topk_mask.to(subnet_param_vals[0].dtype)
     topk_l2_penalty = torch.zeros(accumulate_shape, device=subnet_param_vals[0].device)
     n_params = 0
+    batch_size = topk_mask.shape[0]
     for subnetwork_param_val in subnet_param_vals:
         if n_instances is None:
             # subnetwork_param_val: [k, d_in, d_out] or [k, d_out] (if bias param)
@@ -352,7 +356,7 @@ def calc_topk_l2_full_rank(
         topk_l2_penalty = topk_l2_penalty + ((topk_params) ** 2).sum(dim=mean_dims)
         n_params += topk_params.numel()
 
-    return topk_l2_penalty / len(subnet_param_vals) / n_params
+    return topk_l2_penalty / len(subnet_param_vals) / n_params / batch_size
 
 
 def calc_param_match_loss(
