@@ -4,13 +4,13 @@ wandb_run_name_prefix: "fr_"
 full_rank: true
 unit_norm_matrices: false
 seed: 0
-topk: 1.2
+topk: 1.1
 batch_topk: true
 param_match_coeff: 1.0
-topk_recon_coeff: 1e-1
-topk_l2_coeff: 1e-4
+topk_recon_coeff: 1
+topk_l2_coeff: 1e-2
 ablation_attributions: false
-lr: 1e-3
+lr: 1e-2
 batch_size: 1024
 steps: 30_000
 print_freq: 500

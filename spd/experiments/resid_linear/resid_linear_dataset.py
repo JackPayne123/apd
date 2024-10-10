@@ -51,7 +51,8 @@ class ResidualLinearDataset(
         """Create a function that takes in the raw inputs and returns the labels"""
         gen = torch.Generator()
         gen.manual_seed(self.label_fn_seed)
-        coeffs = torch.rand(self.embed_matrix.shape[1], generator=gen)
+        # coeffs are between [1, 2]
+        coeffs = torch.rand(self.embed_matrix.shape[1], generator=gen) + 1
         return lambda inputs: calc_labels(coeffs, self.embed_matrix, inputs)
 
     def generate_batch(

@@ -20,6 +20,8 @@ from spd.plotting import plot_subnetwork_attributions_statistics, plot_subnetwor
 from spd.run_spd import Config, ResidualLinearConfig, optimize
 from spd.utils import (
     DatasetGeneratedDataLoader,
+    calc_attributions_full_rank,
+    calc_attributions_rank_one,
     init_wandb,
     load_config,
     save_config_to_wandb,
@@ -53,6 +55,67 @@ def get_run_name(config: Config, n_features: int, n_layers: int, d_resid: int, d
     return config.wandb_run_name_prefix + run_suffix
 
 
+def _collect_subnetwork_attributions(
+    model: ResidualLinearSPDFullRankModel, device: str, full_rank: bool
+) -> Float[Tensor, "batch k"]:
+    """
+    Collect subnetwork attributions.
+
+    This function creates a test batch using an identity matrix, passes it through the model,
+    and collects the attributions.
+
+    Args:
+        model (ResidualLinearSPDFullRankModel): The model to collect attributions on.
+        device (str): The device to run computations on.
+        full_rank (bool): Whether the model is full rank or rank one.
+    Returns:
+        The attribution scores.
+    """
+    test_batch = torch.eye(model.n_features, device=device)
+
+    out, test_layer_acts, test_inner_acts = model(test_batch)
+
+    if full_rank:
+        attribution_scores = calc_attributions_full_rank(
+            out=out, inner_acts=test_inner_acts, layer_acts=test_layer_acts
+        )
+    else:
+        attribution_scores = calc_attributions_rank_one(
+            out=out, inner_acts_vals=list(test_inner_acts.values())
+        )
+    return attribution_scores
+
+
+def plot_subnetwork_attributions(
+    attribution_scores: Float[Tensor, "batch k"],
+    out_dir: Path | None,
+    step: int,
+) -> dict[str, plt.Figure]:
+    """Plot subnetwork attributions."""
+    fig, ax = plt.subplots(figsize=(5, 5), constrained_layout=True)
+    im = ax.matshow(attribution_scores.detach().cpu().numpy(), aspect="auto", cmap="Reds")
+    ax.set_xlabel("Subnetwork Index")
+    ax.set_ylabel("Batch Index")
+    ax.set_title("Subnetwork Attributions")
+
+    # Annotate each cell with the numeric value
+    for i in range(attribution_scores.shape[0]):
+        for j in range(attribution_scores.shape[1]):
+            ax.text(
+                j,
+                i,
+                f"{attribution_scores[i, j]:.2f}",
+                ha="center",
+                va="center",
+                color="black",
+                fontsize=10,
+            )
+    plt.colorbar(im)
+    if out_dir:
+        fig.savefig(out_dir / f"subnetwork_attributions_s{step}.png", dpi=200)
+    return {"subnetwork_attributions": fig}
+
+
 def resid_linear_plot_results_fn(
     model: ResidualLinearSPDFullRankModel,
     step: int,
@@ -68,6 +131,11 @@ def resid_linear_plot_results_fn(
 ) -> dict[str, plt.Figure]:
     assert isinstance(config.task_config, ResidualLinearConfig)
     fig_dict = {}
+
+    attribution_scores = _collect_subnetwork_attributions(model, device, config.full_rank)
+    tqdm.write(f"Attribution scores:\n{attribution_scores}")
+    fig_dict_attributions = plot_subnetwork_attributions(attribution_scores, out_dir, step)
+    fig_dict.update(fig_dict_attributions)
 
     if config.topk is not None:
         if dataloader is not None:
