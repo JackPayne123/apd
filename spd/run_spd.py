@@ -650,12 +650,10 @@ def optimize(
 
     lr_schedule_fn = get_lr_schedule_fn(config.lr_schedule, config.lr_exponential_halflife)
 
-    subnet_param_vals = list(model.all_subnetwork_params().values())
-
     n_params = sum(p.numel() for p in list(model.all_subnetwork_params_summed().values()))
     if has_instance_dim:
         # All subnetwork param have an n_instances dimension
-        n_params = n_params / (model.n_instances * len(subnet_param_vals))
+        n_params = n_params / model.n_instances
 
     step_lp_sparsity_coeff = None
     step_topk_recon_coeff = None
@@ -732,14 +730,14 @@ def optimize(
         orthog_loss = None
         if config.orthog_coeff is not None:
             assert config.full_rank, "Orthogonality loss only works in full rank models"
+            subnet_param_vals = list(model.all_subnetwork_params().values())
             if config.distil_from_target:
                 # Remove the final subnetwork index from all params
-                orthog_subnet_param_vals = [
+                subnet_param_vals = [
                     param[:, :-1] if has_instance_dim else param[:-1] for param in subnet_param_vals
                 ]
-            else:
-                orthog_subnet_param_vals = subnet_param_vals
-            orthog_loss = calc_orthog_loss_full_rank(subnet_param_vals=orthog_subnet_param_vals)
+
+            orthog_loss = calc_orthog_loss_full_rank(subnet_param_vals=subnet_param_vals)
 
         param_match_loss = None
         if config.param_match_coeff is not None:
@@ -809,7 +807,7 @@ def optimize(
                 if config.full_rank:
                     assert isinstance(model, SPDFullRankModel)
                     topk_l2_loss = calc_topk_l2_full_rank(
-                        subnet_param_vals=subnet_param_vals,
+                        subnet_param_vals=list(model.all_subnetwork_params().values()),
                         topk_mask=topk_mask,
                         n_params=n_params,
                         n_instances=getattr(model, "n_instances", None),
