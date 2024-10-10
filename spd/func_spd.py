@@ -90,9 +90,11 @@ def calc_param_match_loss(
     device: str,
 ) -> Float[Tensor, ""]:
     param_match_loss = torch.tensor(0.0, device=device)
+    n_params = 0
     for key, value in k_params.items():
-        param_match_loss += (value.sum(dim=0) - pretrained_params[key]).pow(2).mean()
-    return param_match_loss / len(k_params)
+        param_match_loss += (value.sum(dim=0) - pretrained_params[key]).pow(2).sum()
+        n_params += pretrained_params[key].numel()
+    return param_match_loss / n_params
 
 
 # TODO: orthog_loss
@@ -110,17 +112,16 @@ def calc_topk_l2_loss(
     k_params: dict[str, Float[Tensor, " k ... d"]],
 ) -> Float[Tensor, ""]:
     l2_loss = torch.tensor(0.0, device=topk_mask.device)
-    for _, value in k_params.items():
-        l2_loss += (
-            einops.einsum(
-                topk_mask,
-                value,
-                "batch k, k ... d -> batch ... d",
-            )
-            .pow(2)
-            .mean()
+    n_params = 0
+    for _, weight in k_params.items():
+        summed_weight = einops.einsum(
+            topk_mask,
+            weight,
+            "batch k, k ... d -> batch ... d",
         )
-    return l2_loss / len(k_params)
+        l2_loss += summed_weight.pow(2).mean(dim=0).sum()
+        n_params += summed_weight[0].numel()
+    return l2_loss / n_params
 
 
 def calc_lp_loss(attribs: Float[Tensor, "batch k"], p: float) -> Float[Tensor, ""]:
@@ -267,6 +268,13 @@ def optimize(
     total_samples = 0
     data_iter = cycle(dataloader)  # automatically cycles through dataset
 
+    full_model_l2_loss = 0
+    n_params = 0
+    for p in pretrained_params.values():
+        full_model_l2_loss += p.data.norm() ** 2
+        n_params += p.numel()
+    print(f"Full model L2 loss: {full_model_l2_loss/n_params:.3e}")
+
     for step in tqdm(range(config.steps + 1), ncols=0):
         step_lr = get_lr_with_warmup(
             step=step,
@@ -327,27 +335,27 @@ def optimize(
         # if config.orthog_coeff is not None:
         #     loss = loss + config.orthog_coeff * orthog_loss.mean()
         if config.param_match_coeff is not None:
-            loss = loss + config.param_match_coeff * param_match_loss.mean()
+            loss = loss + config.param_match_coeff * param_match_loss
         if step_lp_sparsity_coeff is not None:
-            loss = loss + step_lp_sparsity_coeff * lp_sparsity_loss.mean()
+            loss = loss + step_lp_sparsity_coeff * lp_sparsity_loss
         if step_topk_recon_coeff is not None:
-            loss = loss + step_topk_recon_coeff * topk_recon_loss.mean()
+            loss = loss + step_topk_recon_coeff * topk_recon_loss
         if config.topk_l2_coeff is not None:
-            loss = loss + config.topk_l2_coeff * topk_l2_loss.mean()
+            loss = loss + config.topk_l2_coeff * topk_l2_loss
         if config.topk_param_attrib_coeff is not None:
-            loss = loss + config.topk_param_attrib_coeff * topk_param_attrib_loss.mean()
+            loss = loss + config.topk_param_attrib_coeff * topk_param_attrib_loss
 
         # Logging
         if step % config.print_freq == 0:
             nl = " "
             tqdm.write(f"Step {step}")
-            tqdm.write(f"Total loss: {loss.item()}")
-            tqdm.write(f"Current pnorm:{nl}{step_pnorm}")
-            tqdm.write(f"LP sparsity loss:{nl}{lp_sparsity_loss}")
-            tqdm.write(f"Topk recon loss:{nl}{topk_recon_loss}")
-            tqdm.write(f"topk l2 loss:{nl}{topk_l2_loss}")
-            tqdm.write(f"param match loss:{nl}{param_match_loss}")
-            tqdm.write(f"topk param attrib loss:{nl}{topk_param_attrib_loss}")
+            tqdm.write(f"Total loss: {loss}")
+            tqdm.write(f"Topk recon loss:{nl}{topk_recon_loss:.3e}")
+            tqdm.write(f"topk l2 loss:{nl}{topk_l2_loss:.3e}")
+            tqdm.write(f"param match loss:{nl}{param_match_loss:.3e}")
+            tqdm.write(f"topk param attrib loss:{nl}{topk_param_attrib_loss:.3e}")
+            tqdm.write(f"LP sparsity loss:{nl}{lp_sparsity_loss:.3e}")
+            tqdm.write(f"Current pnorm:{nl}{step_pnorm:.3e}")
             # tqdm.write(f"Orthog loss:{nl}{orthog_loss}")
             if config.wandb_project:
                 wandb.log(
