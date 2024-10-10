@@ -4,7 +4,7 @@ wandb_run_name_prefix: "fr_"
 full_rank: true
 unit_norm_matrices: false
 seed: 0
-topk: 2
+topk: 1.2
 batch_topk: true
 param_match_coeff: 1.0
 topk_recon_coeff: 1e-1

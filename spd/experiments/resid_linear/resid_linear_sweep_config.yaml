@@ -4,10 +4,12 @@ metric:
   name: total_loss
   goal: minimize
 parameters:
+  lr:
+    values: [1e-3, 1e-2]
   topk_recon_coeff:
-    values: [1, 1e-2]
+    values: [100, 1, 1e-2]
   topk_l2_coeff:
-    values: [1e-1, 1e-4]
+    values: [1e-2, 1e-4, 1e-6]
 
 command:
 - ${env}
