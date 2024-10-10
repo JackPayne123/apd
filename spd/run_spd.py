@@ -285,13 +285,14 @@ def calc_recon_mse(
 def calc_topk_l2_rank_one(
     As_and_Bs_vals: list[tuple[Float[Tensor, "d_layer_in k"], Float[Tensor, "k d_layer_out"]]],
     topk_mask: Bool[Tensor, "batch k"] | Bool[Tensor, "batch n_instances k"],
+    n_params: int,
 ) -> Float[Tensor, ""] | Float[Tensor, " n_instances"]:
     """Calculate the L2 of the sum of the topk subnetworks.
 
     Args:
         all_As_and_Bs: The A and B matrices for each layer.
         topk_mask: The topk mask to use for the L2 penalty.
-
+        n_params: The number of decomposable parameters in the model.
     Returns:
         The L2 penalty for the topk subnetworks. One value for each n_instance (used in tms and
             deep linear toy models).
@@ -300,15 +301,16 @@ def calc_topk_l2_rank_one(
     accumulate_shape = (n_instances,) if n_instances is not None else ()
 
     topk_l2_penalty = torch.zeros(accumulate_shape, device=As_and_Bs_vals[0][0].device)
+    batch_size = topk_mask.shape[0]
     for A, B in As_and_Bs_vals:
         # A: [d_in, k] or [n_instances, d_in, k]
         # B: [k, d_out] or [n_instances, k, d_out]
         # topk_mask: [batch, k] or [batch, n_instances, k]
         A_topk = torch.einsum("...fk,b...k ->b...fk", A, topk_mask)
         AB_topk = torch.einsum("b...fk,...kh->b...fh", A_topk, B)
-        topk_l2_penalty = topk_l2_penalty + ((AB_topk) ** 2).mean(dim=(0, -2, -1))
+        topk_l2_penalty = topk_l2_penalty + ((AB_topk) ** 2).sum(dim=(0, -2, -1))
 
-    return topk_l2_penalty / len(As_and_Bs_vals)
+    return topk_l2_penalty / n_params / batch_size
 
 
 def calc_topk_l2_full_rank(
@@ -319,6 +321,7 @@ def calc_topk_l2_full_rank(
         | Float[Tensor, "n_instances k d_in d_out"]
     ],
     topk_mask: Bool[Tensor, "batch k"] | Bool[Tensor, "batch n_instances k"],
+    n_params: int,
     n_instances: int | None = None,
 ) -> Float[Tensor, ""] | Float[Tensor, " n_instances"]:
     """Calculate the L2 of the sum of the topk subnetworks.
@@ -329,6 +332,7 @@ def calc_topk_l2_full_rank(
     Args:
         subnetwork_params: The parameters of the subnetwork.
         topk_mask: The topk mask to use for the L2 penalty.
+        n_params: The number of decomposable parameters in the model.
         n_instances: The number of instances in the model.
 
     Returns:
@@ -341,6 +345,7 @@ def calc_topk_l2_full_rank(
 
     topk_mask = topk_mask.to(subnet_param_vals[0].dtype)
     topk_l2_penalty = torch.zeros(accumulate_shape, device=subnet_param_vals[0].device)
+    batch_size = topk_mask.shape[0]
     for subnetwork_param_val in subnet_param_vals:
         if n_instances is None:
             # subnetwork_param_val: [k, d_in, d_out] or [k, d_out] (if bias param)
@@ -358,9 +363,9 @@ def calc_topk_l2_full_rank(
             mean_dims = (0, -2, -1) if subnetwork_param_val.ndim == 4 else (0, -1)
 
         topk_params = einops.einsum(subnetwork_param_val, topk_mask, ein_str)
-        topk_l2_penalty = topk_l2_penalty + ((topk_params) ** 2).mean(dim=mean_dims)
+        topk_l2_penalty = topk_l2_penalty + ((topk_params) ** 2).sum(dim=mean_dims)
 
-    return topk_l2_penalty / len(subnet_param_vals)
+    return topk_l2_penalty / n_params / batch_size
 
 
 def calc_param_match_loss(
@@ -369,6 +374,7 @@ def calc_param_match_loss(
         str, Float[Tensor, "n_instances d_out"] | Float[Tensor, " d_out"]
     ],
     param_map: dict[str, str],
+    n_params: int,
     has_instance_dim: bool = False,
 ) -> Float[Tensor, ""] | Float[Tensor, " n_instances"]:
     """Calculate the parameter match loss.
@@ -383,6 +389,7 @@ def calc_param_match_loss(
             the subnetwork dimension). May have an n_instances and/or d_in dimension.
         param_map: A map from keys in pretrained_weights to keys in subnetwork_params_summed.
         has_instance_dim: Whether the model has an n_instances dimension.
+        n_params: The number of parameters in the model.
 
     Returns:
         The parameter match loss of shape [n_instances] if the model has an n_instances dimension,
@@ -401,10 +408,10 @@ def calc_param_match_loss(
             # params: [d_out] or [d_in, d_out]
             assert pretrained_weight.ndim in (2, 1)
             mean_dims = (-2, -1) if pretrained_weight.ndim == 2 else (-1,)
-        param_match_loss = param_match_loss + ((subnetwork_param - pretrained_weight) ** 2).mean(
+        param_match_loss = param_match_loss + ((subnetwork_param - pretrained_weight) ** 2).sum(
             dim=mean_dims
         )
-    return param_match_loss / len(subnetwork_params_summed)
+    return param_match_loss / n_params
 
 
 def calc_orthog_loss_full_rank(
@@ -418,13 +425,13 @@ def calc_orthog_loss_full_rank(
 ) -> Float[Tensor, ""] | Float[Tensor, " n_instances"]:
     """Calculate the sum of the absolute values of inner products of different subnets.
 
-    NOTE: We could and maybe should try L2 instead of absolute, as well as cosine sim rather than
-    dot product.
+    NOTE: We could and maybe should try L2 instead of absolute. Note that it is important that we
+    use the dot product rather than the cosine sim normalized by layer (though we may normalize
+    at the end).
 
     Args:
         subnetwork_params: The parameters of the SPDModel.
         has_instance_dim: Whether the model has an n_instances dimension.
-
     Returns:
         The orthogonality loss of shape [n_instances] if the model has an n_instances dimension,
         otherwise of shape [].
@@ -551,6 +558,7 @@ def calc_topk_param_attrib_loss(
     target_layer_pre_acts: dict[str, Tensor],
     target_layer_post_acts: dict[str, Tensor],
     has_instance_dim: bool,
+    n_params: int,
 ) -> Float[Tensor, ""] | Float[Tensor, " n_instances"]:
     """Attribution patch loss of original params to sum of active subnetwork params.
 
@@ -578,6 +586,7 @@ def calc_topk_param_attrib_loss(
         target_layer_post_acts: The activations after the parameter matrix is applied in the target
             model.
         has_instance_dim: Whether the model has an n_instances dimension.
+        n_params: The number of decomposable parameters in the model.
 
     Returns:
         The topk parameter attribution loss. Will have an n_instances dimension if the model has an
@@ -629,8 +638,7 @@ def calc_topk_param_attrib_loss(
 
         loss = loss + loss_out_idx**2
     loss = (loss / target_out.shape[-1] + 1e-16).sum(dim=0)  # Sum over the batch dim
-    total_n_params = sum(p.numel() for p in target_params.values())
-    return loss / total_n_params
+    return loss / n_params
 
 
 def optimize(
@@ -660,6 +668,10 @@ def optimize(
             assert set(param_map.values()) == set(model.all_subnetwork_params_summed().keys())
 
         pretrained_model.to(device=device)
+    n_params = sum(p.numel() for p in list(model.all_subnetwork_params_summed().values()))
+    if has_instance_dim:
+        # All subnetwork param have an n_instances dimension
+        n_params = n_params / model.n_instances
 
     step_lp_sparsity_coeff = None
     step_topk_recon_coeff = None
@@ -732,9 +744,8 @@ def optimize(
                 subnet_param_vals = [
                     param[:, :-1] if has_instance_dim else param[:-1] for param in subnet_param_vals
                 ]
-            orthog_loss = calc_orthog_loss_full_rank(
-                subnet_param_vals=subnet_param_vals,
-            )
+
+            orthog_loss = calc_orthog_loss_full_rank(subnet_param_vals=subnet_param_vals)
 
         param_match_loss = None
         if config.param_match_coeff is not None:
@@ -744,6 +755,7 @@ def optimize(
                 pretrained_weights=pretrained_model.all_decomposable_params(),
                 subnetwork_params_summed=model.all_subnetwork_params_summed(),
                 param_map=param_map,
+                n_params=n_params,
                 has_instance_dim=has_instance_dim,
             )
 
@@ -804,11 +816,14 @@ def optimize(
                     topk_l2_loss = calc_topk_l2_full_rank(
                         subnet_param_vals=list(model.all_subnetwork_params().values()),
                         topk_mask=topk_mask,
+                        n_params=n_params,
                         n_instances=getattr(model, "n_instances", None),
                     )
                 else:
                     topk_l2_loss = calc_topk_l2_rank_one(
-                        As_and_Bs_vals=list(model.all_As_and_Bs().values()), topk_mask=topk_mask
+                        As_and_Bs_vals=list(model.all_As_and_Bs().values()),
+                        topk_mask=topk_mask,
+                        n_params=n_params,
                     )
 
             if config.topk_recon_coeff is not None:
@@ -826,6 +841,7 @@ def optimize(
                     target_layer_pre_acts=layer_pre_acts,
                     target_layer_post_acts=layer_post_acts,
                     has_instance_dim=has_instance_dim,
+                    n_params=n_params,
                 )
 
         # Add up the loss terms
