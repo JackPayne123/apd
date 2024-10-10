@@ -89,6 +89,9 @@ def main(
         init_scale=config.task_config.init_scale,
     ).to(device)
 
+    # Don't train the Embedding matrix
+    model.W_E.requires_grad = False
+
     param_map = {}
     for i in range(target_model.n_layers):
         # Map from pretrained model's `all_decomposable_params` to the SPD models'
