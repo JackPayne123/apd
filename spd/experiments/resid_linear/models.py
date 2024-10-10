@@ -152,7 +152,21 @@ class ResidualLinearSPDFullRankModel(SPDFullRankModel):
 
     @classmethod
     def from_pretrained(cls, path: str | Path) -> "ResidualLinearSPDFullRankModel":
-        raise NotImplementedError
+        path = Path(path)
+        with open(path.parent / "config.json") as f:
+            config = json.load(f)
+
+        params = torch.load(path, weights_only=True, map_location="cpu")
+        model = cls(
+            n_features=config["n_features"],
+            d_embed=config["d_embed"],
+            d_mlp=config["d_mlp"],
+            n_layers=config["n_layers"],
+            k=config["k"],
+            init_scale=config["init_scale"],
+        )
+        model.load_state_dict(params)
+        return model
 
     def set_subnet_to_zero(
         self, subnet_idx: int
