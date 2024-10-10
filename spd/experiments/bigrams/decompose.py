@@ -78,7 +78,7 @@ def main():
         slow_images=True,
         pnorm=None,
         pnorm_end=None,
-        lr_schedule="constant",
+        lr_schedule="cosine",
         sparsity_loss_type="jacobian",
         sparsity_warmup_pct=0.0,
         unit_norm_matrices=False,
@@ -107,7 +107,7 @@ def main():
         device=device,
         dataloader=dataloader,
         pretrained_model=model,
-        out_dir=Path("out2/"),
+        out_dir=Path("out/"),
     )
 
     if config.wandb_project:

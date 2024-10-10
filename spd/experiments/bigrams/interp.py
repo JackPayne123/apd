@@ -2,6 +2,7 @@ import json
 from functools import partial
 from pathlib import Path
 
+import einops
 import fire
 import matplotlib.pyplot as plt
 import torch
@@ -24,15 +25,54 @@ hidden_dim = 200
 batch_size = 500
 
 dataset = BigramDataset(A_vocab_size, B_vocab_size)
-batch_size = 10
-dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
 
 model = BigramModel(dataset.n_A, dataset.n_B, embedding_dim, hidden_dim)
 model.load_state_dict(torch.load("bigram_model.pt", weights_only=True))
+model.to("cpu")
 
-k_params = torch.load("out/k_params_step_6000.pt", weights_only=True)
+# L2 norm of all weights
+l2_norm = sum(p.norm().pow(2) for p in model.parameters())
+print("L2 norm of all weights:", l2_norm.item())
+
+# L2 norm of all weights
+l2_norm = sum(p.pow(2).mean() for p in model.parameters())
+print("L2 norm of all weights:", l2_norm.item())
+
+k_params = torch.load("out/k_params_step_10000.pt", weights_only=True)
 for key, param in k_params.items():
     print(key, param.shape)
+
+l2_norm_by_k = []
+for k in range(5):
+    l2_norm = sum(p[k].norm().pow(2) for p in k_params.values())
+    l2_norm_by_k.append(l2_norm.item())
+print("L2 norm by k:", l2_norm_by_k)
+
+
+l2_norm_by_k = []
+for k in range(5):
+    l2_norm = sum(p[k].pow(2).mean() for p in k_params.values())
+    l2_norm_by_k.append(l2_norm.item())
+print("L2 norm by k:", l2_norm_by_k)
+
+
+def functional_model(x, k: int, k_params=k_params):
+    params = {key: v[k].to("cpu") for key, v in k_params.items()}
+    return torch.func.functional_call(model, params, (x,))
+
+
+batch_size = 1
+dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
+for i, (batch, label) in enumerate(dataloader):
+    fig, ax = plt.subplots(constrained_layout=True)
+    for k in range(5):
+        fig.suptitle(f"Input B = {batch[0, -5:]}")
+        out = functional_model(batch, k)[0]
+        print("k =", k, "functional_model(batch, k) =", out)
+        ax.plot(out.detach().cpu().numpy(), label=f"Subnet k = {k}", alpha=0.3)
+    fig.legend()
+    if i > 5:
+        break
 # %%
 # W_E = k_params["W_E"].detach().cpu().numpy()
 # fig, ax = plt.subplots()
