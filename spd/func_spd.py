@@ -9,6 +9,7 @@ import matplotlib.pyplot as plt
 import matplotlib.ticker as tkr
 import numpy as np
 import torch
+import torch.nn.functional as F
 import wandb
 from jaxtyping import Float
 from matplotlib.colors import CenteredNorm
@@ -64,6 +65,20 @@ def plot_matrix(
         ax.set_yticklabels([f"{L:.0f}" for L in range(1, n_functions + 1)])
 
 
+def recon_loss_mse(
+    pretrained_out: Float[Tensor, "batch ... d"], spd_out: Float[Tensor, "batch ... d"]
+) -> Float[Tensor, ""]:
+    return (pretrained_out - spd_out).pow(2).mean()
+
+
+def recon_loss_KL(
+    pretrained_out: Float[Tensor, "batch ... d"], spd_out: Float[Tensor, "batch ... d"]
+) -> Float[Tensor, ""]:
+    return F.kl_div(
+        input=spd_out, target=pretrained_out, reduction="mean"
+    )  # or batchmean, not sure. TODO
+
+
 def plot_param_dict(
     param_dict: dict[str, torch.Tensor],
     prefix: str = "",
@@ -90,19 +105,25 @@ def calc_param_match_loss(
     device: str,
 ) -> Float[Tensor, ""]:
     param_match_loss = torch.tensor(0.0, device=device)
+    n_params = 0
     for key, value in k_params.items():
-        param_match_loss += (value.sum(dim=0) - pretrained_params[key]).pow(2).mean()
-    return param_match_loss / len(k_params)
+        param_match_loss += (value.sum(dim=0) - pretrained_params[key]).pow(2).sum()
+        n_params += value.numel()
+    return param_match_loss / n_params
 
 
-# TODO: orthog_loss
-
-
-def calc_recon_loss(
-    topk_out: Float[Tensor, " batch n_outputs"],
-    pretrained_out: Float[Tensor, " batch n_outputs"],
+def calc_orthog_loss(
+    k_params: dict[str, Float[Tensor, " k ... d"]],
 ) -> Float[Tensor, ""]:
-    return (topk_out - pretrained_out).pow(2).mean(dim=-1).mean(dim=0)
+    k = next(iter(k_params.values())).shape[0]
+    device = next(iter(k_params.values())).device
+
+    cosine_sims = torch.zeros((k, k), device=device)
+    for weight in k_params.values():
+        weight = weight.reshape(weight.shape[0], -1)
+        weight = weight / weight.norm(dim=-1, keepdim=True)
+        cosine_sims += einops.einsum(weight, weight, "k1 d, k2 d -> k1 k2")
+    return (cosine_sims.triu(diagonal=1) ** 2).mean()
 
 
 def calc_topk_l2_loss(
@@ -110,17 +131,19 @@ def calc_topk_l2_loss(
     k_params: dict[str, Float[Tensor, " k ... d"]],
 ) -> Float[Tensor, ""]:
     l2_loss = torch.tensor(0.0, device=topk_mask.device)
-    for _, value in k_params.items():
-        l2_loss += (
-            einops.einsum(
-                topk_mask,
-                value,
-                "batch k, k ... d -> batch ... d",
-            )
-            .pow(2)
-            .mean()
+    n_params = 0
+    for value in k_params.values():
+        active_weight = einops.einsum(
+            topk_mask,
+            value,
+            "batch k, k ... d -> batch ... d",
         )
-    return l2_loss / len(k_params)
+
+        l2_loss += (
+            active_weight.pow(2).sum()  # over batch and ... d
+        )
+        n_params += active_weight.numel()  # counting batch and ... d
+    return l2_loss / n_params
 
 
 def calc_lp_loss(attribs: Float[Tensor, "batch k"], p: float) -> Float[Tensor, ""]:
@@ -136,15 +159,16 @@ def calc_topk_param_attrib_loss(
     device: str,
 ) -> Float[Tensor, ""]:
     loss: Float[Tensor, " batch"] = torch.zeros(batch_size, device=device)
+    n_params = 0
     for key, value in k_params.items():
         param_diff: Float[Tensor, " ... d"] = (
             einops.einsum(topk_mask, value, "batch k, k ... d -> batch ... d")
             - pretrained_params[key]
         )
         param_grad: Float[Tensor, " batch ... d"] = pretrained_param_grads[key]
-        param_attrib = param_diff * param_grad
-        loss += einops.reduce(param_attrib, "batch ... d -> batch", "mean")
-    return (loss**2).mean(dim=0)
+        loss += einops.einsum(param_diff, param_grad, "batch ... d, batch ... d ->")
+        n_params += param_diff.numel()  # counting batch and ... d
+    return (loss**2) / n_params
 
 
 def optimize(
@@ -153,6 +177,11 @@ def optimize(
     device: str,
     dataloader: DataLoader[tuple[Float[Tensor, "... n_features"], Float[Tensor, "... n_features"]]],
     pretrained_model: Model | None,
+    loss_fn: Callable[
+        [Float[Tensor, "batch n_tasks n_classes"], Float[Tensor, "batch n_tasks n_classes"]],
+        Float[Tensor, ""],
+    ],
+    decomposable_params_whitelist: list[str] | None = None,
     param_map: dict[str, str] | None = None,
     plot_results_fn: Callable[..., dict[str, plt.Figure]] | None = None,
     out_dir: Path | None = None,
@@ -167,16 +196,19 @@ def optimize(
     # it k times. Just optimize this dictionary of parameters.
     pretrained_model.to(device=device)
     pretrained_params = pretrained_model.state_dict()
-    if isinstance(pretrained_model, BigramModel):
-        decomposable_params = pretrained_params
-    elif isinstance(pretrained_model, PiecewiseFunctionTransformer):
-        decomposable_params = [
-            "mlps.0.input_layer.weight",
-            "mlps.0.output_layer.weight",
-            "mlps.0.input_layer.bias",
-        ]
-    else:
-        raise ValueError(f"Unsure how to decompose {pretrained_model}")
+    decomposable_params = [
+        p
+        for p in pretrained_params
+        if decomposable_params_whitelist is None or p in decomposable_params_whitelist
+    ]
+    # if isinstance(pretrained_model, PiecewiseFunctionTransformer):
+    #     decomposable_params = [
+    #         "mlps.0.input_layer.weight",
+    #         "mlps.0.output_layer.weight",
+    #         "mlps.0.input_layer.bias",
+    #     ]
+    # else:
+    #     decomposable_params = pretrained_params
     k_params = {}
     k = config.task_config.k
     assert config.topk is not None, "Need topk"
@@ -186,27 +218,7 @@ def optimize(
             shape = [k, *value.shape]
             k_params[key] = torch.empty(shape, device=device, dtype=value.dtype, requires_grad=True)
 
-    # Okay now for piecewise I want to use the handcoded SPD initialization so I am gonna use the
-    # SPD model after all, but literally only to get the initialization params. Also, it's annoying
-    # that SPD model uses different parameter names so we're using this map. Also, the params are
-    # transposed.
-    if config.initialize_spd == "oldSPD":
-        assert isinstance(pretrained_model, PiecewiseFunctionTransformer)
-        model.to(device=device)
-        spd_params = model.state_dict()
-        spd_param_map = [
-            ("mlps.0.input_layer.weight", "mlps.0.linear1.subnetwork_params", True),
-            ("mlps.0.output_layer.weight", "mlps.0.linear2.subnetwork_params", True),
-            ("mlps.0.input_layer.bias", "mlps.0.linear1.bias", False),
-        ]
-        for key, spd_key, transpose in spd_param_map:
-            if transpose:
-                k_params[key].data[:] = spd_params[spd_key].transpose(-2, -1)
-            else:
-                k_params[key].data[:] = spd_params[spd_key]
-            pass
-        del model, spd_params, spd_param_map
-    elif config.initialize_spd == "fullcopies":
+    if config.initialize_spd == "fullcopies":
         for key in k_params:
             k_params[key].data[:] = (
                 pretrained_params[key].data + torch.randn_like(k_params[key].data) * 1e0
@@ -228,32 +240,44 @@ def optimize(
         }
         return functional_call(pretrained_model, summed_params, single_batch)
 
-    def model_func_sq(
-        mask: Float[Tensor, "k"],
-        single_batch: Float[Tensor, " n_inputs"],
-        k_params: dict[str, Float[Tensor, " k ..."]],
-    ) -> Float[Tensor, ""]:
-        return model_func(mask, single_batch, k_params).pow(2).mean(dim=-1)
+    # def model_func_sq(
+    #     mask: Float[Tensor, "k"],
+    #     single_batch: Float[Tensor, " n_inputs"],
+    #     k_params: dict[str, Float[Tensor, " k ..."]],
+    # ) -> Float[Tensor, ""]:
+    #     return model_func(mask, single_batch, k_params).pow(2).mean(dim=(-1, -2))
 
     def single_attrib(
         single_batch: Float[Tensor, " n_inputs"],
         k_params: dict[str, Float[Tensor, " k ..."]],
+        loss_fn: Callable[
+            [Float[Tensor, "... n_outputs"], Float[Tensor, "... n_outputs"]], Float[Tensor, ""]
+        ],
     ) -> Float[Tensor, " k"]:
         single_mask = torch.ones(k, device=device)
-        return grad(model_func_sq, argnums=0)(single_mask, single_batch, k_params) ** 2
+        k_params_full = {
+            k: einops.einsum(v, single_mask, "k ..., k -> ...") for k, v in k_params.items()
+        }
+        attribs = []
+        full_model_out = functional_call(pretrained_model, k_params_full, single_batch)
+        for i in range(k):
+            k_params_i = {k: v[i] for k, v in k_params.items()}  # or not i TODO
+            model_out_i = functional_call(pretrained_model, k_params_i, single_batch)
+            attribs.append(loss_fn(target=full_model_out, input=model_out_i))
+        return torch.stack(attribs, dim=-1)
 
-    def model_func_0(  # TODO: Take output dims into account
-        single_batch: Float[Tensor, " n_inputs"],
-        summed_params: dict[str, Float[Tensor, " k ..."]],
-    ) -> Float[Tensor, ""]:
-        return functional_call(pretrained_model, summed_params, single_batch)[0]
+    # def model_func_0(  # TODO: Take output dims into account
+    #     single_batch: Float[Tensor, " n_inputs"],
+    #     summed_params: dict[str, Float[Tensor, " k ..."]],
+    # ) -> Float[Tensor, ""]:
+    #     return functional_call(pretrained_model, summed_params, single_batch)[0]
 
-    def single_param_grads(single_batch: Float[Tensor, " n_inputs"]) -> Float[Tensor, ""]:
-        return grad(model_func_0, argnums=1)(single_batch, pretrained_params)
+    # def single_param_grads(single_batch: Float[Tensor, " n_inputs"]) -> Float[Tensor, ""]:
+    #     return grad(model_func_0, argnums=1)(single_batch, pretrained_params)
 
-    batched_param_grads = vmap(single_param_grads, in_dims=0)
+    # batched_param_grads = vmap(single_param_grads, in_dims=0)
     batched_model_func = vmap(model_func, in_dims=(0, 0, None))
-    batched_attrib = vmap(single_attrib, in_dims=(0, None))
+    batched_attrib = vmap(single_attrib, in_dims=(0, None, None))
 
     # TODO: Can we do torch.compile here?
 
@@ -281,7 +305,7 @@ def optimize(
         step_pnorm = config.pnorm or get_step_pnorm(step, config.steps, config.pnorm_end)
 
         opt.zero_grad(set_to_none=True)
-        batch, _ = next(data_iter)
+        batch, _, _ = next(data_iter)
         batch = batch.to(device=device)
         labels = pretrained_model(batch)
 
@@ -302,17 +326,18 @@ def optimize(
                 sparsity_warmup_pct=config.sparsity_warmup_pct,
             )
 
-        pretrained_param_grads = batched_param_grads(batch)
+        # pretrained_param_grads = batched_param_grads(batch)
 
-        attribs = batched_attrib(batch, k_params)
+        attribs = batched_attrib(batch, k_params, loss_fn)
         topk_mask = calc_topk_mask(attribs, topk=config.topk, batch_topk=config.batch_topk).float()
         topk_out = batched_model_func(topk_mask, batch, k_params)
 
-        topk_param_attrib_loss = calc_topk_param_attrib_loss(
-            k_params, topk_mask, pretrained_params, pretrained_param_grads, batch.shape[0], device
-        )
+        topk_param_attrib_loss = torch.tensor(0.0, device=device)
+        # calc_topk_param_attrib_loss(
+        #     k_params, topk_mask, pretrained_params, pretrained_param_grads, batch.shape[0], device
+        # )
 
-        topk_recon_loss = calc_recon_loss(topk_out, labels)
+        topk_recon_loss = loss_fn(labels, topk_out)
 
         param_match_loss = calc_param_match_loss(k_params, pretrained_params, device=device)
 

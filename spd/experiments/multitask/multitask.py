@@ -123,11 +123,16 @@ class MultiTaskModel(nn.Module):
         # Apply softmax to each task's output
         for i in range(self.num_tasks):
             output_start, output_end = self.output_indices[i]
-            task_output = raw_outputs[:, output_start:output_end]
+            if raw_outputs.ndim == 2:
+                task_output = raw_outputs[:, output_start:output_end]
+            elif raw_outputs.ndim == 1:
+                task_output = raw_outputs[output_start:output_end]
+            else:
+                raise ValueError(f"Invalid output dimension: {raw_outputs.ndim}")
             task_probs = F.softmax(task_output, dim=-1)  # Apply softmax
             outputs.append(task_probs)
 
-        return torch.stack(outputs, dim=1)
+        return torch.stack(outputs, dim=-2)
 
 
 def train(
