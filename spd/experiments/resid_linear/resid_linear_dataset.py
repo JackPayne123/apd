@@ -1,5 +1,3 @@
-from collections.abc import Callable
-
 import einops
 import torch
 import torch.nn.functional as F
@@ -40,20 +38,15 @@ class ResidualLinearDataset(
         self.feature_probability = feature_probability
         self.device = device
         self.label_fn_seed = label_fn_seed
-        self.label_fn = self.create_label_function()
+
+        # Create random coeffs between [1, 2]
+        gen = torch.Generator().manual_seed(self.label_fn_seed)
+        self.coeffs = torch.rand(self.embed_matrix.shape[0], generator=gen) + 1
+
+        self.label_fn = lambda inputs: calc_labels(self.coeffs, self.embed_matrix, inputs)
 
     def __len__(self) -> int:
         return 2**31
-
-    def create_label_function(
-        self,
-    ) -> Callable[[Float[Tensor, "batch n_functions"]], Float[Tensor, "batch d_embed"]]:
-        """Create a function that takes in the raw inputs and returns the labels"""
-        gen = torch.Generator()
-        gen.manual_seed(self.label_fn_seed)
-        # coeffs are between [1, 2]
-        coeffs = torch.rand(self.embed_matrix.shape[0], generator=gen) + 1
-        return lambda inputs: calc_labels(coeffs, self.embed_matrix, inputs)
 
     def generate_batch(
         self, batch_size: int

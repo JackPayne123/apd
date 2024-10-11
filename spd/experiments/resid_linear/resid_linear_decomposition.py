@@ -1,5 +1,6 @@
 """Residual Linear decomposition script."""
 
+import json
 from functools import partial
 from pathlib import Path
 
@@ -221,6 +222,14 @@ def main(
         device=device,
         label_fn_seed=config.task_config.label_fn_seed,
     )
+    # Save the coefficients used to generate the labels
+    coeff_list = dataset.coeffs.tolist()
+    with open(out_dir / "label_coeffs.json", "w") as f:
+        json.dump(coeff_list, f)
+    logger.info(f"Saved label coefficients to {out_dir / 'label_coeffs.json'}")
+    if config.wandb_project:
+        wandb.save(str(out_dir / "label_coeffs.json"), base_path=out_dir)
+
     dataloader = DatasetGeneratedDataLoader(dataset, batch_size=config.batch_size, shuffle=False)
 
     plot_results_fn = partial(resid_linear_plot_results_fn, dataloader=dataloader)
