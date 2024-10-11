@@ -5,6 +5,7 @@ from pathlib import Path
 
 import torch
 import wandb
+import yaml
 from jaxtyping import Float
 from pydantic import BaseModel, ConfigDict, PositiveFloat, PositiveInt
 from torch import Tensor, nn
@@ -65,14 +66,22 @@ def train(
             print(f"Step {step}: loss={final_loss}")
 
     if out_dir is not None:
-        model_path = out_dir / "model.pth"
+        model_path = out_dir / "target_model.pth"
         torch.save(model.state_dict(), model_path)
         print(f"Saved model to {model_path}")
 
-        config_path = out_dir / "config.json"
+        config_path = out_dir / "target_model_config.yaml"
         with open(config_path, "w") as f:
-            json.dump(config.model_dump(), f, indent=4)
+            yaml.dump(config.model_dump(mode="json"), f, indent=2)
         print(f"Saved config to {config_path}")
+
+        # Save the coefficients used to generate the labels
+        assert isinstance(dataloader.dataset, ResidualLinearDataset)
+        label_coeffs = dataloader.dataset.coeffs.tolist()
+        label_coeffs_path = out_dir / "label_coeffs.json"
+        with open(label_coeffs_path, "w") as f:
+            json.dump(label_coeffs, f)
+        print(f"Saved label coefficients to {label_coeffs_path}")
 
     print(f"Final loss: {final_loss}")
     return final_loss

@@ -3,11 +3,13 @@
 import json
 from functools import partial
 from pathlib import Path
+from typing import Any
 
 import fire
 import matplotlib.pyplot as plt
 import torch
 import wandb
+import yaml
 from jaxtyping import Float
 from torch import Tensor
 from tqdm import tqdm
@@ -160,6 +162,27 @@ def resid_linear_plot_results_fn(
     return fig_dict
 
 
+def save_target_model_info(
+    save_to_wandb: bool,
+    out_dir: Path,
+    target_model: ResidualLinearModel,
+    target_model_config_dict: dict[str, Any],
+    label_coeffs: list[float],
+) -> None:
+    torch.save(target_model.state_dict(), out_dir / "target_model.pth")
+
+    with open(out_dir / "target_model_config.yaml", "w") as f:
+        yaml.dump(target_model_config_dict, f, indent=2)
+
+    with open(out_dir / "label_coeffs.json", "w") as f:
+        json.dump(label_coeffs, f, indent=2)
+
+    if save_to_wandb:
+        wandb.save(str(out_dir / "target_model.pth"), base_path=out_dir)
+        wandb.save(str(out_dir / "target_model_config.yaml"), base_path=out_dir)
+        wandb.save(str(out_dir / "label_coeffs.json"), base_path=out_dir)
+
+
 def main(
     config_path_or_obj: Path | str | Config, sweep_config_path: Path | str | None = None
 ) -> None:
@@ -176,9 +199,10 @@ def main(
     print(f"Using device: {device}")
     assert isinstance(config.task_config, ResidualLinearConfig)
 
-    target_model = ResidualLinearModel.from_pretrained(config.task_config.pretrained_model_path).to(
-        device
+    target_model, target_model_config, label_coeffs = ResidualLinearModel.from_pretrained(
+        config.task_config.pretrained_model_path
     )
+    target_model = target_model.to(device)
 
     run_name = get_run_name(
         config,
@@ -192,6 +216,18 @@ def main(
         wandb.run.name = run_name
     out_dir = Path(__file__).parent / "out" / run_name
     out_dir.mkdir(parents=True, exist_ok=True)
+
+    # Save config
+    with open(out_dir / "final_config.yaml", "w") as f:
+        yaml.dump(config.model_dump(mode="json"), f, indent=2)
+
+    save_target_model_info(
+        save_to_wandb=config.wandb_project is not None,
+        out_dir=out_dir,
+        target_model=target_model,
+        target_model_config_dict=target_model_config,
+        label_coeffs=label_coeffs,
+    )
 
     model = ResidualLinearSPDFullRankModel(
         n_features=target_model.n_features,
@@ -220,15 +256,8 @@ def main(
         n_features=model.n_features,
         feature_probability=config.task_config.feature_probability,
         device=device,
-        label_fn_seed=config.task_config.label_fn_seed,
+        label_coeffs=label_coeffs,
     )
-    # Save the coefficients used to generate the labels
-    coeff_list = dataset.coeffs.tolist()
-    with open(out_dir / "label_coeffs.json", "w") as f:
-        json.dump(coeff_list, f)
-    logger.info(f"Saved label coefficients to {out_dir / 'label_coeffs.json'}")
-    if config.wandb_project:
-        wandb.save(str(out_dir / "label_coeffs.json"), base_path=out_dir)
 
     dataloader = DatasetGeneratedDataLoader(dataset, batch_size=config.batch_size, shuffle=False)
 

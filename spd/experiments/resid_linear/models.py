@@ -1,6 +1,6 @@
 import json
-import os
 from pathlib import Path
+from typing import Any
 
 import einops
 import torch
@@ -12,7 +12,9 @@ from wandb.apis.public import Run
 
 from spd.models.base import Model, SPDFullRankModel
 from spd.models.components import MLP, MLPComponentsFullRank
-from spd.utils import init_param_
+from spd.run_spd import Config, ResidualLinearConfig
+from spd.types import RootPath
+from spd.utils import download_wandb_file, init_param_, load_yaml
 
 
 class ResidualLinearModel(Model):
@@ -55,19 +57,24 @@ class ResidualLinearModel(Model):
         return residual, layer_pre_acts, layer_post_acts
 
     @classmethod
-    def from_pretrained(cls, path: str | Path) -> "ResidualLinearModel":
+    def from_pretrained(
+        cls, path: str | Path
+    ) -> tuple["ResidualLinearModel", dict[str, Any], list[float]]:
         params = torch.load(path, weights_only=True, map_location="cpu")
-        with open(Path(path).parent / "config.json") as f:
-            config = json.load(f)
+        with open(Path(path).parent / "target_model_config.yaml") as f:
+            config_dict = yaml.safe_load(f)
+
+        with open(Path(path).parent / "label_coeffs.json") as f:
+            label_coeffs = json.load(f)
 
         model = cls(
-            n_features=config["n_features"],
-            d_embed=config["d_embed"],
-            d_mlp=config["d_mlp"],
-            n_layers=config["n_layers"],
+            n_features=config_dict["n_features"],
+            d_embed=config_dict["d_embed"],
+            d_mlp=config_dict["d_mlp"],
+            n_layers=config_dict["n_layers"],
         )
         model.load_state_dict(params)
-        return model
+        return model, config_dict, label_coeffs
 
     def all_decomposable_params(
         self,
@@ -156,82 +163,87 @@ class ResidualLinearSPDFullRankModel(SPDFullRankModel):
         return residual, layer_acts, inner_acts
 
     @classmethod
-    def from_pretrained(
-        cls, path: str | Path, config_file: str | Path | None = None
-    ) -> "ResidualLinearSPDFullRankModel":
-        """Instantiate from a checkpoint file and (optionally) a config file.
+    def _load_model(
+        cls,
+        config_path: Path,
+        target_model_config_path: Path,
+        checkpoint_path: Path,
+        label_coeffs_path: Path,
+    ) -> tuple["ResidualLinearSPDFullRankModel", Config, list[float]]:
+        """Helper function to load the model from local files."""
 
-        Args:
-            path: The path to the checkpoint file.
-            config_file: The path to the yaml config file. If not provided, the config will be
-                loaded from the checkpoint file.
-        """
-        path = Path(path)
+        # Load config
+        config = Config(**load_yaml(config_path))
+        assert isinstance(config.task_config, ResidualLinearConfig)
 
-        config_file_path = (
-            path.parent / "final_config.yaml" if config_file is None else Path(config_file)
-        )
-        with open(config_file_path) as f:
-            config_dict = yaml.safe_load(f)
+        # Load target model config
+        target_model_config = load_yaml(target_model_config_path)
 
-        params = torch.load(path, weights_only=True, map_location="cpu")
+        # Load checkpoint
+        params = torch.load(checkpoint_path, weights_only=True, map_location="cpu")
 
-        # Hackily get the config values which aren't stored in the SPD config from the params
-        # TODO: In future we should store the target model config when running SPD.
-        n_features, d_embed = params["W_E"].shape
-        n_layers = max(int(k.split(".")[1]) for k in params if "layers." in k) + 1
-        k_2, d_embed_2, d_mlp = params["layers.0.linear1.subnetwork_params"].shape
-        assert k_2 == config_dict["task_config"]["k"], "k doesn't match between params and config"
-        assert d_embed == d_embed_2, "d_embed does not match between W_E and the first linear layer"
-
+        # Create model
         model = cls(
-            n_features=n_features,
-            d_embed=d_embed,
-            d_mlp=d_mlp,
-            n_layers=n_layers,
-            k=config_dict["task_config"]["k"],
-            init_scale=config_dict["task_config"]["init_scale"],
+            n_features=target_model_config["n_features"],
+            d_embed=target_model_config["d_embed"],
+            d_mlp=target_model_config["d_mlp"],
+            n_layers=target_model_config["n_layers"],
+            k=config.task_config.k,
+            init_scale=config.task_config.init_scale,
         )
         model.load_state_dict(params)
-        return model
+
+        # Load label coefficients
+        with open(label_coeffs_path) as f:
+            label_coeffs = json.load(f)
+
+        return model, config, label_coeffs
 
     @classmethod
-    def from_wandb(cls, wandb_project_run_id: str) -> "ResidualLinearSPDFullRankModel":
-        """Instantiate ResidualLinearSPDFullRankModel using the latest checkpoint from a wandb run.
+    def from_local_path(
+        cls, path: RootPath
+    ) -> tuple["ResidualLinearSPDFullRankModel", Config, list[float]]:
+        """Instantiate from a checkpoint file."""
+        path = Path(path)
+        model_dir = path.parent
+        return cls._load_model(
+            config_path=model_dir / "final_config.yaml",
+            target_model_config_path=model_dir / "target_model_config.yaml",
+            checkpoint_path=path,
+            label_coeffs_path=model_dir / "label_coeffs.json",
+        )
 
-        Args:
-            wandb_project_run_id: The wandb project name and run ID separated by a forward slash.
-                E.g. "gpt2/2lzle2f0"
-
-        Returns:
-            A ResidualLinearSPDFullRankModel instance loaded from the specified wandb run.
-        """
+    @classmethod
+    def from_wandb(
+        cls, wandb_project_run_id: str
+    ) -> tuple["ResidualLinearSPDFullRankModel", Config, list[float]]:
+        """Instantiate ResidualLinearSPDFullRankModel using the latest checkpoint from a wandb run."""
         api = wandb.Api()
         run: Run = api.run(wandb_project_run_id)
 
-        cache_dir = Path(os.environ.get("SPD_CACHE_DIR", "/tmp/"))
-        model_cache_dir = cache_dir / wandb_project_run_id
-
-        train_config_file_remote = [
-            file for file in run.files() if file.name.endswith("final_config.yaml")
-        ][0]
-
-        train_config_file = train_config_file_remote.download(
-            exist_ok=True, replace=True, root=model_cache_dir
-        ).name
-
-        checkpoints = [file for file in run.files() if file.name.endswith(".pth")]
-        if len(checkpoints) == 0:
+        # Get the latest checkpoint
+        checkpoints = [
+            file
+            for file in run.files()
+            if file.name.endswith(".pth") and "target_model" not in file.name
+        ]
+        if not checkpoints:
             raise ValueError(f"No checkpoint files found in run {wandb_project_run_id}")
         latest_checkpoint_remote = sorted(
             checkpoints, key=lambda x: int(x.name.split(".pth")[0].split("_")[-1])
         )[-1]
-        latest_checkpoint_file = latest_checkpoint_remote.download(
-            exist_ok=True, replace=True, root=model_cache_dir
-        ).name
-        assert latest_checkpoint_file is not None, "Failed to download the latest checkpoint."
 
-        return cls.from_pretrained(path=latest_checkpoint_file, config_file=train_config_file)
+        config_path = download_wandb_file(run, "final_config.yaml")
+        target_model_config_path = download_wandb_file(run, "target_model_config.yaml")
+        label_coeffs_path = download_wandb_file(run, "label_coeffs.json")
+        checkpoint_path = download_wandb_file(run, latest_checkpoint_remote.name)
+
+        return cls._load_model(
+            config_path=config_path,
+            target_model_config_path=target_model_config_path,
+            checkpoint_path=checkpoint_path,
+            label_coeffs_path=label_coeffs_path,
+        )
 
     def set_subnet_to_zero(
         self, subnet_idx: int

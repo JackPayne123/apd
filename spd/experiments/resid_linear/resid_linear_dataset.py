@@ -31,17 +31,24 @@ class ResidualLinearDataset(
         n_features: int,
         feature_probability: float,
         device: str,
-        label_fn_seed: int,
+        label_fn_seed: int | None = None,
+        label_coeffs: list[float] | None = None,
     ):
+        assert label_coeffs is not None or label_fn_seed is not None
         self.embed_matrix = embed_matrix
         self.n_features = n_features
         self.feature_probability = feature_probability
         self.device = device
         self.label_fn_seed = label_fn_seed
 
-        # Create random coeffs between [1, 2]
-        gen = torch.Generator().manual_seed(self.label_fn_seed)
-        self.coeffs = torch.rand(self.embed_matrix.shape[0], generator=gen) + 1
+        if label_coeffs is None:
+            # Create random coeffs between [1, 2]
+            gen = torch.Generator()
+            if self.label_fn_seed is not None:
+                gen.manual_seed(self.label_fn_seed)
+            self.coeffs = torch.rand(self.embed_matrix.shape[0], generator=gen) + 1
+        else:
+            self.coeffs = torch.tensor(label_coeffs)
 
         self.label_fn = lambda inputs: calc_labels(self.coeffs, self.embed_matrix, inputs)
 

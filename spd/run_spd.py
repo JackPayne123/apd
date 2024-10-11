@@ -81,7 +81,6 @@ class ResidualLinearConfig(BaseModel):
     k: PositiveInt
     feature_probability: Probability
     init_scale: float = 1.0
-    label_fn_seed: int = 0
     pretrained_model_path: RootPath
 
 

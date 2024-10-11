@@ -17,6 +17,7 @@ from pydantic import BaseModel
 from pydantic.v1.utils import deep_update
 from torch import Tensor
 from torch.utils.data import DataLoader, Dataset
+from wandb.apis.public import Run
 
 from spd.models.base import Model, SPDFullRankModel, SPDModel
 from spd.settings import REPO_ROOT
@@ -604,3 +605,17 @@ def run_spd_forward_pass(
         attribution_scores=attribution_scores,
         topk_mask=topk_mask,
     )
+
+
+def download_wandb_file(run: Run, file_name: str) -> Path:
+    cache_dir = Path(os.environ.get("SPD_CACHE_DIR", "/tmp/"))
+    run_cache_dir = cache_dir / run.id
+    run_cache_dir.mkdir(parents=True, exist_ok=True)
+    file_on_wandb = run.file(file_name)
+    assert len(file_on_wandb) == 1, "More than one file with this name found on wandb"
+    return Path(file_on_wandb[0].download(exist_ok=True, replace=True, root=run_cache_dir).name)
+
+
+def load_yaml(file_path: Path) -> dict[str, Any]:
+    with open(file_path) as f:
+        return yaml.safe_load(f)

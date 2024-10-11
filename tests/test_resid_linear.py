@@ -13,7 +13,6 @@ RESID_LINEAR_TASK_CONFIG = ResidualLinearConfig(
     init_scale=1.0,
     k=6,
     feature_probability=0.2,
-    label_fn_seed=0,
     pretrained_model_path=Path(),  # We'll create this later
 )
 
@@ -24,6 +23,7 @@ def test_resid_linear_decomposition_happy_path() -> None:
     d_embed = 2
     d_mlp = 3
     n_layers = 1
+    label_coeffs = [1.5, 1.8, 1.1]
 
     device = "cpu"
     config = Config(
@@ -74,7 +74,7 @@ def test_resid_linear_decomposition_happy_path() -> None:
         n_features=model.n_features,
         feature_probability=config.task_config.feature_probability,
         device=device,
-        label_fn_seed=config.task_config.label_fn_seed,
+        label_coeffs=label_coeffs,
     )
     dataloader = DatasetGeneratedDataLoader(dataset, batch_size=config.batch_size, shuffle=False)
 
