@@ -10,6 +10,8 @@ from torch.utils.data import DataLoader, Dataset
 from torchvision import datasets, transforms
 from tqdm import tqdm
 
+from spd.experiments.multitask.single import transform
+
 
 class MultiTaskDataset(Dataset):
     def __init__(self, datasets, input_sizes, num_classes, p_active=0.5):
@@ -148,14 +150,6 @@ def train(
     torch.manual_seed(seed)
     np.random.seed(seed)
     random.seed(seed)
-
-    # Define transforms
-    transform = transforms.Compose(
-        [
-            transforms.ToTensor(),
-            transforms.Normalize((0.5,), (0.5,)),
-        ]
-    )
 
     # Prepare datasets and input sizes
     datasets_list = []
