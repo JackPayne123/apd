@@ -133,7 +133,6 @@ def resid_linear_plot_results_fn(
     fig_dict = {}
 
     attribution_scores = _collect_subnetwork_attributions(model, device, config.full_rank)
-    tqdm.write(f"Attribution scores:\n{attribution_scores}")
     fig_dict_attributions = plot_subnetwork_attributions(attribution_scores, out_dir, step)
     fig_dict.update(fig_dict_attributions)
 

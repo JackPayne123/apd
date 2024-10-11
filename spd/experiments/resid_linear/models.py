@@ -1,10 +1,14 @@
 import json
+import os
 from pathlib import Path
 
 import einops
 import torch
+import wandb
+import yaml
 from jaxtyping import Bool, Float
 from torch import Tensor, nn
+from wandb.apis.public import Run
 
 from spd.models.base import Model, SPDFullRankModel
 from spd.models.components import MLP, MLPComponentsFullRank
@@ -56,11 +60,12 @@ class ResidualLinearModel(Model):
         with open(Path(path).parent / "config.json") as f:
             config = json.load(f)
 
-        n_features = config["n_features"]
-        d_embed = config["d_embed"]
-        d_mlp = config["d_mlp"]
-        n_layers = config["n_layers"]
-        model = cls(n_features, d_embed, d_mlp, n_layers)
+        model = cls(
+            n_features=config["n_features"],
+            d_embed=config["d_embed"],
+            d_mlp=config["d_mlp"],
+            n_layers=config["n_layers"],
+        )
         model.load_state_dict(params)
         return model
 
@@ -151,22 +156,82 @@ class ResidualLinearSPDFullRankModel(SPDFullRankModel):
         return residual, layer_acts, inner_acts
 
     @classmethod
-    def from_pretrained(cls, path: str | Path) -> "ResidualLinearSPDFullRankModel":
+    def from_pretrained(
+        cls, path: str | Path, config_file: str | Path | None = None
+    ) -> "ResidualLinearSPDFullRankModel":
+        """Instantiate from a checkpoint file and (optionally) a config file.
+
+        Args:
+            path: The path to the checkpoint file.
+            config_file: The path to the yaml config file. If not provided, the config will be
+                loaded from the checkpoint file.
+        """
         path = Path(path)
-        with open(path.parent / "config.json") as f:
-            config = json.load(f)
+
+        config_file_path = (
+            path.parent / "final_config.yaml" if config_file is None else Path(config_file)
+        )
+        with open(config_file_path) as f:
+            config_dict = yaml.safe_load(f)
 
         params = torch.load(path, weights_only=True, map_location="cpu")
+
+        # Hackily get the config values which aren't stored in the SPD config from the params
+        # TODO: In future we should store the target model config when running SPD.
+        n_features, d_embed = params["W_E"].shape
+        n_layers = max(int(k.split(".")[1]) for k in params if "layers." in k) + 1
+        k_2, d_embed_2, d_mlp = params["layers.0.linear1.subnetwork_params"].shape
+        assert k_2 == config_dict["task_config"]["k"], "k doesn't match between params and config"
+        assert d_embed == d_embed_2, "d_embed does not match between W_E and the first linear layer"
+
         model = cls(
-            n_features=config["n_features"],
-            d_embed=config["d_embed"],
-            d_mlp=config["d_mlp"],
-            n_layers=config["n_layers"],
-            k=config["k"],
-            init_scale=config["init_scale"],
+            n_features=n_features,
+            d_embed=d_embed,
+            d_mlp=d_mlp,
+            n_layers=n_layers,
+            k=config_dict["task_config"]["k"],
+            init_scale=config_dict["task_config"]["init_scale"],
         )
         model.load_state_dict(params)
         return model
+
+    @classmethod
+    def from_wandb(cls, wandb_project_run_id: str) -> "ResidualLinearSPDFullRankModel":
+        """Instantiate ResidualLinearSPDFullRankModel using the latest checkpoint from a wandb run.
+
+        Args:
+            wandb_project_run_id: The wandb project name and run ID separated by a forward slash.
+                E.g. "gpt2/2lzle2f0"
+
+        Returns:
+            A ResidualLinearSPDFullRankModel instance loaded from the specified wandb run.
+        """
+        api = wandb.Api()
+        run: Run = api.run(wandb_project_run_id)
+
+        cache_dir = Path(os.environ.get("SPD_CACHE_DIR", "/tmp/"))
+        model_cache_dir = cache_dir / wandb_project_run_id
+
+        train_config_file_remote = [
+            file for file in run.files() if file.name.endswith("final_config.yaml")
+        ][0]
+
+        train_config_file = train_config_file_remote.download(
+            exist_ok=True, replace=True, root=model_cache_dir
+        ).name
+
+        checkpoints = [file for file in run.files() if file.name.endswith(".pth")]
+        if len(checkpoints) == 0:
+            raise ValueError(f"No checkpoint files found in run {wandb_project_run_id}")
+        latest_checkpoint_remote = sorted(
+            checkpoints, key=lambda x: int(x.name.split(".pth")[0].split("_")[-1])
+        )[-1]
+        latest_checkpoint_file = latest_checkpoint_remote.download(
+            exist_ok=True, replace=True, root=model_cache_dir
+        ).name
+        assert latest_checkpoint_file is not None, "Failed to download the latest checkpoint."
+
+        return cls.from_pretrained(path=latest_checkpoint_file, config_file=train_config_file)
 
     def set_subnet_to_zero(
         self, subnet_idx: int
