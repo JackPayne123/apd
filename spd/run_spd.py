@@ -1,6 +1,5 @@
 """Run SPD on a model."""
 
-import json
 from collections.abc import Callable
 from pathlib import Path
 from typing import Literal, Self
@@ -945,9 +944,8 @@ def optimize(
         ):
             torch.save(model.state_dict(), out_dir / f"model_{step}.pth")
             tqdm.write(f"Saved model to {out_dir / f'model_{step}.pth'}")
-            with open(out_dir / "config.json", "w") as f:
-                json.dump(config.model_dump(), f, indent=4)
-            tqdm.write(f"Saved config to {out_dir / 'config.json'}")
+            if config.wandb_project:
+                wandb.save(str(out_dir / f"model_{step}.pth"), base_path=out_dir)
 
         # Skip gradient step if we are at the last step (last step just for plotting and logging)
         if step != config.steps:
