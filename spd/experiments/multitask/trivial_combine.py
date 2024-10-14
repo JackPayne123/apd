@@ -101,9 +101,17 @@ def main():
     ]
     test_dataset = MultiMNISTDataset(test_datasets)
     test_loader = DataLoader(test_dataset, batch_size=1024, shuffle=True)
-    for x, y in test_loader:
-        print(x.shape, y.shape)
-        break
+    for i, (x, y) in enumerate(test_loader):
+        print(
+            f"images {i}",
+            x[0][:784].abs().sum(),
+            x[0][784 : 2 * 784].abs().sum(),
+            x[0][2 * 784 : 3 * 784].abs().sum(),
+            x[0][3 * 784 : 4 * 784].abs().sum(),
+        )
+        print(f"labels {i}", y[0][0], y[0][10], y[0][20], y[0][30])
+        if i > 10:
+            break
 
 
 if __name__ == "__main__":

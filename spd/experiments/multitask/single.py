@@ -1,7 +1,6 @@
-import os
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 import fire
 import numpy as np
@@ -11,7 +10,7 @@ import torch.optim as optim
 from jaxtyping import Float
 from PIL import Image
 from torch import Tensor
-from torch.utils.data import DataLoader, Dataset, Subset, random_split
+from torch.utils.data import DataLoader, Dataset, random_split
 from torchvision import transforms
 from torchvision.datasets import EMNIST, KMNIST, MNIST, FashionMNIST, VisionDataset
 from tqdm import tqdm
@@ -70,6 +69,7 @@ class E10MNIST(Dataset[tuple[Tensor, int]]):
 class MultiMNISTDataset(Dataset[tuple[Tensor, Tensor]]):
     def __init__(self, datasets: list[VisionDataset], p: float = 0.25):
         self.datasets = datasets
+        self.n_inputs = [d[0][0].shape[-1] for d in datasets]
         self.n_classes = [len(d.classes) for d in datasets]
         self.n_datasets = len(datasets)
         self.lens = [len(d) for d in datasets]
@@ -85,15 +85,17 @@ class MultiMNISTDataset(Dataset[tuple[Tensor, Tensor]]):
         inputs = []
         targets = []
         for i, dataset in enumerate(self.datasets):
-            input, target = dataset[index]
-            inputs.append(input.squeeze(0))
             if mask[i]:
-                target = torch.nn.functional.one_hot(
-                    dataset.targets[index], num_classes=self.n_classes[i]
-                )
+                input, target = dataset[index]
+                input = input.squeeze(0)
+                target = torch.tensor(target)
+                target = torch.nn.functional.one_hot(target, num_classes=self.n_classes[i])
             else:
+                input = torch.zeros(self.n_inputs[i])
                 target = torch.ones(self.n_classes[i]) / self.n_classes[i]
+            # print(f"Getting item w/ mask={mask[i]}, input.shape={input.shape}, target={target}")
             targets.append(target)
+            inputs.append(input)
         return torch.cat(inputs, dim=-1), torch.cat(targets, dim=-1)
 
 

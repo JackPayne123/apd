@@ -7,7 +7,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import DataLoader, Dataset
-from torchvision import datasets, transforms
+from torchvision import datasets
 from tqdm import tqdm
 
 from spd.experiments.multitask.single import transform
