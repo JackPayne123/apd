@@ -5,6 +5,7 @@ from typing import Any, Optional
 
 import einops
 import fire
+import matplotlib.pyplot as plt
 import numpy as np
 import torch
 import torch.nn as nn
@@ -66,13 +67,14 @@ class CombinedMNISTModel(nn.Module):
     def forward(
         self, x: Float[torch.Tensor, "batch input_size"]
     ) -> Float[torch.Tensor, "batch num_classes"]:
-        is_active = x.sum(dim=-1) > 0
         out = self.fc1(x)
         out = self.act(out)
         out = self.fc2(out)
         out = self.act(out)
         out = self.fc3(out)
-        return einops.einsum(out, is_active, "batch n, batch -> batch n")
+        return out
+        # This einsum doesn't check activity per task so this doesn't work.
+        # einops.einsum(out, is_active, "batch n, batch -> batch n")
 
 
 def main():
@@ -85,7 +87,11 @@ def main():
     ]:
         print(f"Loading {name} model")
         model = SingleMNISTModel(input_size=28**2, hidden_size=512, num_classes=10)
-        model.load_state_dict(torch.load(f"models/{name}/{fname}", weights_only=True))
+        model.load_state_dict(
+            torch.load(
+                f"models/{name}/{fname}", weights_only=False, map_location=torch.device("cpu")
+            )
+        )
         models.append(model)
     combined_model = CombinedMNISTModel(models)
     print(combined_model)
@@ -99,9 +105,13 @@ def main():
         FashionMNIST(**kwargs),
         E10MNIST(**kwargs),
     ]
-    test_dataset = MultiMNISTDataset(test_datasets)
+    test_dataset = MultiMNISTDataset(test_datasets, p=1.0)
     test_loader = DataLoader(test_dataset, batch_size=1024, shuffle=True)
     for i, (x, y) in enumerate(test_loader):
+        active_inputs = x[:, :784].abs().sum(dim=-1) > 0
+        print("In active frac:", active_inputs.float().mean())
+        active_outputs = (y[:, :10] > 0.5).any(dim=-1)
+        print("Out active frac:", active_outputs.float().mean())
         print(
             f"images {i}",
             x[0][:784].abs().sum(),
@@ -112,6 +122,15 @@ def main():
         print(f"labels {i}", y[0][0], y[0][10], y[0][20], y[0][30])
         if i > 10:
             break
+        pred = combined_model(x)
+        print(pred.shape)
+        print("Pred", pred[0])
+        print("Target", y[0])
+        softmax = torch.nn.functional.softmax(pred.reshape(-1, 4, 10), dim=-1).reshape(-1, 40)
+        plt.plot(y[0].data.numpy(), label="Target")
+        plt.plot(softmax[0].data.numpy(), label="Pred")
+        plt.legend()
+        plt.show()
 
 
 if __name__ == "__main__":

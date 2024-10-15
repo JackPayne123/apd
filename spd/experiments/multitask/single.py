@@ -18,6 +18,7 @@ from tqdm import tqdm
 transform = transforms.Compose(
     [transforms.ToTensor(), transforms.Normalize((0.5,), (0.5,)), lambda x: x.view(-1, 28**2)]
 )
+# The to image and ToTensor bit is equivalent to img/255.
 
 
 class SingleMNISTModel(nn.Module):
