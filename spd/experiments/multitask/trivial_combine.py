@@ -92,7 +92,9 @@ def main():
         model = GenericMNISTModel(input_size=28**2, hidden_size=512, num_classes=10)
         model.load_state_dict(
             torch.load(
-                f"models/{name}/{fname}", weights_only=False, map_location=torch.device("cpu")
+                f"models/{name}/{fname}",
+                weights_only=False,
+                map_location=torch.device("cuda" if torch.cuda.is_available() else "cpu"),
             )
         )
         models.append(model)
@@ -108,7 +110,7 @@ def main():
         FashionMNIST(**kwargs),
         E10MNIST(**kwargs),
     ]
-    test_dataset = MultiMNISTDataset(test_datasets, p=1.0)
+    test_dataset = MultiMNISTDataset(test_datasets, p=0.25)
     test_loader = DataLoader(test_dataset, batch_size=1024, shuffle=True)
     for i, (x, y) in enumerate(test_loader):
         active_inputs = x[:, :784].abs().sum(dim=-1) > 0
@@ -131,8 +133,12 @@ def main():
         print("Target", y[0])
         softmax = torch.nn.functional.softmax(pred.reshape(-1, 4, 10), dim=-1).reshape(-1, 40)
         plt.plot(y[0].data.numpy(), label="Target")
-        plt.plot(softmax[0].data.numpy(), label="Pred")
+        plt.scatter(range(40), softmax[0].data.numpy(), label="Pred", color="C1")
         plt.legend()
+        plt.axvline(9.5, c="k", linestyle="--")
+        plt.axvline(19.5, c="k", linestyle="--")
+        plt.axvline(29.5, c="k", linestyle="--")
+        plt.ylim(-0.1, 1.1)
         plt.show()
 
 

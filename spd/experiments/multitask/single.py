@@ -205,6 +205,7 @@ def train(
     log_interval: int = 1,
     device: str = "cuda" if torch.cuda.is_available() else "cpu",
 ) -> None:
+    print(f"Training on {device}")
     torch.manual_seed(seed)
     np.random.seed(seed)
     train_loader, val_loader, test_loader = get_data_loaders(
