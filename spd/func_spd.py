@@ -305,7 +305,7 @@ def optimize(
         step_pnorm = config.pnorm or get_step_pnorm(step, config.steps, config.pnorm_end)
 
         opt.zero_grad(set_to_none=True)
-        batch, _, _ = next(data_iter)
+        batch, _ = next(data_iter)
         batch = batch.to(device=device)
         labels = pretrained_model(batch)
 

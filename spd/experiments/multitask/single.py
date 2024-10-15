@@ -125,6 +125,7 @@ def per_task_softmax(
     pred_logits: Float[torch.Tensor, "... (tasks classes)"],
     n_tasks: int,
     n_classes: int,
+    logsoftmax: bool = False,
 ) -> Float[torch.Tensor, "... (tasks classes)"]:
     pred_logits = einops.rearrange(
         pred_logits,
@@ -132,7 +133,7 @@ def per_task_softmax(
         tasks=n_tasks,
         classes=n_classes,
     )
-    pred_probs = pred_logits.softmax(dim=-1)
+    pred_probs = pred_logits.log_softmax(dim=-1) if logsoftmax else pred_logits.softmax(dim=-1)
     pred_probs = einops.rearrange(
         pred_probs,
         "... tasks classes -> ... (tasks classes)",
@@ -140,6 +141,35 @@ def per_task_softmax(
         classes=n_classes,
     )
     return pred_probs
+
+
+def per_task_kldiv(
+    pred_logits: Float[torch.Tensor, "... (tasks classes)"],
+    target_logits: Float[torch.Tensor, "... (tasks classes)"],
+    n_tasks: int,
+    n_classes: int,
+) -> Float[torch.Tensor, "... (tasks classes)"]:
+    pred_logprobs = per_task_softmax(
+        pred_logits, n_tasks=n_tasks, n_classes=n_classes, logsoftmax=True
+    )
+    target_logprobs = per_task_softmax(
+        target_logits, n_tasks=n_tasks, n_classes=n_classes, logsoftmax=True
+    )
+    pred_logprobs = einops.rearrange(
+        pred_logprobs,
+        "... (tasks classes) -> ... tasks classes",
+        tasks=n_tasks,
+        classes=n_classes,
+    )
+    target_logprobs = einops.rearrange(
+        target_logprobs,
+        "... (tasks classes) -> ... tasks classes",
+        tasks=n_tasks,
+        classes=n_classes,
+    )
+    return torch.nn.functional.kl_div(
+        input=pred_logprobs, target=target_logprobs, reduction="batchmean", log_target=True
+    )
 
 
 class MultiMNISTDatasetLoss:
@@ -155,11 +185,40 @@ class MultiMNISTDatasetLoss:
     ) -> Float[torch.Tensor, ""]:
         assert pred_logits.shape[-1] == target_probs.shape[-1]
         assert pred_logits.shape[-1] == self.total_output_size
-        pred_probs = per_task_softmax(pred_logits, n_tasks=self.n_tasks, n_classes=self.n_classes)
+        pred_logprobs = per_task_softmax(
+            pred_logits, n_tasks=self.n_tasks, n_classes=self.n_classes, logsoftmax=True
+        )
         # We want to sum over classes (normal cross entropy) and then sum over tasks (so that the
         # gradients to individual subnetworks are sensible). Take mean over batch as usual.
-        loss = -torch.sum(target_probs * torch.log(pred_probs), dim=-1)
+        loss = -torch.sum(target_probs * pred_logprobs, dim=-1)
         return loss.mean(dim=0)
+
+    def comp_logits(
+        self,
+        pred_logits: Float[torch.Tensor, "... total_output_size"],
+        target_logits: Float[torch.Tensor, "... total_output_size"],
+    ) -> Float[torch.Tensor, ""]:
+        assert pred_logits.shape[-1] == target_logits.shape[-1]
+        assert pred_logits.shape[-1] == self.total_output_size
+        pred_logprobs = per_task_softmax(
+            pred_logits, n_tasks=self.n_tasks, n_classes=self.n_classes, logsoftmax=True
+        )
+        target_probs = per_task_softmax(
+            target_logits, n_tasks=self.n_tasks, n_classes=self.n_classes, logsoftmax=False
+        )
+        loss = -torch.sum(target_probs * pred_logprobs, dim=-1)
+        return loss.mean(dim=0)
+
+    def comp_kl_logits(
+        self,
+        pred_logits: Float[torch.Tensor, "... total_output_size"],
+        target_logits: Float[torch.Tensor, "... total_output_size"],
+    ) -> Float[torch.Tensor, ""]:
+        assert pred_logits.shape[-1] == target_logits.shape[-1]
+        assert pred_logits.shape[-1] == self.total_output_size
+        return per_task_kldiv(
+            pred_logits, target_logits, n_tasks=self.n_tasks, n_classes=self.n_classes
+        )
 
 
 def get_data_loaders(
