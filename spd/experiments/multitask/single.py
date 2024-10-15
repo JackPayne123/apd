@@ -81,7 +81,7 @@ class MNISTDropoutDataset(Dataset[tuple[Tensor, Tensor]]):
     def __getitem__(self, index: int) -> tuple[Tensor, Tensor]:
         output_blank = torch.rand(1) > self.p
         input, target = self.dataset[index]
-        target = torch.nn.functional.one_hot(target, num_classes=self.n_classes)
+        target = torch.nn.functional.one_hot(torch.tensor(target), num_classes=self.n_classes)
         if output_blank:
             input = torch.zeros_like(input)
             target = torch.ones_like(target) / self.n_classes
@@ -212,7 +212,9 @@ def train(
     )
 
     # Initialize model, loss function, optimizer
-    model: GenericMNISTModel = GenericMNISTModel(input_size, hidden_size, num_classes).to(device)
+    model: GenericMNISTModel = GenericMNISTModel(
+        input_size=input_size, hidden_size=hidden_size, num_classes=num_classes
+    ).to(device)
     criterion: nn.CrossEntropyLoss = nn.CrossEntropyLoss()
     optimizer: optim.Adam = optim.Adam(model.parameters(), lr=learning_rate)
 
@@ -227,7 +229,7 @@ def train(
             images: Float[torch.Tensor, "batch input_size"] = images.view(-1, input_size).to(
                 device
             )  # Flatten the 28x28 images
-            labels: torch.Tensor = labels.to(device)
+            labels: Float[torch.Tensor, "batch num_classes"] = labels.to(device)
             # Forward pass
             logits: Float[torch.Tensor, "batch num_classes"] = model(images)
             loss: torch.Tensor = criterion(logits, labels)
@@ -240,8 +242,17 @@ def train(
             # Accumulate loss and accuracy
             total_loss += loss.item()
             _, predicted = logits.max(1)
-            total += labels.size(0)
-            correct += predicted.eq(labels).sum().item()
+            if blanks:
+                assert logits.shape == labels.shape
+                assert logits.shape[-1] == num_classes
+                assert logits.ndim == 2
+                _, label_int = labels.max(1)
+                mask = labels[:, 0] != 1 / num_classes
+                total += mask.sum().item()
+                correct += predicted.eq(label_int)[mask].sum().item()
+            else:
+                total += labels.size(0)
+                correct += predicted.eq(labels).sum().item()
 
             # Update progress bar
             loop.set_postfix(loss=loss.item(), accuracy=100.0 * correct / total)
@@ -259,13 +270,22 @@ def train(
                 images: Float[torch.Tensor, "batch input_size"] = images.view(-1, input_size).to(
                     device
                 )
-                labels: torch.Tensor = labels.to(device)
+                labels: Float[torch.Tensor, "batch num_classes"] = labels.to(device)
                 logits: Float[torch.Tensor, "batch num_classes"] = model(images)
                 loss: torch.Tensor = criterion(logits, labels)
                 val_loss += loss.item()
                 _, predicted = logits.max(1)
-                val_total += labels.size(0)
-                val_correct += predicted.eq(labels).sum().item()
+                if blanks:
+                    assert logits.shape == labels.shape
+                    assert logits.shape[-1] == num_classes
+                    assert logits.ndim == 2
+                    _, label_int = labels.max(1)
+                    mask = labels[:, 0] != 1 / num_classes
+                    val_total += mask.sum().item()
+                    val_correct += predicted.eq(label_int)[mask].sum().item()
+                else:
+                    val_total += labels.size(0)
+                    val_correct += predicted.eq(labels).sum().item()
 
         val_loss /= len(val_loader)
         val_accuracy: float = 100.0 * val_correct / val_total
@@ -285,13 +305,22 @@ def train(
     with torch.no_grad():
         for images, labels in test_loader:
             images: Float[torch.Tensor, "batch input_size"] = images.view(-1, input_size).to(device)
-            labels: torch.Tensor = labels.to(device)
+            labels: Float[torch.Tensor, "batch num_classes"] = labels.to(device)
             logits: Float[torch.Tensor, "batch num_classes"] = model(images)
             loss: torch.Tensor = criterion(logits, labels)
             test_loss += loss.item()
             _, predicted = logits.max(1)
-            test_total += labels.size(0)
-            test_correct += predicted.eq(labels).sum().item()
+            if blanks:
+                assert logits.shape == labels.shape
+                assert logits.shape[-1] == num_classes
+                assert logits.ndim == 2
+                _, label_int = labels.max(1)
+                mask = labels[:, 0] != 1 / num_classes
+                test_total += mask.sum().item()
+                test_correct += predicted.eq(label_int)[mask].sum().item()
+            else:
+                test_total += labels.size(0)
+                test_correct += predicted.eq(labels).sum().item()
 
     test_loss /= len(test_loader)
     test_accuracy: float = 100.0 * test_correct / test_total
