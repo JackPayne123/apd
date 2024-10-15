@@ -2,6 +2,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+import einops
 import fire
 import numpy as np
 import torch
@@ -21,16 +22,16 @@ transform = transforms.Compose(
 # The to image and ToTensor bit is equivalent to img/255.
 
 
-class SingleMNISTModel(nn.Module):
-    def __init__(self, input_size: int, hidden_size: int, num_classes: int):
+class GenericMNISTModel(nn.Module):
+    def __init__(self, hidden_size: int, input_size: int = 28 * 28, num_classes: int = 10):
         super().__init__()
         self.input_size = input_size
         self.hidden_size = hidden_size
         self.num_classes = num_classes
         self.fc1 = nn.Linear(input_size, hidden_size)
-        self.act = nn.ReLU()
         self.fc2 = nn.Linear(hidden_size, hidden_size)
         self.fc3 = nn.Linear(hidden_size, num_classes)
+        self.act = nn.ReLU()
 
     def forward(
         self, x: Float[torch.Tensor, "batch input_size"]
@@ -67,6 +68,26 @@ class E10MNIST(Dataset[tuple[Tensor, int]]):
         return img, target
 
 
+class MNISTDropoutDataset(Dataset[tuple[Tensor, Tensor]]):
+    def __init__(self, dataset: VisionDataset, p: float = 0.25):
+        """Output a data with probability p, otherwise output a blank input."""
+        self.dataset = dataset
+        self.n_classes = len(dataset.classes)
+        self.p = p
+
+    def __len__(self) -> int:
+        return len(self.dataset)
+
+    def __getitem__(self, index: int) -> tuple[Tensor, Tensor]:
+        output_blank = torch.rand(1) > self.p
+        input, target = self.dataset[index]
+        target = torch.nn.functional.one_hot(target, num_classes=self.n_classes)
+        if output_blank:
+            input = torch.zeros_like(input)
+            target = torch.ones_like(target) / self.n_classes
+        return input, target
+
+
 class MultiMNISTDataset(Dataset[tuple[Tensor, Tensor]]):
     def __init__(self, datasets: list[VisionDataset], p: float = 0.25):
         self.datasets = datasets
@@ -100,8 +121,50 @@ class MultiMNISTDataset(Dataset[tuple[Tensor, Tensor]]):
         return torch.cat(inputs, dim=-1), torch.cat(targets, dim=-1)
 
 
+def per_task_softmax(
+    pred_logits: Float[torch.Tensor, "... (tasks classes)"],
+    n_tasks: int,
+    n_classes: int,
+) -> Float[torch.Tensor, "... (tasks classes)"]:
+    pred_logits = einops.rearrange(
+        pred_logits,
+        "... (tasks classes) -> ... tasks classes",
+        tasks=n_tasks,
+        classes=n_classes,
+    )
+    pred_probs = pred_logits.softmax(dim=-1)
+    pred_probs = einops.rearrange(
+        pred_probs,
+        "... tasks classes -> ... (tasks classes)",
+        tasks=n_tasks,
+        classes=n_classes,
+    )
+    return pred_probs
+
+
+class MultiMNISTDatasetLoss:
+    def __init__(self, n_tasks: int, n_classes: int):
+        self.n_classes = n_classes
+        self.n_tasks = n_tasks
+        self.total_output_size = n_tasks * n_classes
+
+    def __call__(
+        self,
+        pred_logits: Float[torch.Tensor, "... total_output_size"],
+        target_probs: Float[torch.Tensor, "... total_output_size"],
+    ) -> Float[torch.Tensor, ""]:
+        assert pred_logits.shape[-1] == target_probs.shape[-1]
+        assert pred_logits.shape[-1] == self.total_output_size
+        pred_probs = per_task_softmax(pred_logits, n_tasks=self.n_tasks, n_classes=self.n_classes)
+        # We want to sum over classes (normal cross entropy) and then sum over tasks (so that the
+        # gradients to individual subnetworks are sensible). Take mean over batch as usual.
+        loss = -torch.sum(target_probs * torch.log(pred_probs), dim=-1)
+        return loss.mean(dim=0)
+
+
 def get_data_loaders(
     dataset_class: type[MNIST | KMNIST | FashionMNIST | E10MNIST],
+    blanks: bool = False,
     batch_size: int = 128,
     split_ratio: float = 0.8,
 ) -> tuple[
@@ -115,6 +178,9 @@ def get_data_loaders(
     kwargs = {"root": data_dir, "download": True, "transform": transform}
     train_dataset = dataset_class(train=True, **kwargs)
     test_dataset = dataset_class(train=False, **kwargs)
+    if blanks:
+        train_dataset = MNISTDropoutDataset(train_dataset)
+        test_dataset = MNISTDropoutDataset(test_dataset)
     train_size: int = int(split_ratio * len(train_dataset))
     val_size: int = len(train_dataset) - train_size
     train_dataset, val_dataset = random_split(train_dataset, [train_size, val_size])
@@ -127,6 +193,7 @@ def get_data_loaders(
 
 def train(
     dataset_class: type[MNIST | KMNIST | FashionMNIST | E10MNIST],
+    blanks: bool = False,
     output_dir: str | None = None,
     input_size: int = 28 * 28,  # MNIST images all are 28x28
     num_classes: int = 10,  # these datasets all have 10 classes
@@ -141,11 +208,11 @@ def train(
     torch.manual_seed(seed)
     np.random.seed(seed)
     train_loader, val_loader, test_loader = get_data_loaders(
-        dataset_class=dataset_class, batch_size=batch_size
+        dataset_class=dataset_class, batch_size=batch_size, blanks=blanks
     )
 
     # Initialize model, loss function, optimizer
-    model: SingleMNISTModel = SingleMNISTModel(input_size, hidden_size, num_classes).to(device)
+    model: GenericMNISTModel = GenericMNISTModel(input_size, hidden_size, num_classes).to(device)
     criterion: nn.CrossEntropyLoss = nn.CrossEntropyLoss()
     optimizer: optim.Adam = optim.Adam(model.parameters(), lr=learning_rate)
 
@@ -161,7 +228,6 @@ def train(
                 device
             )  # Flatten the 28x28 images
             labels: torch.Tensor = labels.to(device)
-
             # Forward pass
             logits: Float[torch.Tensor, "batch num_classes"] = model(images)
             loss: torch.Tensor = criterion(logits, labels)
@@ -237,14 +303,14 @@ def train(
     torch.save(model.state_dict(), Path(output_dir) / f"{dataset_class.__name__}.pth")
 
 
-def main(dataset_class: str):
+def main(dataset_class: str, blanks: bool = False):
     dataset_classes = {
         "mnist": MNIST,
         "kmnist": KMNIST,
         "fashion": FashionMNIST,
         "e10mnist": E10MNIST,
     }
-    train(dataset_classes[dataset_class], output_dir=f"models/{dataset_class}")
+    train(dataset_classes[dataset_class], output_dir=f"models/{dataset_class}", blanks=blanks)
 
 
 if __name__ == "__main__":

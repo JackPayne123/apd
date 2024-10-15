@@ -20,8 +20,9 @@ from tqdm import tqdm
 
 from spd.experiments.multitask.single import (
     E10MNIST,
+    GenericMNISTModel,
     MultiMNISTDataset,
-    SingleMNISTModel,
+    MultiMNISTDatasetLoss,
     transform,
 )
 
@@ -38,7 +39,9 @@ def copy_weights(srcs: list[nn.Linear], dst: nn.Linear) -> None:
     for i in range(n_sources):
         src = srcs[i]
         print(
-            f"Copying from {src.weight.data.shape} into {dst.weight.data[out_idx : out_idx + src.out_features, in_idx : in_idx + src.in_features].shape} of {dst.weight.data.shape}"
+            f"Copying from {src.weight.data.shape} into"
+            f"{dst.weight.data[out_idx : out_idx + src.out_features, in_idx : in_idx + src.in_features].shape}"
+            f"of {dst.weight.data.shape}"
         )
         dst.weight.data[out_idx : out_idx + src.out_features, in_idx : in_idx + src.in_features] = (
             src.weight.data
@@ -50,7 +53,7 @@ def copy_weights(srcs: list[nn.Linear], dst: nn.Linear) -> None:
 
 
 class CombinedMNISTModel(nn.Module):
-    def __init__(self, models: list[SingleMNISTModel]):
+    def __init__(self, models: list[GenericMNISTModel]):
         super().__init__()
         self.n_models = len(models)
         self.input_size = sum(model.input_size for model in models)
@@ -86,7 +89,7 @@ def main():
         ("e10mnist", "E10MNIST.pth"),
     ]:
         print(f"Loading {name} model")
-        model = SingleMNISTModel(input_size=28**2, hidden_size=512, num_classes=10)
+        model = GenericMNISTModel(input_size=28**2, hidden_size=512, num_classes=10)
         model.load_state_dict(
             torch.load(
                 f"models/{name}/{fname}", weights_only=False, map_location=torch.device("cpu")
