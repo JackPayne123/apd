@@ -36,6 +36,8 @@ def copy_weights(srcs: list[nn.Linear], dst: nn.Linear) -> None:
     assert sum(out_sizes) == dst.out_features, f"{(out_sizes)} != {dst.out_features}"
     in_idx = 0
     out_idx = 0
+    dst.weight.data[:, :] = torch.zeros_like(dst.weight.data)
+    dst.bias.data[:] = torch.zeros_like(dst.bias.data)
     for i in range(n_sources):
         src = srcs[i]
         print(

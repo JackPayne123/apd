@@ -225,7 +225,7 @@ def train(
         total_loss: float = 0
         correct: int = 0
         total: int = 0
-        loop = tqdm(train_loader, desc=f"Epoch [{epoch}/{num_epochs}]")
+        loop = tqdm(train_loader, desc=f"Epoch [{epoch}/{num_epochs}]", ncols=0)
         for images, labels in loop:
             images: Float[torch.Tensor, "batch input_size"] = images.view(-1, input_size).to(
                 device
@@ -331,6 +331,7 @@ def train(
     # Save the model checkpoint
     Path(output_dir).mkdir(exist_ok=True)
     torch.save(model.state_dict(), Path(output_dir) / f"{dataset_class.__name__}.pth")
+    print(f"Saved model to {output_dir}/{dataset_class.__name__}.pth")
 
 
 def main(dataset_class: str, blanks: bool = False):
