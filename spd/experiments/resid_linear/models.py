@@ -112,6 +112,7 @@ class ResidualLinearSPDFullRankModel(SPDFullRankModel):
                     init_scale=init_scale,
                     in_bias=True,
                     out_bias=True,
+                    act_fn="gelu",
                 )
                 for _ in range(n_layers)
             ]

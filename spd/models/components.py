@@ -246,8 +246,10 @@ class MLPComponentsFullRank(nn.Module):
         init_scale: float,
         in_bias: bool = True,
         out_bias: bool = False,
+        act_fn: str = "relu",
     ):
         super().__init__()
+        self.act_fn = act_fn
         self.linear1 = ParamComponentsFullRank(
             in_dim=d_embed, out_dim=d_mlp, k=k, bias=in_bias, init_scale=init_scale
         )
@@ -278,7 +280,15 @@ class MLPComponentsFullRank(nn.Module):
         inner_acts.append(inner_acts_linear1)
         layer_acts.append(x)
 
-        x = torch.nn.functional.relu(x)
+        if self.act_fn == "relu":
+            act_fn = torch.nn.functional.relu
+        elif self.act_fn == "gelu":
+            act_fn = torch.nn.functional.gelu
+        else:
+            raise ValueError(f"Invalid activation function: {self.act_fn}")
+
+        x = act_fn(x)
+
         x, inner_acts_linear2 = self.linear2(x, topk_mask)
         inner_acts.append(inner_acts_linear2)
         layer_acts.append(x)
