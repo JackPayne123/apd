@@ -1,6 +1,7 @@
 from pathlib import Path
 
 import torch
+from jaxtyping import Float
 
 from spd.experiments.resid_linear.models import ResidualLinearModel, ResidualLinearSPDFullRankModel
 from spd.experiments.resid_linear.resid_linear_dataset import ResidualLinearDataset
@@ -111,3 +112,75 @@ def test_resid_linear_decomposition_happy_path() -> None:
     assert (
         final_loss < initial_loss
     ), f"Expected final loss to be lower than initial loss, but got {final_loss} >= {initial_loss}"
+
+
+def test_resid_linear_spd_equivalence() -> None:
+    set_seed(0)
+    n_features = 3
+    d_embed = 2
+    d_mlp = 3
+    n_layers = 2
+    k = 1  # Single subnetwork
+
+    device = "cpu"
+
+    # Create a target ResidualLinearModel
+    target_model = ResidualLinearModel(
+        n_features=n_features, d_embed=d_embed, d_mlp=d_mlp, n_layers=n_layers
+    ).to(device)
+
+    # Create the SPD model with k=1
+    spd_model = ResidualLinearSPDFullRankModel(
+        n_features=n_features,
+        d_embed=d_embed,
+        d_mlp=d_mlp,
+        n_layers=n_layers,
+        k=k,
+        init_scale=1.0,
+    ).to(device)
+
+    # Set up param_map for
+    param_map = {}
+    for i in range(n_layers):
+        param_map[f"layers.{i}.input_layer.weight"] = f"layers.{i}.linear1.subnetwork_params"
+        param_map[f"layers.{i}.input_layer.bias"] = f"layers.{i}.linear1.bias"
+        param_map[f"layers.{i}.output_layer.weight"] = f"layers.{i}.linear2.subnetwork_params"
+        param_map[f"layers.{i}.output_layer.bias"] = f"layers.{i}.linear2.bias"
+
+    # Copy parameters from target model to SPD model
+    for name, param in target_model.named_parameters():
+        if name in param_map:
+            spd_param = spd_model.get_parameter(param_map[name])
+            if "weight" in name:
+                # Need to transpose the weight matrix because it's in a Linear module which has
+                # shape (mlp_dim, d_embed) but we need it to be (d_embed, mlp_dim)
+                spd_param.data[0] = param.data.T
+            else:
+                spd_param.data[0] = param.data
+
+    # Copy embedding matrix
+    spd_model.W_E.data[:, :] = target_model.W_E.data.detach().clone()
+
+    # Create a random input
+    batch_size = 4
+    input_data: Float[torch.Tensor, "batch n_features"] = torch.rand(
+        batch_size, n_features, device=device
+    )
+
+    # Forward pass through both models
+    target_output, _, target_post_acts = target_model(input_data)
+    # Note that the target_post_acts should be the same as the "layer_acts" from the SPD model
+    spd_output, spd_layer_acts, _ = spd_model(input_data)
+
+    # Assert outputs are the same
+    assert torch.allclose(target_output, spd_output, atol=1e-6), "Outputs do not match"
+
+    # Assert activations are the same for all the matching activations that we have stored
+    # We haven't stored the post/layer-activations for the biases in the SPD model, so we only
+    # compare the activations for values that we have stored
+    for layer_name, target_act in target_post_acts.items():
+        if layer_name in spd_layer_acts:
+            spd_act = spd_layer_acts[layer_name]
+            assert torch.allclose(
+                target_act, spd_act, atol=1e-6
+            ), f"Activations do not match for layer {layer_name}"
