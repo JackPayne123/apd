@@ -48,7 +48,7 @@ def train(
     if out_dir is not None:
         out_dir.mkdir(parents=True, exist_ok=True)
 
-    optimizer = torch.optim.AdamW(trainable_params, lr=config.lr, weight_decay=0.0)
+    optimizer = torch.optim.AdamW(trainable_params, lr=config.lr, weight_decay=0.01)
 
     final_loss = None
     for step, (batch, labels) in enumerate(dataloader):
@@ -92,11 +92,11 @@ if __name__ == "__main__":
     config = Config(
         seed=0,
         label_fn_seed=0,
-        n_features=5,
-        d_embed=5,
-        d_mlp=5,
+        n_features=2,
+        d_embed=2,
+        d_mlp=2,
         n_layers=1,
-        feature_probability=0.2,
+        feature_probability=0.5,
         batch_size=256,
         steps=20_000,
         print_freq=100,
@@ -105,7 +105,7 @@ if __name__ == "__main__":
 
     set_seed(config.seed)
     run_name = (
-        f"resid_linear_n-features{config.n_features}_d-resid{config.d_embed}_"
+        f"resid_linear_identity_n-features{config.n_features}_d-resid{config.d_embed}_"
         f"d-mlp{config.d_mlp}_n-layers{config.n_layers}_seed{config.seed}"
     )
     out_dir = Path(__file__).parent / "out" / run_name
@@ -116,6 +116,10 @@ if __name__ == "__main__":
         d_mlp=config.d_mlp,
         n_layers=config.n_layers,
     ).to(device)
+
+    # Make W_E the identity matrix
+    assert model.W_E.shape == (config.n_features, config.d_embed)
+    model.W_E.data[:, :] = torch.eye(config.d_embed, device=device)
 
     # Don't train the Embedding matrix
     model.W_E.requires_grad = False
