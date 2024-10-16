@@ -612,8 +612,7 @@ def download_wandb_file(run: Run, file_name: str) -> Path:
     run_cache_dir = cache_dir / run.id
     run_cache_dir.mkdir(parents=True, exist_ok=True)
     file_on_wandb = run.file(file_name)
-    assert len(file_on_wandb) == 1, "More than one file with this name found on wandb"
-    return Path(file_on_wandb[0].download(exist_ok=True, replace=True, root=run_cache_dir).name)
+    return Path(file_on_wandb.download(exist_ok=True, replace=True, root=run_cache_dir).name)  # type: ignore
 
 
 def load_yaml(file_path: Path) -> dict[str, Any]:
