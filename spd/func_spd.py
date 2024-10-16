@@ -15,12 +15,10 @@ from jaxtyping import Float
 from matplotlib.colors import CenteredNorm
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 from torch import Tensor
-from torch.func import functional_call, grad, vmap
+from torch.func import functional_call, vmap
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
-from spd.experiments.bigrams.model import BigramModel
-from spd.experiments.piecewise.models import PiecewiseFunctionTransformer
 from spd.models.base import Model, SPDFullRankModel, SPDModel
 from spd.run_spd import (
     Config,
@@ -181,6 +179,7 @@ def optimize(
         [Float[Tensor, "batch n_tasks n_classes"], Float[Tensor, "batch n_tasks n_classes"]],
         Float[Tensor, ""],
     ],
+    hardcode_topk_mask: bool = False,
     decomposable_params_whitelist: list[str] | None = None,
     param_map: dict[str, str] | None = None,
     plot_results_fn: Callable[..., dict[str, plt.Figure]] | None = None,
@@ -263,7 +262,7 @@ def optimize(
         for i in range(k):
             k_params_i = {k: v[i] for k, v in k_params.items()}  # or not i TODO
             model_out_i = functional_call(pretrained_model, k_params_i, single_batch)
-            attribs.append(loss_fn(target=full_model_out, input=model_out_i))
+            attribs.append(loss_fn(full_model_out, model_out_i))
         return torch.stack(attribs, dim=-1)
 
     # def model_func_0(  # TODO: Take output dims into account
@@ -305,7 +304,7 @@ def optimize(
         step_pnorm = config.pnorm or get_step_pnorm(step, config.steps, config.pnorm_end)
 
         opt.zero_grad(set_to_none=True)
-        batch, _ = next(data_iter)
+        batch, batch_labels = next(data_iter)
         batch = batch.to(device=device)
         labels = pretrained_model(batch)
 
@@ -329,7 +328,16 @@ def optimize(
         # pretrained_param_grads = batched_param_grads(batch)
 
         attribs = batched_attrib(batch, k_params, loss_fn)
+        topk_mask: Float[Tensor, "batch k"]
         topk_mask = calc_topk_mask(attribs, topk=config.topk, batch_topk=config.batch_topk).float()
+
+        if hardcode_topk_mask:
+            batch_labels: Float[Tensor, "batch (n_tasks n_classes)"]
+            n_tasks = config.task_config.k
+            n_classes = batch_labels.shape[1] // n_tasks
+            task_indices = torch.tensor([i * n_classes for i in range(n_tasks)])
+            topk_mask[:, :] = (batch_labels[:, task_indices] != 0.1).float()
+
         topk_out = batched_model_func(topk_mask, batch, k_params)
 
         topk_param_attrib_loss = torch.tensor(0.0, device=device)

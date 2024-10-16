@@ -1,21 +1,13 @@
-import os
-import random
 from pathlib import Path
 
 import fire
-import numpy as np
 import torch
-import torch.nn as nn
-import torch.nn.functional as F
 import wandb
 from jaxtyping import Float
 from torch import Tensor
-from torch.utils.data import DataLoader, Dataset
-from torchvision import transforms
-from torchvision.datasets import EMNIST, KMNIST, MNIST, FashionMNIST, VisionDataset
-from tqdm import tqdm
+from torch.utils.data import DataLoader
+from torchvision.datasets import KMNIST, MNIST, FashionMNIST
 
-from spd.experiments.multitask.multitask import MultiTaskDataset, MultiTaskModel
 from spd.experiments.multitask.single import (
     E10MNIST,
     GenericMNISTModel,
@@ -68,26 +60,26 @@ def main():
         FashionMNIST(**kwargs),
         E10MNIST(**kwargs),
     ]
-    dataset = MultiMNISTDataset(datasets, p=0.25)
+    dataset = MultiMNISTDataset(datasets, n=1, p=None)
 
     dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
 
     config = Config(
         wandb_project="spd-multitask",
-        wandb_run_name="k=4",
+        wandb_run_name="k=4_hcmask",
         task_config=MinimalTaskConfig(k=4),
         wandb_run_name_prefix="multitask_trivial_combine",
         full_rank=True,
         seed=1,
         topk=1,
         batch_topk=False,
-        steps=10_000,
+        steps=20_000,
         print_freq=20,
         image_freq=200,
         save_freq=1000,
         lr=5e-4,
         batch_size=batch_size,
-        topk_param_attrib_coeff=1e0,
+        topk_param_attrib_coeff=0.0,
         param_match_coeff=1e3,
         topk_recon_coeff=1,
         topk_l2_coeff=1e3,
@@ -97,7 +89,7 @@ def main():
         slow_images=True,
         pnorm=None,
         pnorm_end=None,
-        lr_schedule="constant",
+        lr_schedule="cosine",
         sparsity_loss_type="jacobian",
         sparsity_warmup_pct=0.0,
         unit_norm_matrices=False,
@@ -136,6 +128,7 @@ def main():
         pretrained_model=combined_model,
         out_dir=Path("out/"),
         loss_fn=loss_fn,
+        hardcode_topk_mask=True,
     )
 
     if config.wandb_project:

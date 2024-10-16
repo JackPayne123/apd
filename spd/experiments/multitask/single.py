@@ -89,7 +89,9 @@ class MNISTDropoutDataset(Dataset[tuple[Tensor, Tensor]]):
 
 
 class MultiMNISTDataset(Dataset[tuple[Tensor, Tensor]]):
-    def __init__(self, datasets: list[VisionDataset], p: float = 0.25):
+    def __init__(self, datasets: list[VisionDataset], p: float | None = None, n: int | None = 1):
+        assert p is None or n is None, "Cannot specify both p and n"
+        assert p is not None or n is not None, "Must specify either p or n"
         self.datasets = datasets
         self.n_inputs = [d[0][0].shape[-1] for d in datasets]
         self.n_classes = [len(d.classes) for d in datasets]
@@ -97,13 +99,21 @@ class MultiMNISTDataset(Dataset[tuple[Tensor, Tensor]]):
         self.lens = [len(d) for d in datasets]
         self.min_length = min(self.lens)
         self.p = p
+        self.n = n
 
     def __len__(self) -> int:
         return self.min_length
 
     def __getitem__(self, index: int) -> tuple[Tensor, Tensor]:
-        # mask with probability p
-        mask = torch.rand(self.n_datasets) < self.p
+        if self.p is not None:
+            # mask with probability p
+            mask = torch.rand(self.n_datasets) < self.p
+        elif self.n is not None:
+            # mask where n active per batch
+            mask = torch.zeros(self.n_datasets)
+            mask[torch.randint(0, self.n_datasets, (self.n,))] = 1
+        else:
+            raise ValueError("Must specify either p or n")
         inputs = []
         targets = []
         for i, dataset in enumerate(self.datasets):
@@ -277,6 +287,7 @@ def train(
     ).to(device)
     criterion: nn.CrossEntropyLoss = nn.CrossEntropyLoss()
     optimizer: optim.Adam = optim.Adam(model.parameters(), lr=learning_rate)
+    # TODO: WARNING, add weight decay!!
 
     # Training loop
     for epoch in range(1, num_epochs + 1):
