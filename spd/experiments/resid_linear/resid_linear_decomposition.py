@@ -140,7 +140,7 @@ def resid_linear_plot_results_fn(
     fig_dict.update(fig_dict_attributions)
 
     if config.topk is not None:
-        if dataloader is not None:
+        if dataloader is not None and config.task_config.k > 1:
             fig_dict_correlations = plot_subnetwork_correlations(
                 dataloader=dataloader,
                 spd_model=model,
