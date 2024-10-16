@@ -43,7 +43,8 @@ def plot_matrix(
     # Useful to have bigger text for small matrices
     fontsize = 8 if matrix.numel() < 50 else 4
     matrix = np.atleast_2d(matrix.detach().cpu().numpy())  # type: ignore
-    im = ax.matshow(matrix, cmap="coolwarm", norm=CenteredNorm())
+    v = np.max(np.abs(matrix))
+    im = ax.matshow(matrix, cmap="coolwarm", vmin=-v / 2, vmax=v / 2)
     # for (j, i), label in np.ndenumerate(matrix):
     #     ax.text(i, j, f"{label:.2f}", ha="center", va="center", fontsize=fontsize)
     ax.set_xlabel(xlabel)
@@ -283,7 +284,12 @@ def optimize(
     # Note that we expect weight decay to be problematic for spd
     opt = torch.optim.AdamW(k_params.values(), lr=config.lr, weight_decay=0.0)
 
-    lr_schedule_fn = get_lr_schedule_fn(config.lr_schedule, config.lr_exponential_halflife)
+    lr_schedule_fn = get_lr_schedule_fn(
+        config.lr_schedule,
+        config.lr_exponential_halflife,
+        config.lr_step_xs,
+        config.lr_step_ys,
+    )
 
     step_lp_sparsity_coeff = None
     step_topk_recon_coeff = None

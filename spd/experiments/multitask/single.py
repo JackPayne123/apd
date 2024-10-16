@@ -268,7 +268,7 @@ def train(
     num_classes: int = 10,  # these datasets all have 10 classes
     hidden_size: int = 512,
     batch_size: int = 128,
-    num_epochs: int = 3,
+    num_epochs: int = 30,
     learning_rate: float = 0.001,
     seed: int = 0,
     log_interval: int = 1,
@@ -286,7 +286,7 @@ def train(
         input_size=input_size, hidden_size=hidden_size, num_classes=num_classes
     ).to(device)
     criterion: nn.CrossEntropyLoss = nn.CrossEntropyLoss()
-    optimizer: optim.Adam = optim.Adam(model.parameters(), lr=learning_rate)
+    optimizer: optim.AdamW = optim.AdamW(model.parameters(), lr=learning_rate)
     # TODO: WARNING, add weight decay!!
 
     # Training loop

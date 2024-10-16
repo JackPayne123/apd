@@ -108,6 +108,8 @@ class Config(BaseModel):
     pnorm_end: PositiveFloat | None = None
     lr_schedule: Literal["linear", "constant", "cosine", "exponential"] = "constant"
     lr_exponential_halflife: PositiveFloat | None = None
+    lr_step_xs: list[int] | None = None
+    lr_step_ys: list[float] | None = None
     lr_warmup_pct: Probability = 0.0
     sparsity_loss_type: Literal["jacobian"] = "jacobian"
     sparsity_warmup_pct: Probability = 0.0
@@ -205,8 +207,10 @@ class Config(BaseModel):
 
 
 def get_lr_schedule_fn(
-    lr_schedule: Literal["linear", "constant", "cosine", "exponential"],
+    lr_schedule: Literal["linear", "constant", "cosine", "exponential", "step"],
     lr_exponential_halflife: PositiveFloat | None = None,
+    lr_step_xs: list[int] | None = None,
+    lr_step_ys: list[float] | None = None,
 ) -> Callable[[int, int], float]:
     if lr_schedule == "linear":
         return lambda step, steps: 1 - (step / steps)
@@ -220,6 +224,18 @@ def get_lr_schedule_fn(
         gamma = 0.5 ** (1 / halflife)
         logger.info(f"Using exponential LR schedule with halflife {halflife} steps (gamma {gamma})")
         return lambda step, steps: gamma**step
+    elif lr_schedule == "step":
+        assert lr_step_xs is not None and lr_step_ys is not None
+        assert len(lr_step_xs) == len(lr_step_ys)
+        assert lr_step_xs == sorted(lr_step_xs)
+
+        def lr_fn(step: int) -> float:
+            for i in range(len(lr_step_xs)):
+                if step < lr_step_xs[i]:
+                    return lr_step_ys[i]
+            return lr_step_ys[-1]
+
+        return lr_fn
     else:
         raise ValueError(f"Unknown lr_schedule: {lr_schedule}")
 
@@ -548,7 +564,10 @@ def optimize(
     # Note that we expect weight decay to be problematic for spd
     opt = torch.optim.AdamW(model.parameters(), lr=config.lr, weight_decay=0.0)
 
-    lr_schedule_fn = get_lr_schedule_fn(config.lr_schedule, config.lr_exponential_halflife)
+    lr_schedule_fn = get_lr_schedule_fn(
+        config.lr_schedule,
+        config.lr_exponential_halflife,
+    )
 
     step_lp_sparsity_coeff = None
     step_topk_recon_coeff = None

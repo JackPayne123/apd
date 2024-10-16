@@ -66,7 +66,7 @@ def main():
 
     config = Config(
         wandb_project="spd-multitask",
-        wandb_run_name="k=4_hcmask",
+        wandb_run_name="k=4_hcmask_modelsB",
         task_config=MinimalTaskConfig(k=4),
         wandb_run_name_prefix="multitask_trivial_combine",
         full_rank=True,
