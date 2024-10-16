@@ -81,6 +81,7 @@ class ResidualLinearConfig(BaseModel):
     k: PositiveInt
     feature_probability: Probability
     init_scale: float = 1.0
+    one_feature_active: bool = False
     pretrained_model_path: RootPath
 
 
@@ -961,4 +962,5 @@ def optimize(
             if config.unit_norm_matrices:
                 assert isinstance(model, SPDModel), "Can only norm matrices in SPDModel instances"
                 model.fix_normalized_adam_gradients()
+
             opt.step()
