@@ -2,6 +2,7 @@
 
 import json
 from pathlib import Path
+from typing import Literal
 
 import torch
 import wandb
@@ -15,6 +16,7 @@ from spd.experiments.resid_linear.models import ResidualLinearModel
 from spd.experiments.resid_linear.resid_linear_dataset import (
     ResidualLinearDataset,
 )
+from spd.run_spd import get_lr_schedule_fn
 from spd.utils import DatasetGeneratedDataLoader, set_seed
 
 wandb.require("core")
@@ -33,6 +35,7 @@ class Config(BaseModel):
     steps: PositiveInt
     print_freq: PositiveInt
     lr: PositiveFloat
+    lr_schedule: Literal["linear", "constant", "cosine", "exponential"] = "constant"
 
 
 def train(
@@ -50,10 +53,19 @@ def train(
 
     optimizer = torch.optim.AdamW(trainable_params, lr=config.lr, weight_decay=0.01)
 
+    # Add this line to get the lr_schedule_fn
+    lr_schedule_fn = get_lr_schedule_fn(config.lr_schedule)
+
     final_loss = None
     for step, (batch, labels) in enumerate(dataloader):
         if step >= config.steps:
             break
+
+        # Add this block to update the learning rate
+        current_lr = config.lr * lr_schedule_fn(step, config.steps)
+        for param_group in optimizer.param_groups:
+            param_group["lr"] = current_lr
+
         optimizer.zero_grad()
         batch = batch.to(device)
         labels = labels.to(device)
@@ -63,7 +75,7 @@ def train(
         optimizer.step()
         final_loss = loss.item()
         if step % config.print_freq == 0:
-            print(f"Step {step}: loss={final_loss}")
+            print(f"Step {step}: loss={final_loss}, lr={current_lr}")
 
     if out_dir is not None:
         model_path = out_dir / "target_model.pth"
@@ -92,15 +104,16 @@ if __name__ == "__main__":
     config = Config(
         seed=0,
         label_fn_seed=0,
-        n_features=2,
-        d_embed=2,
-        d_mlp=2,
+        n_features=5,
+        d_embed=5,
+        d_mlp=5,
         n_layers=1,
-        feature_probability=0.5,
+        feature_probability=0.2,
         batch_size=256,
         steps=20_000,
         print_freq=100,
         lr=1e-2,
+        lr_schedule="cosine",
     )
 
     set_seed(config.seed)
@@ -116,6 +129,10 @@ if __name__ == "__main__":
         d_mlp=config.d_mlp,
         n_layers=config.n_layers,
     ).to(device)
+
+    # Initialize with all positive values
+    for p in model.parameters():
+        p.data = p.data.abs()
 
     # Make W_E the identity matrix
     assert model.W_E.shape == (config.n_features, config.d_embed)
