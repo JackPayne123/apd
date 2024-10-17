@@ -1,4 +1,5 @@
 from pathlib import Path
+from typing import Literal
 
 import einops
 import matplotlib.pyplot as plt
@@ -254,7 +255,7 @@ def plot_model_functions(
     spd_model: PiecewiseFunctionSPDTransformer | PiecewiseFunctionSPDFullRankTransformer,
     target_model: PiecewiseFunctionTransformer | None,
     full_rank: bool,
-    ablation_attributions: bool,
+    attribution_type: Literal["gradient", "ablation"],
     device: str,
     start: float,
     stop: float,
@@ -294,7 +295,7 @@ def plot_model_functions(
         target_model=target_model,
         input_array=input_array,
         full_rank=full_rank,
-        ablation_attributions=ablation_attributions,
+        ablation_attributions=attribution_type == "ablation",
         batch_topk=batch_topk,
         topk=topk,
         distil_from_target=distil_from_target,

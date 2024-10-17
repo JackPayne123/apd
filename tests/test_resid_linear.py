@@ -36,7 +36,7 @@ def test_resid_linear_decomposition_happy_path() -> None:
         param_match_coeff=1.0,
         topk_recon_coeff=1,
         topk_l2_coeff=1e-2,
-        ablation_attributions=False,
+        attribution_type="gradient",
         lr=1e-2,
         batch_size=8,
         steps=5,  # Run only a few steps for the test
