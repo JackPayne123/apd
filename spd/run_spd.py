@@ -95,6 +95,7 @@ class Config(BaseModel):
     lr: PositiveFloat
     orthog_coeff: NonNegativeFloat | None = None
     out_recon_coeff: NonNegativeFloat | None = None
+    topk_act_recon_coeff: NonNegativeFloat | None = None
     param_match_coeff: NonNegativeFloat | None = 1.0
     topk_recon_coeff: NonNegativeFloat | None = None
     topk_l2_coeff: NonNegativeFloat | None = None
@@ -629,6 +630,43 @@ def calc_topk_param_attrib_loss(
     return loss / n_params
 
 
+def calc_topk_act_recon(
+    target_layer_post_acts: dict[
+        str, Float[Tensor, "batch n_instances d_out"] | Float[Tensor, "batch d_out"]
+    ],
+    layer_acts_topk: dict[
+        str, Float[Tensor, "batch n_instances d_out"] | Float[Tensor, "batch d_out"]
+    ],
+) -> Float[Tensor, ""] | Float[Tensor, " n_instances"]:
+    """MSE between all target model activations and the sum of the topk subnetwork activations.
+
+    Args:
+        target_layer_post_acts: The activations after each layer in the target model.
+        layer_acts_topk: The activations after each subnetwork in the SPD model summed over the topk
+            subnetworks.
+
+    Returns:
+        The activation reconstruction loss. Will have an n_instances dimension if the model has an
+            n_instances dimension, otherwise a scalar.
+    """
+    assert target_layer_post_acts.keys() == layer_acts_topk.keys(), "Layer keys must match"
+
+    device = next(iter(layer_acts_topk.values())).device
+
+    total_act_dim = 0  # Accumulate the d_out over all layers for normalization
+    loss = torch.zeros(1, device=device)
+    for layer_name in target_layer_post_acts:
+        total_act_dim += target_layer_post_acts[layer_name].shape[-1]
+
+        error = ((target_layer_post_acts[layer_name] - layer_acts_topk[layer_name]) ** 2).sum(
+            dim=-1
+        )
+        loss = loss + error
+
+    # Normalize by the total number of output dimensions and mean over the batch dim
+    return (loss / total_act_dim).mean(dim=0)
+
+
 def optimize(
     model: SPDModel | SPDFullRankModel,
     config: Config,
@@ -771,7 +809,8 @@ def optimize(
             topk_recon_loss,
             topk_mask,
             topk_param_attrib_loss,
-        ) = None, None, None, None, None
+            topk_act_recon_loss,
+        ) = None, None, None, None, None, None
         if config.topk is not None:
             if config.attribution_type == "ablation":
                 attribution_scores = calc_ablation_attributions(model=model, batch=batch, out=out)
@@ -804,7 +843,7 @@ def optimize(
                 topk_mask = torch.cat((topk_mask, last_subnet_mask), dim=-1)
 
             # Do a forward pass with only the topk subnetworks
-            out_topk, _, inner_acts_topk = model(batch, topk_mask=topk_mask)
+            out_topk, layer_acts_topk, inner_acts_topk = model(batch, topk_mask=topk_mask)
             assert len(inner_acts_topk) == model.n_param_matrices
 
             if config.topk_l2_coeff is not None:
@@ -841,6 +880,13 @@ def optimize(
                     n_params=n_params,
                 )
 
+            if config.topk_act_recon_coeff is not None:
+                assert layer_acts_topk is not None
+                assert layer_post_acts is not None
+                topk_act_recon_loss = calc_topk_act_recon(
+                    target_layer_post_acts=layer_post_acts, layer_acts_topk=layer_acts_topk
+                )
+
         # Add up the loss terms
         loss = torch.tensor(0.0, device=device)
         if orthog_loss is not None:
@@ -863,6 +909,9 @@ def optimize(
         if topk_param_attrib_loss is not None:
             assert config.topk_param_attrib_coeff is not None
             loss = loss + config.topk_param_attrib_coeff * topk_param_attrib_loss.mean()
+        if topk_act_recon_loss is not None:
+            assert config.topk_act_recon_coeff is not None
+            loss = loss + config.topk_act_recon_coeff * topk_act_recon_loss.mean()
 
         # Logging
         if step % config.print_freq == 0:
@@ -885,6 +934,8 @@ def optimize(
                 tqdm.write(f"Orthog loss:{nl}{orthog_loss}")
             if topk_param_attrib_loss is not None:
                 tqdm.write(f"Topk param attrib loss:{nl}{topk_param_attrib_loss}")
+            if topk_act_recon_loss is not None:
+                tqdm.write(f"Topk act recon loss:{nl}{topk_act_recon_loss}")
             if config.wandb_project:
                 wandb.log(
                     {
