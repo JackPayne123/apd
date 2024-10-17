@@ -1,6 +1,5 @@
 """Run SPD on a model."""
 
-import json
 from collections.abc import Callable
 from pathlib import Path
 from typing import Literal, Self
@@ -77,6 +76,16 @@ class PiecewiseConfig(BaseModel):
     decompose_bias: bool = True
 
 
+class ResidualLinearConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    task_name: Literal["residual_linear"] = "residual_linear"
+    k: PositiveInt
+    feature_probability: Probability
+    init_scale: float = 1.0
+    one_feature_active: bool = False
+    pretrained_model_path: RootPath
+
+
 class Config(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
     wandb_project: str | None = None
@@ -111,7 +120,7 @@ class Config(BaseModel):
     sparsity_warmup_pct: Probability = 0.0
     unit_norm_matrices: bool = True
     attribution_type: Literal["gradient", "ablation", "activation"] = "gradient"
-    task_config: DeepLinearConfig | PiecewiseConfig | TMSConfig = Field(
+    task_config: DeepLinearConfig | PiecewiseConfig | TMSConfig | ResidualLinearConfig = Field(
         ..., discriminator="task_name"
     )
 
@@ -626,7 +635,7 @@ def calc_topk_param_attrib_loss(
             loss_out_idx = loss_out_idx + param_loss
 
         loss = loss + loss_out_idx**2
-    loss = (loss / target_out.shape[-1] + 1e-16).sum(dim=0)  # Sum over the batch dim
+    loss = (loss / target_out.shape[-1] + 1e-16).mean(dim=0)  # Mean over the batch dim
     return loss / n_params
 
 
@@ -686,6 +695,14 @@ def optimize(
 
     lr_schedule_fn = get_lr_schedule_fn(config.lr_schedule, config.lr_exponential_halflife)
 
+    if pretrained_model is not None:
+        if config.param_match_coeff is not None:
+            assert param_map is not None, "Need a param_map for param_match loss"
+            # Check that our param_map contains all the decomposable param names
+            assert set(param_map.keys()) == set(pretrained_model.all_decomposable_params().keys())
+            assert set(param_map.values()) == set(model.all_subnetwork_params_summed().keys())
+
+        pretrained_model.to(device=device)
     n_params = sum(p.numel() for p in list(model.all_subnetwork_params_summed().values()))
     if has_instance_dim:
         # All subnetwork param have an n_instances dimension
@@ -728,15 +745,6 @@ def optimize(
         layer_pre_acts = None
         layer_post_acts = None
         if pretrained_model is not None:
-            if config.param_match_coeff is not None:
-                assert param_map is not None, "Need a param_map for param_match loss"
-                # Check that our param_map contains all the decomposable param names
-                assert set(param_map.keys()) == set(
-                    pretrained_model.all_decomposable_params().keys()
-                )
-                assert set(param_map.values()) == set(model.all_subnetwork_params_summed().keys())
-
-            pretrained_model.to(device=device)
             labels, layer_pre_acts, layer_post_acts = pretrained_model(batch)
 
         total_samples += batch.shape[0]
@@ -758,7 +766,6 @@ def optimize(
 
         # Do a forward pass with all subnetworks
         out, layer_acts, inner_acts = model(batch)
-        assert len(inner_acts) == model.n_param_matrices
 
         # Calculate losses
         out_recon_loss = calc_recon_mse(out, labels, has_instance_dim)
@@ -844,7 +851,6 @@ def optimize(
 
             # Do a forward pass with only the topk subnetworks
             out_topk, layer_acts_topk, inner_acts_topk = model(batch, topk_mask=topk_mask)
-            assert len(inner_acts_topk) == model.n_param_matrices
 
             if config.topk_l2_coeff is not None:
                 if config.full_rank:
@@ -969,7 +975,6 @@ def optimize(
             plot_results_fn is not None
             and config.image_freq is not None
             and step % config.image_freq == 0
-            and (step > 0 or not config.slow_images)
         ):
             fig_dict = plot_results_fn(
                 model=model,
@@ -994,9 +999,8 @@ def optimize(
         ):
             torch.save(model.state_dict(), out_dir / f"model_{step}.pth")
             tqdm.write(f"Saved model to {out_dir / f'model_{step}.pth'}")
-            with open(out_dir / "config.json", "w") as f:
-                json.dump(config.model_dump(), f, indent=4)
-            tqdm.write(f"Saved config to {out_dir / 'config.json'}")
+            if config.wandb_project:
+                wandb.save(str(out_dir / f"model_{step}.pth"), base_path=out_dir)
 
         # Skip gradient step if we are at the last step (last step just for plotting and logging)
         if step != config.steps:
@@ -1013,4 +1017,5 @@ def optimize(
             if config.unit_norm_matrices:
                 assert isinstance(model, SPDModel), "Can only norm matrices in SPDModel instances"
                 model.fix_normalized_adam_gradients()
+
             opt.step()
