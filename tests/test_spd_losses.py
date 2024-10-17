@@ -245,16 +245,16 @@ class TestCalcOrthogLoss:
 class TestCalcActReconLoss:
     def test_calc_topk_act_recon_simple(self):
         # Batch size 2, d_out 2
-        target_layer_post_acts = {"layer1": torch.tensor([[1.0, 2.0], [3.0, 4.0]])}
+        target_post_acts = {"layer1": torch.tensor([[1.0, 2.0], [3.0, 4.0]])}
         layer_acts_topk = {"layer1": torch.tensor([[1.0, 2.0], [3.0, 4.0]])}
         expected = torch.tensor(0.0)
 
-        result = calc_topk_act_recon(target_layer_post_acts, layer_acts_topk)
+        result = calc_topk_act_recon(target_post_acts, layer_acts_topk)
         torch.testing.assert_close(result, expected)
 
     def test_calc_topk_act_recon_different_d_out(self):
         # Batch size 2, d_out 2/3
-        target_layer_post_acts = {
+        target_post_acts = {
             "layer1": torch.tensor([[1.0, 2.0], [3.0, 4.0]]),
             "layer2": torch.tensor([[5.0, 6.0, 7.0], [8.0, 9.0, 10.0]]),
         }
@@ -264,11 +264,11 @@ class TestCalcActReconLoss:
         }
         expected = torch.tensor((0.25 + 1) / 2)  # ((0.5^2 * 5) / 5 + (1^2 * 5) / 5) / 2
 
-        result = calc_topk_act_recon(target_layer_post_acts, layer_acts_topk)
+        result = calc_topk_act_recon(target_post_acts, layer_acts_topk)
         torch.testing.assert_close(result, expected)
 
     def test_calc_topk_act_recon_with_n_instances(self):
-        target_layer_post_acts = {
+        target_post_acts = {
             "layer1": torch.tensor([[[1.0, 2.0], [3.0, 4.0]], [[5.0, 6.0], [7.0, 8.0]]]),
             "layer2": torch.tensor([[[9.0, 10.0], [11.0, 12.0]], [[13.0, 14.0], [15.0, 16.0]]]),
         }
@@ -278,5 +278,5 @@ class TestCalcActReconLoss:
         }
         expected = torch.tensor([0.25, 0.25])  # (0.5^2 * 8) / 8 for each instance
 
-        result = calc_topk_act_recon(target_layer_post_acts, layer_acts_topk)
+        result = calc_topk_act_recon(target_post_acts, layer_acts_topk)
         torch.testing.assert_close(result, expected)
