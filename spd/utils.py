@@ -540,31 +540,43 @@ def remove_grad_parallel_to_subnetwork_vecs(
     A_grad -= einops.einsum(parallel_component, A, "... k, ... d_in k -> ... d_in k")
 
 
-class SPDoutputs(NamedTuple):
-    target_model_output: torch.Tensor | None
-    spd_model_output: torch.Tensor
-    spd_topk_model_output: torch.Tensor
-    layer_acts: dict[str, torch.Tensor]
-    inner_acts: dict[str, torch.Tensor]
-    attribution_scores: torch.Tensor
-    topk_mask: torch.Tensor
+class SPDOutputs(NamedTuple):
+    target_model_output: (
+        Float[Tensor, "batch d_model_out"] | Float[Tensor, "batch n_instances d_model_out"] | None
+    )
+    spd_model_output: (
+        Float[Tensor, "batch d_model_out"] | Float[Tensor, "batch n_instances d_model_out"]
+    )
+    spd_topk_model_output: (
+        Float[Tensor, "batch d_model_out"] | Float[Tensor, "batch n_instances d_model_out"]
+    )
+    layer_acts: dict[str, Float[Tensor, "batch d_out"] | Float[Tensor, "batch n_instances d_out"]]
+    inner_acts: dict[
+        str,
+        Float[Tensor, "batch k d_out"]  # full rank
+        | Float[Tensor, "batch n_instances k d_out"]  # full rank
+        | Float[Tensor, "batch k"]  # rank one
+        | Float[Tensor, "batch n_instances k"],  # rank one
+    ]
+    attribution_scores: Float[Tensor, "batch k"] | Float[Tensor, "batch n_instances k"]
+    topk_mask: Float[Tensor, "batch k"] | Float[Tensor, "batch n_instances k"]
 
 
 def run_spd_forward_pass(
     spd_model: SPDModel | SPDFullRankModel,
     target_model: Model | None,
-    input_array: torch.Tensor,
+    input_array: Float[Tensor, "batch n_inputs"],
     full_rank: bool,
     ablation_attributions: bool,
     batch_topk: bool,
     topk: float,
     distil_from_target: bool,
-) -> SPDoutputs:
+) -> SPDOutputs:
     # non-SPD model, and SPD-model non-topk forward pass
     if target_model is not None:
-        model_output_hardcoded, _, _ = target_model(input_array)
+        target_model_output, _, _ = target_model(input_array)
     else:
-        model_output_hardcoded = None
+        target_model_output = None
 
     model_output_spd, layer_acts, inner_acts = spd_model(input_array)
 
@@ -596,8 +608,8 @@ def run_spd_forward_pass(
 
     model_output_spd_topk, _, _ = spd_model(input_array, topk_mask=topk_mask)
     attribution_scores = attribution_scores.cpu().detach()
-    return SPDoutputs(
-        target_model_output=model_output_hardcoded,
+    return SPDOutputs(
+        target_model_output=target_model_output,
         spd_model_output=model_output_spd,
         spd_topk_model_output=model_output_spd_topk,
         layer_acts=layer_acts,
