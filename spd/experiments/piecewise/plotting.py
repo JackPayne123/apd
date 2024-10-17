@@ -335,7 +335,7 @@ def plot_model_functions(
     spd_model: PiecewiseFunctionSPDTransformer | PiecewiseFunctionSPDFullRankTransformer,
     target_model: PiecewiseFunctionTransformer | None,
     full_rank: bool,
-    attribution_type: Literal["gradient", "ablation"],
+    attribution_type: Literal["gradient", "ablation", "activation"],
     device: str,
     start: float,
     stop: float,
