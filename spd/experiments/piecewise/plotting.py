@@ -25,8 +25,8 @@ from spd.run_spd import (
 from spd.utils import (
     BatchedDataLoader,
     calc_ablation_attributions,
-    calc_attributions_full_rank,
-    calc_attributions_rank_one,
+    calc_grad_attributions_full_rank,
+    calc_grad_attributions_rank_one,
     calc_topk_mask,
 )
 
@@ -151,7 +151,7 @@ def plot_components(
     # Forward pass to get the output and inner activations
     out, layer_acts, inner_acts = model(x)
     # Calculate attribution scores
-    attribution_scores = calc_attributions_rank_one(
+    attribution_scores = calc_grad_attributions_rank_one(
         out=out, inner_acts_vals=list(inner_acts.values())
     )
     attribution_scores_normed = attribution_scores / attribution_scores.std(dim=1, keepdim=True)
@@ -272,7 +272,7 @@ def run_spd_forward_pass(
     target_model: PiecewiseFunctionTransformer | None,
     input_array: torch.Tensor,
     full_rank: bool,
-    attribution_type: Literal["gradient", "ablation"],
+    attribution_type: Literal["gradient", "ablation", "activation"],
     batch_topk: bool,
     topk: float,
     distil_from_target: bool,
@@ -291,13 +291,13 @@ def run_spd_forward_pass(
         )
     elif attribution_type == "gradient":
         if full_rank:
-            attribution_scores = calc_attributions_full_rank(
+            attribution_scores = calc_grad_attributions_full_rank(
                 out=model_output_spd,
                 inner_acts=inner_acts,
                 layer_acts=layer_acts,
             )
         else:
-            attribution_scores = calc_attributions_rank_one(
+            attribution_scores = calc_grad_attributions_rank_one(
                 out=model_output_spd, inner_acts_vals=list(inner_acts.values())
             )
     else:

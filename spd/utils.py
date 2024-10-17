@@ -249,7 +249,7 @@ class BatchedDataLoader(DataLoader[Q], Generic[Q]):
             yield batch[0], label[0]
 
 
-def calc_attributions_rank_one(
+def calc_grad_attributions_rank_one(
     out: Float[Tensor, "batch d_out"] | Float[Tensor, "batch n_instances d_out"],
     inner_acts_vals: list[Float[Tensor, "batch k"] | Float[Tensor, "batch n_instances k"]],
 ) -> Float[Tensor, "batch k"] | Float[Tensor, "batch n_instances k"]:
@@ -332,7 +332,7 @@ def calc_grad_attributions_rank_one_per_layer(
     return layer_attribution_scores
 
 
-def calc_attributions_full_rank(
+def calc_grad_attributions_full_rank(
     out: Float[Tensor, "... out_dim"],
     inner_acts: dict[str, Float[Tensor, "... k d_out"]],
     layer_acts: dict[str, Float[Tensor, "... d_out"]],
@@ -449,6 +449,29 @@ def calc_ablation_attributions(
         attributions[..., subnet_idx] = out_recon
         model.restore_subnet(subnet_idx, stored_vals)
     return attributions
+
+
+def calc_activation_attributions(
+    inner_acts: dict[
+        str, Float[Tensor, "batch k d_out"] | Float[Tensor, "batch n_instances k d_out"]
+    ],
+) -> Float[Tensor, "batch k"] | Float[Tensor, "batch n_instances k"]:
+    """Calculate the attributions by taking the L2 norm of the activations in each subnetwork.
+
+    Args:
+        inner_acts: The activations at the output of each subnetwork before being summed.
+    Returns:
+        The attributions for each subnetwork.
+    """
+    first_param = inner_acts[next(iter(inner_acts.keys()))]
+    assert len(first_param.shape) in (3, 4)
+
+    attribution_scores: Float[Tensor, "batch k"] | Float[Tensor, "batch n_instances k"] = (
+        torch.zeros(first_param.shape[:-1], device=first_param.device, dtype=first_param.dtype)
+    )
+    for param_matrix in inner_acts.values():
+        attribution_scores += param_matrix.pow(2).sum(dim=-1)
+    return attribution_scores
 
 
 def calc_topk_mask(
