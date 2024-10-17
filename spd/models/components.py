@@ -1,36 +1,12 @@
+from collections.abc import Callable
+
 import einops
 import torch
+import torch.nn.functional as F
 from jaxtyping import Bool, Float
 from torch import Tensor, nn
 
 from spd.utils import init_param_
-
-
-def initialize_embeds(
-    W_E: nn.Linear,
-    W_U: nn.Linear,
-    n_inputs: int,
-    d_embed: int,
-    superposition: bool,
-    torch_gen: torch.Generator | None = None,
-):
-    if torch_gen is None:
-        torch_gen = torch.Generator()
-    assert W_E.weight.shape == (d_embed, n_inputs), f"Shape of W_E: {W_E.weight.shape}"
-    W_E.weight.data[:, :] = torch.zeros(d_embed, n_inputs)
-    W_E.weight.data[0, 0] = 1.0
-    num_functions = n_inputs - 1
-    d_control = d_embed - 2
-
-    if not superposition:
-        W_E.weight.data[1:-1, 1:] = torch.eye(num_functions)
-    else:
-        random_matrix = torch.randn(d_control, num_functions, generator=torch_gen)
-        random_normalised = random_matrix / torch.norm(random_matrix, dim=1, keepdim=True)
-        W_E.weight.data[1:-1, 1:] = random_normalised
-
-    W_U.weight.data = torch.zeros(1, d_embed)  # Assuming n_outputs is always 1
-    W_U.weight.data[:, -1] = 1.0
 
 
 class ParamComponents(nn.Module):
@@ -118,18 +94,13 @@ class ParamComponentsFullRank(nn.Module):
 
 
 class MLP(nn.Module):
-    def __init__(self, d_model: int, d_mlp: int, act_fn: str = "relu"):
+    def __init__(self, d_model: int, d_mlp: int, act_fn: Callable[[Tensor], Tensor] = F.relu):
         super().__init__()
         self.d_model = d_model
         self.d_mlp = d_mlp
         self.input_layer = nn.Linear(d_model, d_mlp)
         self.output_layer = nn.Linear(d_mlp, d_model)
-        if act_fn == "relu":
-            self.act_fn = torch.nn.functional.relu
-        elif act_fn == "gelu":
-            self.act_fn = torch.nn.functional.gelu
-        else:
-            raise ValueError(f"Invalid activation function: {act_fn}")
+        self.act_fn = act_fn
 
     def forward(
         self, x: Float[Tensor, "... d_model"]
@@ -246,7 +217,7 @@ class MLPComponentsFullRank(nn.Module):
         init_scale: float,
         in_bias: bool = True,
         out_bias: bool = False,
-        act_fn: str = "relu",
+        act_fn: Callable[[Tensor], Tensor] = F.relu,
     ):
         super().__init__()
         self.act_fn = act_fn
@@ -280,14 +251,7 @@ class MLPComponentsFullRank(nn.Module):
         inner_acts.append(inner_acts_linear1)
         layer_acts.append(x)
 
-        if self.act_fn == "relu":
-            act_fn = torch.nn.functional.relu
-        elif self.act_fn == "gelu":
-            act_fn = torch.nn.functional.gelu
-        else:
-            raise ValueError(f"Invalid activation function: {self.act_fn}")
-
-        x = act_fn(x)
+        x = self.act_fn(x)
 
         x, inner_acts_linear2 = self.linear2(x, topk_mask)
         inner_acts.append(inner_acts_linear2)

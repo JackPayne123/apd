@@ -4,6 +4,7 @@ from typing import Any
 
 import einops
 import torch
+import torch.nn.functional as F
 import wandb
 import yaml
 from jaxtyping import Bool, Float
@@ -28,10 +29,10 @@ class ResidualLinearModel(Model):
         self.W_E = nn.Parameter(torch.empty(n_features, d_embed))
         init_param_(self.W_E)
         # Make each feature have norm 1
-        self.W_E.data.div_(self.W_E.data.norm(dim=1, keepdim=True))
+        self.W_E.data /= self.W_E.data.norm(dim=1, keepdim=True)
 
         self.layers = nn.ModuleList(
-            [MLP(d_model=d_embed, d_mlp=d_mlp, act_fn="gelu") for _ in range(n_layers)]
+            [MLP(d_model=d_embed, d_mlp=d_mlp, act_fn=F.gelu) for _ in range(n_layers)]
         )
 
     def forward(
@@ -112,7 +113,7 @@ class ResidualLinearSPDFullRankModel(SPDFullRankModel):
                     init_scale=init_scale,
                     in_bias=True,
                     out_bias=True,
-                    act_fn="gelu",
+                    act_fn=F.gelu,
                 )
                 for _ in range(n_layers)
             ]

@@ -12,8 +12,35 @@ from torch import Tensor
 
 from spd.log import logger
 from spd.models.base import Model, SPDFullRankModel, SPDModel
-from spd.models.components import MLP, MLPComponents, MLPComponentsFullRank, initialize_embeds
+from spd.models.components import MLP, MLPComponents, MLPComponentsFullRank
 from spd.utils import calc_neuron_indices, remove_grad_parallel_to_subnetwork_vecs
+
+
+def initialize_embeds(
+    W_E: nn.Linear,
+    W_U: nn.Linear,
+    n_inputs: int,
+    d_embed: int,
+    superposition: bool,
+    torch_gen: torch.Generator | None = None,
+):
+    if torch_gen is None:
+        torch_gen = torch.Generator()
+    assert W_E.weight.shape == (d_embed, n_inputs), f"Shape of W_E: {W_E.weight.shape}"
+    W_E.weight.data[:, :] = torch.zeros(d_embed, n_inputs)
+    W_E.weight.data[0, 0] = 1.0
+    num_functions = n_inputs - 1
+    d_control = d_embed - 2
+
+    if not superposition:
+        W_E.weight.data[1:-1, 1:] = torch.eye(num_functions)
+    else:
+        random_matrix = torch.randn(d_control, num_functions, generator=torch_gen)
+        random_normalised = random_matrix / torch.norm(random_matrix, dim=1, keepdim=True)
+        W_E.weight.data[1:-1, 1:] = random_normalised
+
+    W_U.weight.data = torch.zeros(1, d_embed)  # Assuming n_outputs is always 1
+    W_U.weight.data[:, -1] = 1.0
 
 
 class PiecewiseLinear(nn.Module):
