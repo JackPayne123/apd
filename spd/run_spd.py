@@ -178,9 +178,6 @@ class Config(BaseModel):
         if self.full_rank:
             assert not self.unit_norm_matrices, "Can't unit norm matrices if full rank"
 
-        if self.attribution_type == "ablation":
-            assert self.topk is not None, "ablation_attributions is only compatible with topk"
-
         if (
             self.full_rank
             and isinstance(self.task_config, PiecewiseConfig)
