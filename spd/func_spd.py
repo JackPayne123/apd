@@ -254,17 +254,31 @@ def optimize(
             [Float[Tensor, "... n_outputs"], Float[Tensor, "... n_outputs"]], Float[Tensor, ""]
         ],
     ) -> Float[Tensor, " k"]:
-        single_mask = torch.ones(k, device=device)
-        k_params_full = {
-            k: einops.einsum(v, single_mask, "k ..., k -> ...") for k, v in k_params.items()
-        }
-        attribs = []
-        full_model_out = functional_call(pretrained_model, k_params_full, single_batch)
-        for i in range(k):
-            k_params_i = {k: v[i] for k, v in k_params.items()}  # or not i TODO
-            model_out_i = functional_call(pretrained_model, k_params_i, single_batch)
-            attribs.append(loss_fn(full_model_out, model_out_i))
-        return torch.stack(attribs, dim=-1)
+        ablation = True
+        if ablation:
+            single_mask = torch.ones(k, device=device)
+            k_params_full = {
+                k: einops.einsum(v, single_mask, "k ..., k -> ...") for k, v in k_params.items()
+            }
+            attribs = []
+            full_model_out = functional_call(pretrained_model, k_params_full, single_batch)
+            for i in range(k):
+                k_params_i = {k: v[i] for k, v in k_params.items()}  # or not i TODO
+                model_out_i = functional_call(pretrained_model, k_params_i, single_batch)
+                attribs.append(loss_fn(full_model_out, model_out_i))
+            return torch.stack(attribs, dim=-1)
+        else:
+            k_params_full = {
+                key: einops.einsum(v, torch.ones(k, device=device), "k ..., k -> ...")
+                for key, v in k_params.items()
+            }
+            full_model_out = functional_call(pretrained_model, k_params_full, single_batch)
+            single_mask = torch.ones(k, device=device)
+
+            def loss_fn_vs_full(single_mask, single_batch, k_params):
+                return loss_fn(full_model_out, model_func(single_mask, single_batch, k_params))
+
+            return grad(loss_fn_vs_full, argnums=0)(single_mask, single_batch, k_params) ** 2
 
     # def model_func_0(  # TODO: Take output dims into account
     #     single_batch: Float[Tensor, " n_inputs"],

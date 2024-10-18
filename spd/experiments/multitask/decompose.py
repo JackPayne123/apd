@@ -40,7 +40,7 @@ def main():
         ("e10mnist", "E10MNIST.pth"),
     ]:
         print(f"Loading {name} model")
-        model = GenericMNISTModel(input_size=28**2, hidden_size=512, num_classes=10)
+        model = GenericMNISTModel(input_size=28**2, hidden_size=64, num_classes=10)
         model.load_state_dict(
             torch.load(
                 f"models/{name}/{fname}",
@@ -66,7 +66,7 @@ def main():
 
     config = Config(
         wandb_project="spd-multitask",
-        wandb_run_name="k=4_hcmask_modelsB",
+        wandb_run_name="k=4_modelsB",
         task_config=MinimalTaskConfig(k=4),
         wandb_run_name_prefix="multitask_trivial_combine",
         full_rank=True,
@@ -77,7 +77,7 @@ def main():
         print_freq=20,
         image_freq=200,
         save_freq=1000,
-        lr=5e-4,
+        lr=1e-3,
         batch_size=batch_size,
         topk_param_attrib_coeff=0.0,
         param_match_coeff=1e3,
@@ -128,7 +128,7 @@ def main():
         pretrained_model=combined_model,
         out_dir=Path("out/"),
         loss_fn=loss_fn,
-        hardcode_topk_mask=True,
+        hardcode_topk_mask=False,
     )
 
     if config.wandb_project:

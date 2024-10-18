@@ -277,9 +277,9 @@ def train(
     output_dir: str | None = None,
     input_size: int = 28 * 28,  # MNIST images all are 28x28
     num_classes: int = 10,  # these datasets all have 10 classes
-    hidden_size: int = 512,
+    hidden_size: int = 64,
     batch_size: int = 128,
-    num_epochs: int = 30,
+    num_epochs: int = 10,
     learning_rate: float = 0.001,
     seed: int = 0,
     log_interval: int = 1,
