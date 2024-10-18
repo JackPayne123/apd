@@ -8,7 +8,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from jaxtyping import Float
+from jaxtyping import Bool, Float
 from PIL import Image
 from torch import Tensor
 from torch.utils.data import DataLoader, Dataset, random_split
@@ -89,7 +89,13 @@ class MNISTDropoutDataset(Dataset[tuple[Tensor, Tensor]]):
 
 
 class MultiMNISTDataset(Dataset[tuple[Tensor, Tensor]]):
-    def __init__(self, datasets: list[VisionDataset], p: float | None = None, n: int | None = 1):
+    def __init__(
+        self,
+        datasets: list[VisionDataset],
+        p: float | None = None,
+        n: int | None = 1,
+        mask: Bool[Tensor, " k"] | None = None,
+    ):
         assert p is None or n is None, "Cannot specify both p and n"
         assert p is not None or n is not None, "Must specify either p or n"
         self.datasets = datasets
@@ -100,20 +106,25 @@ class MultiMNISTDataset(Dataset[tuple[Tensor, Tensor]]):
         self.min_length = min(self.lens)
         self.p = p
         self.n = n
+        self.mask = mask
 
     def __len__(self) -> int:
         return self.min_length
 
     def __getitem__(self, index: int) -> tuple[Tensor, Tensor]:
-        if self.p is not None:
-            # mask with probability p
-            mask = torch.rand(self.n_datasets) < self.p
-        elif self.n is not None:
-            # mask where n active per batch
-            mask = torch.zeros(self.n_datasets)
-            mask[torch.randint(0, self.n_datasets, (self.n,))] = 1
+        if self.mask is None:
+            if self.p is not None:
+                # mask with probability p
+                mask = torch.rand(self.n_datasets) < self.p
+            elif self.n is not None:
+                # mask where n active per batch
+                mask = torch.zeros(self.n_datasets)
+                mask[torch.randint(0, self.n_datasets, (self.n,))] = 1
+            else:
+                raise ValueError("Must specify either p or n")
         else:
-            raise ValueError("Must specify either p or n")
+            mask = self.mask
+
         inputs = []
         targets = []
         for i, dataset in enumerate(self.datasets):
@@ -404,14 +415,19 @@ def train(
     print(f"Saved model to {output_dir}/{dataset_class.__name__}.pth")
 
 
-def main(dataset_class: str, blanks: bool = False):
+def main(dataset_class: str | None = None, blanks: bool = False):
     dataset_classes = {
-        "mnist": MNIST,
-        "kmnist": KMNIST,
-        "fashion": FashionMNIST,
         "e10mnist": E10MNIST,
+        "fashion": FashionMNIST,
+        "kmnist": KMNIST,
+        "mnist": MNIST,
     }
-    train(dataset_classes[dataset_class], output_dir=f"models/{dataset_class}", blanks=blanks)
+    if dataset_class is not None:
+        train(dataset_classes[dataset_class], output_dir=f"models/{dataset_class}", blanks=blanks)
+    else:
+        for key, dataset_class in dataset_classes.items():
+            print(f"Training {key}")
+            train(dataset_class, output_dir=f"models/{key}", blanks=blanks)
 
 
 if __name__ == "__main__":

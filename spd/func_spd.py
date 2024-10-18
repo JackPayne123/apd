@@ -15,7 +15,7 @@ from jaxtyping import Float
 from matplotlib.colors import CenteredNorm
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 from torch import Tensor
-from torch.func import functional_call, vmap
+from torch.func import functional_call, grad, vmap
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
