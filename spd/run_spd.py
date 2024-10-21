@@ -494,12 +494,15 @@ def calc_lp_sparsity_loss_rank_one(
 ) -> Float[Tensor, ""] | Float[Tensor, " n_instances"]:
     """Calculate the Lp sparsity loss on the attributions (inner_acts * d(out)/d(inner_acts).
 
-    Unlike the attributions we calculate for topk in `spd.utils.calc_attributions`, in this function
-    we calculate the derivative w.r.t. the layer activations and multiply by that layer's B matrix.
-    This will give the same gradient as taking the derivative w.r.t. the inner_acts using the chain
-    rule, but importantly it puts the B matrix in the computational graph for this calculation so
-    backprop can pass through it (autograd.grad will not build a computational graph from
-    intermediate tensors
+    Note that this always uses the gradient form of the attributions. We do not support other
+    attributions for this lp sparsity loss.
+
+    Unlike the attributions we calculate for topk in `spd.utils.calc_grad_attributions_rank_one`,
+    in this function we calculate the derivative w.r.t. the layer activations and multiply by that
+    layer's B matrix. This will give the same gradient as taking the derivative w.r.t. the
+    inner_acts using the chain rule, but importantly it puts the B matrix in the computational graph
+    for this calculation so backprop can pass through it (autograd.grad will not build a
+    computational graph from intermediate tensors
     https://gist.github.com/danbraunai-apollo/388c3c76be92922cf7b2a2f7da7d0d43). This is a
     (somewhat arbitrary) decision to include this layer's B matrix but not future layer parameters
     in the sparsity loss. We don't do this in topk because topk isn't a differentiable operation
