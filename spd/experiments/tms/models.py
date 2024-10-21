@@ -236,8 +236,9 @@ class TMSSPDFullRankModel(SPDFullRankModel):
         assert self.n_features == self.k
         self.subnetwork_params.data = torch.zeros_like(self.subnetwork_params.data)
         for subnet_idx in range(self.k):
-            self.subnetwork_params.data[:, subnet_idx, subnet_idx, :] = target_model.W.data[
-                :, subnet_idx, :
+            feature_idx = subnet_idx
+            self.subnetwork_params.data[:, subnet_idx, feature_idx, :] = target_model.W.data[
+                :, feature_idx, :
             ]
         self.b_final.data = target_model.b_final.data
 
