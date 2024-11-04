@@ -24,7 +24,7 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 from spd.log import logger
-from spd.models.base import Model, SPDFullRankModel, SPDModel
+from spd.models.base import Model, SPDFullRankModel, SPDModel, SPDRankPenaltyModel
 from spd.types import Probability, RootPath
 from spd.utils import (
     calc_ablation_attributions,
@@ -93,7 +93,7 @@ class Config(BaseModel):
     wandb_project: str | None = None
     wandb_run_name: str | None = None
     wandb_run_name_prefix: str = ""
-    full_rank: bool = False
+    spd_type: Literal["rank_one", "full_rank", "rank_penalty"] = "rank_one"
     seed: int = 0
     topk: PositiveFloat | None = None
     batch_topk: bool = True
@@ -110,6 +110,7 @@ class Config(BaseModel):
     param_match_coeff: NonNegativeFloat | None = 1.0
     topk_recon_coeff: NonNegativeFloat | None = None
     topk_l2_coeff: NonNegativeFloat | None = None
+    topk_schatten_coeff: NonNegativeFloat | None = None
     lp_sparsity_coeff: NonNegativeFloat | None = None
     topk_param_attrib_coeff: NonNegativeFloat | None = None
     distil_from_target: bool = False
@@ -188,11 +189,18 @@ class Config(BaseModel):
                 self.lr_exponential_halflife is not None
             ), "lr_exponential_halflife must be set if lr_schedule is exponential"
 
-        if self.full_rank:
-            assert not self.unit_norm_matrices, "Can't unit norm matrices if full rank"
+        if self.spd_type in ["full_rank", "rank_penalty"]:
+            assert (
+                not self.unit_norm_matrices
+            ), "Can't unit norm matrices if using full rank or rank_penalty"
+
+        if self.topk_schatten_coeff is None:
+            assert (
+                self.spd_type == "rank_penalty"
+            ), "topk_schatten_coeff must be set if using rank_penalty"
 
         if (
-            self.full_rank
+            self.spd_type != "rank_one"
             and isinstance(self.task_config, PiecewiseConfig)
             and not self.task_config.handcoded_AB
             and not self.task_config.decompose_bias
@@ -200,7 +208,7 @@ class Config(BaseModel):
             raise ValueError("Must have one of handcoded_AB or decompose_bias set")
 
         if (
-            not self.full_rank
+            self.spd_type == "rank_one"
             and isinstance(self.task_config, PiecewiseConfig)
             and self.task_config.decompose_bias
         ):
@@ -232,6 +240,8 @@ def get_common_run_name_suffix(config: Config) -> str:
         run_suffix += f"topkrecon{config.topk_recon_coeff:.2e}_"
     if config.topk_l2_coeff is not None:
         run_suffix += f"topkl2_{config.topk_l2_coeff:.2e}_"
+    if config.topk_schatten_coeff is not None:
+        run_suffix += f"schatten{config.topk_schatten_coeff:.2e}_"
     if config.topk_act_recon_coeff is not None:
         run_suffix += f"topkactrecon_{config.topk_act_recon_coeff:.2e}_"
     if config.topk_param_attrib_coeff is not None:
@@ -392,6 +402,55 @@ def calc_topk_l2_full_rank(
         topk_l2_penalty = topk_l2_penalty + ((topk_params) ** 2).sum(dim=mean_dims)
 
     return topk_l2_penalty / n_params / batch_size
+
+
+def calc_topk_schatten_loss(
+    As_and_Bs_vals: list[
+        tuple[
+            Float[Tensor, "n_instances k d_layer_in m"],
+            Float[Tensor, "n_instances k m d_layer_out"],
+        ]
+    ],
+    topk_mask: Bool[Tensor, "batch k"] | Bool[Tensor, "batch n_instances k"],
+    p: float,
+    n_params: int,
+) -> Float[Tensor, ""] | Float[Tensor, " n_instances"]:
+    """Calculate the Schatten p-norms of the topk subnetworks and sum them.
+
+    Args:
+        As_and_Bs_vals: List of tuples containing A and B matrices for each layer
+        topk_mask: The topk mask to use for the Schatten p-norm penalty
+        p: The Schatten p-norm to use (from config.pnorm)
+        n_params: The number of parameters in the model
+    Returns:
+        The Schatten p-norm penalty for the topk subnetworks
+    """
+    n_instances = topk_mask.shape[1] if topk_mask.ndim == 3 else None
+    accumulate_shape = (n_instances,) if n_instances is not None else ()
+
+    topk_schatten_penalty = torch.zeros(accumulate_shape, device=As_and_Bs_vals[0][0].device)
+    batch_size = topk_mask.shape[0]
+
+    for A, B in As_and_Bs_vals:
+        # A: [k, d_in, m] or [n_instances, k, d_in, m]
+        # B: [k, m, d_out] or [n_instances, k, m, d_out]
+        # topk_mask: [batch, k] or [batch, n_instances, k]
+
+        # Compute S_A = A^T A and S_B = B B^T
+        S_A = einops.einsum(A, A, "... k d_in m, ... k d_in m -> ... k m")
+        S_B = einops.einsum(B, B, "... k m d_out, ... k m d_out -> ... k m")
+
+        S_AB = S_A * S_B
+
+        # Apply topk mask
+        S_AB_topk = einops.einsum(S_AB, topk_mask, "... k m, batch ... k -> batch ... k m")
+
+        # Sum the Schatten p-norm
+        topk_schatten_penalty = topk_schatten_penalty + ((S_AB_topk + 1e-16) ** (0.5 * p)).sum(
+            dim=(0, -2, -1)
+        )
+
+    return topk_schatten_penalty / n_params / batch_size
 
 
 def calc_param_match_loss(
@@ -701,7 +760,7 @@ def calc_topk_act_recon(
 
 def calculate_attributions(
     config: Config,
-    model: SPDModel | SPDFullRankModel,
+    model: SPDModel | SPDFullRankModel | SPDRankPenaltyModel,
     batch: Float[Tensor, "... n_features"],
     out: Float[Tensor, "... n_features"],
     inner_acts: dict[str, Float[Tensor, "batch n_instances k"] | Float[Tensor, "batch k"]],
@@ -711,16 +770,16 @@ def calculate_attributions(
     if config.attribution_type == "ablation":
         attributions = calc_ablation_attributions(model=model, batch=batch, out=out)
     elif config.attribution_type == "gradient":
-        if config.full_rank:
-            attributions = calc_grad_attributions_full_rank(
-                out=out, inner_acts=inner_acts, layer_acts=layer_acts
-            )
-        else:
+        if config.spd_type == "rank_one":
             attributions = calc_grad_attributions_rank_one(
                 out=out, inner_acts_vals=list(inner_acts.values())
             )
+        else:
+            attributions = calc_grad_attributions_full_rank(
+                out=out, inner_acts=inner_acts, layer_acts=layer_acts
+            )
     elif config.attribution_type == "activation":
-        assert config.full_rank, "Activation attributions only supported for full rank"
+        assert config.spd_type != "rank_one", "Activation attributions not supported for rank one"
         attributions = calc_activation_attributions(inner_acts=inner_acts)
     else:
         raise ValueError(f"Invalid attribution type: {config.attribution_type}")
@@ -728,7 +787,7 @@ def calculate_attributions(
 
 
 def optimize(
-    model: SPDModel | SPDFullRankModel,
+    model: SPDModel | SPDFullRankModel | SPDRankPenaltyModel,
     config: Config,
     device: str,
     dataloader: DataLoader[tuple[Float[Tensor, "... n_features"], Float[Tensor, "... n_features"]]],
@@ -823,7 +882,7 @@ def optimize(
 
         orthog_loss = None
         if config.orthog_coeff is not None:
-            assert config.full_rank, "Orthogonality loss only works in full rank models"
+            assert config.spd_type != "rank_one", "Orthogonality loss not supported for rank one"
             subnet_param_vals = list(model.all_subnetwork_params().values())
             if config.distil_from_target:
                 # Remove the final subnetwork index from all params
@@ -856,11 +915,7 @@ def optimize(
         lp_sparsity_loss = None
         if config.lp_sparsity_coeff is not None:
             step_pnorm = config.pnorm or get_step_pnorm(step, config.steps, config.pnorm_end)
-            if config.full_rank:
-                lp_sparsity_loss = calc_lp_sparsity_loss_full_rank(
-                    out=out, attributions=attributions, step_pnorm=step_pnorm
-                )
-            else:
+            if config.spd_type == "rank_one":
                 lp_sparsity_loss = calc_lp_sparsity_loss_rank_one(
                     out=out,
                     layer_acts=layer_acts,
@@ -868,15 +923,20 @@ def optimize(
                     B_params={k: tup[1] for k, tup in model.all_As_and_Bs().items()},
                     step_pnorm=step_pnorm,
                 )
+            else:
+                lp_sparsity_loss = calc_lp_sparsity_loss_full_rank(
+                    out=out, attributions=attributions, step_pnorm=step_pnorm
+                )
 
         (
             out_topk,
             topk_l2_loss,
+            topk_schatten_loss,
             topk_recon_loss,
             topk_mask,
             topk_param_attrib_loss,
             topk_act_recon_loss,
-        ) = None, None, None, None, None, None
+        ) = None, None, None, None, None, None, None
         if config.topk is not None:
             # We always assume the final subnetwork is the one we want to distil
             topk_attrs = attributions[..., :-1] if config.distil_from_target else attributions
@@ -892,7 +952,7 @@ def optimize(
             out_topk, layer_acts_topk, inner_acts_topk = model(batch, topk_mask=topk_mask)
 
             if config.topk_l2_coeff is not None:
-                if config.full_rank:
+                if config.spd_type == "full_rank":
                     assert isinstance(model, SPDFullRankModel)
                     topk_l2_loss = calc_topk_l2_full_rank(
                         subnet_param_vals=list(model.all_subnetwork_params().values()),
@@ -900,12 +960,14 @@ def optimize(
                         n_params=n_params,
                         n_instances=getattr(model, "n_instances", None),
                     )
-                else:
+                elif config.spd_type == "rank_one":
                     topk_l2_loss = calc_topk_l2_rank_one(
                         As_and_Bs_vals=list(model.all_As_and_Bs().values()),
                         topk_mask=topk_mask,
                         n_params=n_params,
                     )
+                else:
+                    raise ValueError(f"topk_l2_loss not supported for {config.spd_type}")
 
             if config.topk_recon_coeff is not None:
                 assert out_topk is not None
@@ -932,6 +994,19 @@ def optimize(
                     target_post_acts=post_acts, layer_acts_topk=layer_acts_topk
                 )
 
+        if config.topk_schatten_coeff is not None:
+            assert topk_mask is not None
+            assert isinstance(
+                model, SPDRankPenaltyModel
+            ), "Topk schatten loss only supported for SPDRankPenaltyModel"
+            pnorm = config.pnorm if config.pnorm is not None else 1.0
+            topk_schatten_loss = calc_topk_schatten_loss(
+                As_and_Bs_vals=list(model.all_As_and_Bs().values()),
+                topk_mask=topk_mask,
+                p=pnorm,
+                n_params=n_params,
+            )
+
         # Add up the loss terms
         loss = torch.tensor(0.0, device=device)
         if orthog_loss is not None:
@@ -957,6 +1032,9 @@ def optimize(
         if topk_act_recon_loss is not None:
             assert config.topk_act_recon_coeff is not None
             loss = loss + config.topk_act_recon_coeff * topk_act_recon_loss.mean()
+        if topk_schatten_loss is not None:
+            assert config.topk_schatten_coeff is not None
+            loss = loss + config.topk_schatten_coeff * topk_schatten_loss.mean()
 
         # Logging
         if step % config.print_freq == 0:
@@ -981,6 +1059,8 @@ def optimize(
                 tqdm.write(f"Topk param attrib loss:{nl}{topk_param_attrib_loss}")
             if topk_act_recon_loss is not None:
                 tqdm.write(f"Topk act recon loss:{nl}{topk_act_recon_loss}")
+            if topk_schatten_loss is not None:
+                tqdm.write(f"Topk schatten loss:{nl}{topk_schatten_loss}")
             if config.wandb_project:
                 wandb.log(
                     {
@@ -1008,6 +1088,9 @@ def optimize(
                         else None,
                         "topk_act_recon_loss": topk_act_recon_loss.mean().item()
                         if topk_act_recon_loss is not None
+                        else None,
+                        "topk_schatten_loss": topk_schatten_loss.mean().item()
+                        if topk_schatten_loss is not None
                         else None,
                     },
                     step=step,

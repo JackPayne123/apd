@@ -19,7 +19,7 @@ from torch import Tensor
 from torch.utils.data import DataLoader, Dataset
 from wandb.apis.public import Run
 
-from spd.models.base import Model, SPDFullRankModel, SPDModel
+from spd.models.base import Model, SPDFullRankModel, SPDModel, SPDRankPenaltyModel
 from spd.settings import REPO_ROOT
 
 T = TypeVar("T", bound=BaseModel)
@@ -435,7 +435,7 @@ def calc_grad_attributions_full_rank_per_layer(
 
 @torch.inference_mode()
 def calc_ablation_attributions(
-    model: SPDModel | SPDFullRankModel,
+    model: SPDModel | SPDFullRankModel | SPDRankPenaltyModel,
     batch: Float[Tensor, "batch ... n_features"],
     out: Float[Tensor, "batch ... d_model_out"],
 ) -> Float[Tensor, "batch ... k"]:

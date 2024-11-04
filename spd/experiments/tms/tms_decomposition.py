@@ -14,7 +14,12 @@ import yaml
 from matplotlib.colors import CenteredNorm
 from tqdm import tqdm
 
-from spd.experiments.tms.models import TMSModel, TMSSPDFullRankModel, TMSSPDModel
+from spd.experiments.tms.models import (
+    TMSModel,
+    TMSSPDFullRankModel,
+    TMSSPDModel,
+    TMSSPDRankPenaltyModel,
+)
 from spd.experiments.tms.utils import TMSDataset, plot_A_matrix
 from spd.log import logger
 from spd.run_spd import Config, TMSConfig, get_common_run_name_suffix, optimize
@@ -58,7 +63,7 @@ def plot_permuted_A(model: TMSSPDModel, step: int, out_dir: Path, **_) -> plt.Fi
 
 
 def plot_subnetwork_params(
-    model: TMSSPDFullRankModel | TMSSPDModel, step: int, out_dir: Path, **_
+    model: TMSSPDFullRankModel | TMSSPDModel | TMSSPDRankPenaltyModel, step: int, out_dir: Path, **_
 ) -> plt.Figure:
     """Plot the subnetwork parameter matrix."""
     all_params = model.all_subnetwork_params()
@@ -99,10 +104,13 @@ def plot_subnetwork_params(
 
 
 def make_plots(
-    model: TMSSPDFullRankModel | TMSSPDModel, step: int, out_dir: Path, **_
+    model: TMSSPDFullRankModel | TMSSPDModel | TMSSPDRankPenaltyModel,
+    step: int,
+    out_dir: Path,
+    **_,
 ) -> dict[str, plt.Figure]:
     plots = {}
-    if isinstance(model, TMSSPDFullRankModel):
+    if isinstance(model, TMSSPDFullRankModel | TMSSPDRankPenaltyModel):
         plots["subnetwork_params"] = plot_subnetwork_params(model, step, out_dir)
     else:
         plots["A"] = plot_permuted_A(model, step, out_dir)
@@ -134,7 +142,7 @@ def main(
         yaml.dump(config.model_dump(mode="json"), f, indent=2)
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    if config.full_rank:
+    if config.spd_type == "full_rank":
         model = TMSSPDFullRankModel(
             n_instances=task_config.n_instances,
             n_features=task_config.n_features,
@@ -144,7 +152,7 @@ def main(
             bias_val=task_config.bias_val,
             device=device,
         )
-    else:
+    elif config.spd_type == "rank_one":
         model = TMSSPDModel(
             n_instances=task_config.n_instances,
             n_features=task_config.n_features,
@@ -154,6 +162,18 @@ def main(
             bias_val=task_config.bias_val,
             device=device,
         )
+    elif config.spd_type == "rank_penalty":
+        model = TMSSPDRankPenaltyModel(
+            n_instances=task_config.n_instances,
+            n_features=task_config.n_features,
+            n_hidden=task_config.n_hidden,
+            k=task_config.k,
+            train_bias=task_config.train_bias,
+            bias_val=task_config.bias_val,
+            device=device,
+        )
+    else:
+        raise ValueError(f"Unknown spd_type: {config.spd_type}")
 
     pretrained_model = None
     if task_config.pretrained_model_path:
