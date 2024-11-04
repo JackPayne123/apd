@@ -122,7 +122,8 @@ def resid_linear_plot_results_fn(
     assert isinstance(config.task_config, ResidualLinearConfig)
     fig_dict = {}
 
-    attribution_scores = _collect_subnetwork_attributions(model, device, config.full_rank)
+    assert config.spd_type == "full_rank"
+    attribution_scores = _collect_subnetwork_attributions(model, device, full_rank=True)
     fig_dict_attributions = plot_subnetwork_attributions(attribution_scores, out_dir, step)
     fig_dict.update(fig_dict_attributions)
 
