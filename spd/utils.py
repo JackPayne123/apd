@@ -475,6 +475,35 @@ def calc_activation_attributions(
     return attribution_scores
 
 
+def calculate_attributions(
+    model: SPDModel | SPDFullRankModel | SPDRankPenaltyModel,
+    batch: Float[Tensor, "... n_features"],
+    out: Float[Tensor, "... n_features"],
+    inner_acts: dict[str, Float[Tensor, "batch n_instances k"] | Float[Tensor, "batch k"]],
+    layer_acts: dict[str, Float[Tensor, "batch n_instances d_out"] | Float[Tensor, "batch d_out"]],
+    attribution_type: Literal["ablation", "gradient", "activation"],
+    spd_type: Literal["rank_one", "full_rank", "rank_penalty"],
+) -> Float[Tensor, "batch n_instances k"] | Float[Tensor, "batch k"]:
+    attributions = None
+    if attribution_type == "ablation":
+        attributions = calc_ablation_attributions(model=model, batch=batch, out=out)
+    elif attribution_type == "gradient":
+        if spd_type == "rank_one":
+            attributions = calc_grad_attributions_rank_one(
+                out=out, inner_acts_vals=list(inner_acts.values())
+            )
+        else:
+            attributions = calc_grad_attributions_full_rank(
+                out=out, inner_acts=inner_acts, layer_acts=layer_acts
+            )
+    elif attribution_type == "activation":
+        assert spd_type != "rank_one", "Activation attributions not supported for rank one"
+        attributions = calc_activation_attributions(inner_acts=inner_acts)
+    else:
+        raise ValueError(f"Invalid attribution type: {attribution_type}")
+    return attributions
+
+
 def calc_topk_mask(
     attribution_scores: Float[Tensor, "batch ... k"],
     topk: float,
@@ -589,8 +618,8 @@ def run_spd_forward_pass(
     spd_model: SPDModel | SPDFullRankModel,
     target_model: Model | None,
     input_array: Float[Tensor, "batch n_inputs"],
-    full_rank: bool,
     attribution_type: Literal["gradient", "ablation", "activation"],
+    spd_type: Literal["rank_one", "full_rank", "rank_penalty"],
     batch_topk: bool,
     topk: float,
     distil_from_target: bool,
@@ -602,26 +631,15 @@ def run_spd_forward_pass(
         target_model_output = None
 
     model_output_spd, layer_acts, inner_acts = spd_model(input_array)
-
-    if attribution_type == "ablation":
-        attribution_scores = calc_ablation_attributions(
-            model=spd_model, batch=input_array, out=model_output_spd
-        )
-    elif attribution_type == "gradient":
-        if full_rank:
-            attribution_scores = calc_grad_attributions_full_rank(
-                out=model_output_spd,
-                inner_acts=inner_acts,
-                layer_acts=layer_acts,
-            )
-        else:
-            attribution_scores = calc_grad_attributions_rank_one(
-                out=model_output_spd, inner_acts_vals=list(inner_acts.values())
-            )
-    elif attribution_type == "activation":
-        attribution_scores = calc_activation_attributions(inner_acts=inner_acts)
-    else:
-        raise ValueError(f"Invalid attribution type: {attribution_type}")
+    attribution_scores = calculate_attributions(
+        model=spd_model,
+        batch=input_array,
+        out=model_output_spd,
+        inner_acts=inner_acts,
+        layer_acts=layer_acts,
+        attribution_type=attribution_type,
+        spd_type=spd_type,
+    )
 
     # We always assume the final subnetwork is the one we want to distil
     topk_attrs = attribution_scores[..., :-1] if distil_from_target else attribution_scores

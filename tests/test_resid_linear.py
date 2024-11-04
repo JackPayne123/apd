@@ -29,7 +29,7 @@ def test_resid_linear_decomposition_happy_path() -> None:
     device = "cpu"
     config = Config(
         seed=0,
-        full_rank=True,
+        spd_type="full_rank",
         unit_norm_matrices=False,
         topk=1,
         batch_topk=True,

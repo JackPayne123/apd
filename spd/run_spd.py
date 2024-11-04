@@ -26,13 +26,7 @@ from tqdm import tqdm
 from spd.log import logger
 from spd.models.base import Model, SPDFullRankModel, SPDModel, SPDRankPenaltyModel
 from spd.types import Probability, RootPath
-from spd.utils import (
-    calc_ablation_attributions,
-    calc_activation_attributions,
-    calc_grad_attributions_full_rank,
-    calc_grad_attributions_rank_one,
-    calc_topk_mask,
-)
+from spd.utils import calc_topk_mask, calculate_attributions
 
 
 class TMSConfig(BaseModel):
@@ -194,7 +188,7 @@ class Config(BaseModel):
                 not self.unit_norm_matrices
             ), "Can't unit norm matrices if using full rank or rank_penalty"
 
-        if self.topk_schatten_coeff is None:
+        if self.topk_schatten_coeff is not None:
             assert (
                 self.spd_type == "rank_penalty"
             ), "topk_schatten_coeff must be set if using rank_penalty"
@@ -758,34 +752,6 @@ def calc_topk_act_recon(
     return (loss / total_act_dim).mean(dim=0)
 
 
-def calculate_attributions(
-    config: Config,
-    model: SPDModel | SPDFullRankModel | SPDRankPenaltyModel,
-    batch: Float[Tensor, "... n_features"],
-    out: Float[Tensor, "... n_features"],
-    inner_acts: dict[str, Float[Tensor, "batch n_instances k"] | Float[Tensor, "batch k"]],
-    layer_acts: dict[str, Float[Tensor, "batch n_instances d_out"] | Float[Tensor, "batch d_out"]],
-) -> Float[Tensor, "batch n_instances k"] | Float[Tensor, "batch k"]:
-    attributions = None
-    if config.attribution_type == "ablation":
-        attributions = calc_ablation_attributions(model=model, batch=batch, out=out)
-    elif config.attribution_type == "gradient":
-        if config.spd_type == "rank_one":
-            attributions = calc_grad_attributions_rank_one(
-                out=out, inner_acts_vals=list(inner_acts.values())
-            )
-        else:
-            attributions = calc_grad_attributions_full_rank(
-                out=out, inner_acts=inner_acts, layer_acts=layer_acts
-            )
-    elif config.attribution_type == "activation":
-        assert config.spd_type != "rank_one", "Activation attributions not supported for rank one"
-        attributions = calc_activation_attributions(inner_acts=inner_acts)
-    else:
-        raise ValueError(f"Invalid attribution type: {config.attribution_type}")
-    return attributions
-
-
 def optimize(
     model: SPDModel | SPDFullRankModel | SPDRankPenaltyModel,
     config: Config,
@@ -905,12 +871,13 @@ def optimize(
             )
 
         attributions = calculate_attributions(
-            config=config,
             model=model,
             batch=batch,
             out=out,
             inner_acts=inner_acts,
             layer_acts=layer_acts,
+            attribution_type=config.attribution_type,
+            spd_type=config.spd_type,
         )
         lp_sparsity_loss = None
         if config.lp_sparsity_coeff is not None:
