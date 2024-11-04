@@ -1,3 +1,5 @@
+# %%
+import einops
 import matplotlib.collections as mc
 import matplotlib.pyplot as plt
 import numpy as np
@@ -6,10 +8,13 @@ import yaml
 from jaxtyping import Float
 from torch import Tensor
 
+from spd.experiments.tms.models import TMSModel
+from spd.experiments.tms.train_tms import TMSTrainConfig
+from spd.experiments.tms.utils import TMSDataset
 from spd.run_spd import (
     Config,
 )
-from spd.utils import REPO_ROOT
+from spd.utils import REPO_ROOT, DatasetGeneratedDataLoader, set_seed
 
 
 def plot_vectors(
@@ -222,11 +227,14 @@ def plot_networks(
     return fig
 
 
+# %%
 if __name__ == "__main__":
     # pretrained_path = REPO_ROOT / "spd/experiments/tms/demo_spd_model/model_30000.pth"
     pretrained_path = (
         REPO_ROOT
-        / "spd/experiments/tms/out/fr_topk2.80e-01_topkrecon1.00e+01_topkl2_1.00e+00_sd0_attr-gra_lr1.00e-02_bs2048_ft5_hid2/model_20000.pth"
+        # / "spd/experiments/tms/out/fr_topk2.80e-01_topkrecon1.00e+01_topkl2_1.00e+00_sd0_attr-gra_lr1.00e-02_bs2048_ft5_hid2/model_20000.pth"
+        # / "spd/experiments/tms/out/fr_topk3.50e-01_topkrecon1.00e+01_topkactrecon_1.00e-01_sd0_attr-gra_lr1.00e-02_bs2048_ft5_hid2/model_30000.pth"
+        / "spd/experiments/tms/out/fr_topk1.00e+00_topkrecon1.00e+01_topkl2_1.00e+01_topkactrecon_0.00e+00_sd0_attr-act_lr1.00e-02_bs2048_ft5_hid2/model_30000.pth"
     )
 
     with open(pretrained_path.parent / "final_config.yaml") as f:
@@ -243,3 +251,47 @@ if __name__ == "__main__":
     fig2 = plot_networks(subnets, n_instances=1, has_labels=False)
     fig2.savefig(pretrained_path.parent / "network_diagram.png", bbox_inches="tight", dpi=200)
     print(f"Saved figure to {pretrained_path.parent / 'network_diagram.png'}")
+
+    # %%
+    pretrained_path = (
+        REPO_ROOT
+        # / "spd/experiments/tms/out/tms_n-features5_n-hidden2_n-instances12_seed0.pth/model.pth"
+        / "spd/experiments/tms/out/tms_n-features5_n-hidden2_n-instances12_seed0_play.pth/model.pth"
+    )
+    config = TMSTrainConfig(
+        n_features=5,
+        n_hidden=2,
+        n_instances=12,
+        feature_probability=0.05,
+        batch_size=1024,
+        steps=5_000,
+        seed=0,
+    )
+
+    set_seed(config.seed)
+
+    model = TMSModel(
+        n_instances=config.n_instances,
+        n_features=config.n_features,
+        n_hidden=config.n_hidden,
+        device="cpu",
+    )
+    model.load_state_dict(torch.load(pretrained_path, map_location="cpu", weights_only=True))
+
+    dataset = TMSDataset(
+        n_instances=config.n_instances,
+        n_features=config.n_features,
+        feature_probability=config.feature_probability,
+        device="cpu",
+    )
+    dataloader = DatasetGeneratedDataLoader(dataset, batch_size=config.batch_size)
+    # Get a random batch
+    batch, labels = next(iter(dataloader))
+    # Get the loss for a random batch
+    out, _, _ = model(batch)
+    error = (labels - out) ** 2
+    loss = einops.reduce(error, "b i f -> i", "mean")
+    print(f"Loss: {loss}")
+    print(f"Loss meaned: {loss.mean().item()}")
+
+# %%

@@ -1,11 +1,16 @@
-wandb_project: spd-tms
+# wandb_project: spd-tms
 wandb_run_name: null
 wandb_run_name_prefix: ""
 seed: 0
 topk: null
+
+full_rank: true
+unit_norm_matrices: false
+
+
 param_match_coeff: 1.0
 lp_sparsity_coeff: 3
-pnorm: 0.9
+pnorm: 0.5
 pnorm_end: null
 batch_size: 2048
 steps: 30_000
@@ -17,12 +22,26 @@ lr_schedule: constant
 lr_warmup_pct: 0.1
 task_config:
   task_name: tms
-  k: 5
-  n_features: 5
-  n_hidden: 2
-  n_instances: 12
+  # k: 5
+  # n_features: 5
+  # n_hidden: 2
+  # n_instances: 12
+
+  # k: 100
+  # n_features: 100
+  # n_hidden: 30
+  # n_instances: 2
+
+  k: 1000
+  n_features: 1000
+  n_hidden: 100
+  n_instances: 1
+
   bias_val: 0.0
   train_bias: true
   feature_probability: 0.05
   # File obtained by running spd/experiments/tms/train_tms.py
-  pretrained_model_path: spd/experiments/tms/out/tms_n-features5_n-hidden2_n-instances12_seed0.pth/model.pth
+  # pretrained_model_path: spd/experiments/tms/out/tms_n-features5_n-hidden2_n-instances12_seed0.pth/model.pth
+  # pretrained_model_path: spd/experiments/tms/out/tms_n-features100_n-hidden30_n-instances2_seed0.pth/model.pth
+  pretrained_model_path: spd/experiments/tms/out/tms_n-features1000_n-hidden100_n-instances1_seed0.pth/model.pth
+  handcoded: true

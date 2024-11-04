@@ -169,6 +169,11 @@ def main(
         pretrained_model.eval()
         if task_config.handcoded:
             model.set_handcoded_spd_params(pretrained_model)
+            # for subnet_idx in range(model.k):
+            #     model.subnetwork_params.data[:, subnet_idx, :, :] = (
+            #         pretrained_model.W.data / model.k
+            #     )
+            # model.b_final.data = pretrained_model.b_final.data
 
     param_map = None
     if task_config.pretrained_model_path:

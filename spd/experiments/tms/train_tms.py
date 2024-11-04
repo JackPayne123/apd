@@ -119,10 +119,10 @@ def plot_intro_diagram(model: TMSModel, filepath: Path) -> None:
 if __name__ == "__main__":
     device = "cuda" if torch.cuda.is_available() else "cpu"
     config = TMSTrainConfig(
-        n_features=5,
-        n_hidden=2,
-        n_instances=12,
-        feature_probability=0.05,
+        n_features=1000,
+        n_hidden=100,
+        n_instances=1,
+        feature_probability=0.01,
         batch_size=1024,
         steps=5_000,
         seed=0,

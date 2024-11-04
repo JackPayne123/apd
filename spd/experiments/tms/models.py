@@ -242,6 +242,13 @@ class TMSSPDFullRankModel(SPDFullRankModel):
             ]
         self.b_final.data = target_model.b_final.data
 
+    def set_handcoded_spd_params_symmetric(self, target_model: TMSModel):
+        """Set the subnetwork params to be the same as the weight matrix divided by self.k"""
+        # I.e. all subnetworks should be the same
+        for subnet_idx in range(self.k):
+            self.subnetwork_params.data[:, subnet_idx, :, :] = target_model.W.data / self.k
+        self.b_final.data = target_model.b_final.data
+
     def set_subnet_to_zero(
         self, subnet_idx: int
     ) -> dict[str, Float[Tensor, "n_instances n_features n_hidden"]]:
