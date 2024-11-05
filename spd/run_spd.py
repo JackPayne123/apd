@@ -40,7 +40,9 @@ class TMSConfig(BaseModel):
     train_bias: bool
     bias_val: float
     pretrained_model_path: RootPath | None = None
-    one_feature_active: bool = False
+    data_generation_type: Literal[
+        "exactly_one_active", "at_least_zero_active", "at_least_one_active"
+    ] = "at_least_zero_active"
     handcoded: bool = False
 
 

@@ -261,7 +261,7 @@ def test_tms_spd_full_rank_equivalence() -> None:
 def test_tms_dataset_one_feature_active():
     n_instances = 3
     n_features = 5
-    feature_probability = 0.5  # This won't be used when one_feature_active is True
+    feature_probability = 0.5  # This won't be used when data_generation_type="exactly_one_active"
     device = "cpu"
     batch_size = 10
 
@@ -270,7 +270,7 @@ def test_tms_dataset_one_feature_active():
         n_features=n_features,
         feature_probability=feature_probability,
         device=device,
-        one_feature_active=True,
+        data_generation_type="exactly_one_active",
     )
 
     batch, _ = dataset.generate_batch(batch_size)
@@ -296,14 +296,14 @@ def test_tms_dataset_multi_feature():
     n_features = 5
     feature_probability = 0.5
     device = "cpu"
-    batch_size = 30
+    batch_size = 100
 
     dataset = TMSDataset(
         n_instances=n_instances,
         n_features=n_features,
         feature_probability=feature_probability,
         device=device,
-        one_feature_active=False,
+        data_generation_type="at_least_zero_active",
     )
 
     batch, _ = dataset.generate_batch(batch_size)
@@ -317,7 +317,7 @@ def test_tms_dataset_multi_feature():
     # Check that the proportion of non-zero elements is close to feature_probability
     non_zero_proportion = torch.count_nonzero(batch) / batch.numel()
     assert (
-        abs(non_zero_proportion - feature_probability) < 0.1
+        abs(non_zero_proportion - feature_probability) < 0.05
     ), f"Expected proportion {feature_probability}, but got {non_zero_proportion}"
 
 
