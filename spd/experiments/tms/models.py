@@ -360,6 +360,7 @@ class TMSSPDRankPenaltyModel(SPDRankPenaltyModel):
     ) -> dict[
         str, tuple[Float[Tensor, "n_instances k d_in m"], Float[Tensor, "n_instances k m d_out"]]
     ]:
+        """Get all A and B matrices. Note that this won't return bias components."""
         return {
             "W": (self.A, self.B),
             "W_T": (
