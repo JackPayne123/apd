@@ -103,13 +103,10 @@ class TMSDataset(
     ) -> Float[Tensor, "batch n_instances n_features"]:
         """Generate a batch with at least one feature active per sample and instance.
         Values are uniformly distributed in [0,1] for active features."""
-        # Generate random values and activation mask
-        values = torch.rand(batch_size, self.n_instances, self.n_features, device=self.device)
-        mask = torch.rand_like(values) < self.feature_probability
+        binomial_batch = self._generate_multi_feature_batch(batch_size)
 
-        # Ensure at least one feature is active per instance
-        # If no features are active, use _generate_one_feature_active_batch
-        any_active = mask.any(dim=-1, keepdim=True)
+        # If no features are active, use a row from _generate_one_feature_active_batch
+        any_active = binomial_batch.any(dim=-1, keepdim=True)
         backup = self._generate_one_feature_active_batch(batch_size)
 
-        return torch.where(any_active, values * mask, backup)
+        return torch.where(any_active, binomial_batch, backup)
