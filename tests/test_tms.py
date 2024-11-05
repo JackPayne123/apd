@@ -410,7 +410,7 @@ def test_tms_spd_rank_penalty_full_rank_equivalence() -> None:
     n_features = 3
     n_hidden = 2
     n_instances = 2
-    k = 2  # Single subnetwork
+    k = 2
 
     device = "cpu"
 
