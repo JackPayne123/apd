@@ -80,7 +80,9 @@ class ResidualLinearConfig(BaseModel):
     k: PositiveInt
     feature_probability: Probability
     init_scale: float = 1.0
-    one_feature_active: bool = False
+    data_generation_type: Literal[
+        "exactly_one_active", "at_least_zero_active", "at_least_one_active"
+    ] = "at_least_zero_active"
     pretrained_model_path: RootPath
 
 

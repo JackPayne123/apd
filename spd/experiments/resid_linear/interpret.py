@@ -36,7 +36,7 @@ if __name__ == "__main__":
         feature_probability=config.task_config.feature_probability,
         device=device,
         label_coeffs=label_coeffs,
-        one_feature_active=config.task_config.one_feature_active,
+        data_generation_type=config.task_config.data_generation_type,
     )
     batch, labels = dataset.generate_batch(config.batch_size)
     # Print some basic information about the model

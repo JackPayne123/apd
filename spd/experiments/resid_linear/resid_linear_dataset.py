@@ -1,3 +1,5 @@
+from typing import Literal
+
 import einops
 import torch
 import torch.nn.functional as F
@@ -33,7 +35,9 @@ class ResidualLinearDataset(
         device: str,
         label_fn_seed: int | None = None,
         label_coeffs: list[float] | None = None,
-        one_feature_active: bool = False,
+        data_generation_type: Literal[
+            "exactly_one_active", "at_least_zero_active", "at_least_one_active"
+        ] = "at_least_zero_active",
     ):
         assert label_coeffs is not None or label_fn_seed is not None
         self.embed_matrix = embed_matrix.to(device)
@@ -41,7 +45,7 @@ class ResidualLinearDataset(
         self.feature_probability = feature_probability
         self.device = device
         self.label_fn_seed = label_fn_seed
-        self.one_feature_active = one_feature_active
+        self.data_generation_type = data_generation_type
 
         if label_coeffs is None:
             # Create random coeffs between [1, 2]
@@ -62,10 +66,14 @@ class ResidualLinearDataset(
     def generate_batch(
         self, batch_size: int
     ) -> tuple[Float[Tensor, "batch n_features"], Float[Tensor, "batch d_embed"]]:
-        if self.one_feature_active:
+        if self.data_generation_type == "exactly_one_active":
             batch = self._generate_one_feature_active_batch(batch_size)
-        else:
+        elif self.data_generation_type == "at_least_zero_active":
             batch = self._generate_multi_feature_batch(batch_size)
+        elif self.data_generation_type == "at_least_one_active":
+            batch = self._generate_at_least_one_active_batch(batch_size)
+        else:
+            raise ValueError(f"Invalid generation type: {self.data_generation_type}")
 
         labels = self.label_fn(batch)
         return batch, labels
@@ -86,3 +94,17 @@ class ResidualLinearDataset(
         batch = torch.rand((batch_size, self.n_features), device=self.device) * 2 - 1
         mask = torch.rand_like(batch) < self.feature_probability
         return batch * mask
+
+    def _generate_at_least_one_active_batch(
+        self, batch_size: int
+    ) -> Float[Tensor, "batch n_instances n_features"]:
+        """Generate a batch with at least one feature active per sample and instance.
+        Values are uniformly distributed in [-1, 1] for active features."""
+        binomial_batch = self._generate_multi_feature_batch(batch_size)
+
+        # Ensure at least one feature is active per instance
+        # If no features are active, use _generate_one_feature_active_batch
+        any_active = binomial_batch.any(dim=-1, keepdim=True)
+        backup = self._generate_one_feature_active_batch(batch_size)
+
+        return torch.where(any_active, binomial_batch, backup)

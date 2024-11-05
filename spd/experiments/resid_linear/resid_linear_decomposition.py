@@ -344,7 +344,7 @@ def main(
         feature_probability=config.task_config.feature_probability,
         device=device,
         label_coeffs=label_coeffs,
-        one_feature_active=config.task_config.one_feature_active,
+        data_generation_type=config.task_config.data_generation_type,
     )
 
     dataloader = DatasetGeneratedDataLoader(dataset, batch_size=config.batch_size, shuffle=False)
