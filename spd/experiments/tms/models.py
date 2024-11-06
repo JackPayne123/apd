@@ -368,3 +368,11 @@ class TMSSPDRankPenaltyModel(SPDRankPenaltyModel):
                 rearrange(self.A, "i k f m -> i k m f"),
             ),
         }
+
+    def set_matrices_to_unit_norm(self) -> None:
+        """Set the matrices that need to be normalized to unit norm."""
+        pass
+
+    def fix_normalized_adam_gradients(self) -> None:
+        """Modify the gradient by subtracting it's component parallel to the activation."""
+        pass

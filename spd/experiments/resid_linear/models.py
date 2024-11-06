@@ -15,7 +15,12 @@ from spd.models.base import Model, SPDFullRankModel, SPDRankPenaltyModel
 from spd.models.components import MLP, MLPComponentsFullRank, MLPComponentsRankPenalty
 from spd.run_spd import Config, ResidualLinearConfig
 from spd.types import RootPath
-from spd.utils import download_wandb_file, init_param_, load_yaml
+from spd.utils import (
+    download_wandb_file,
+    init_param_,
+    load_yaml,
+    remove_grad_parallel_to_subnetwork_vecs,
+)
 
 
 class ResidualLinearModel(Model):
@@ -410,6 +415,18 @@ class ResidualLinearSPDRankPenaltyModel(SPDRankPenaltyModel):
             params[f"layers.{i}.input_layer.weight"] = (mlp.linear1.A, mlp.linear1.B)
             params[f"layers.{i}.output_layer.weight"] = (mlp.linear2.A, mlp.linear2.B)
         return params
+
+    def set_matrices_to_unit_norm(self):
+        for mlp in self.layers:
+            mlp.linear1.A.data /= mlp.linear1.A.data.norm(p=2, dim=-2, keepdim=True)
+            mlp.linear2.A.data /= mlp.linear2.A.data.norm(p=2, dim=-2, keepdim=True)
+
+    def fix_normalized_adam_gradients(self):
+        for mlp in self.layers:
+            assert mlp.linear1.A.grad is not None
+            remove_grad_parallel_to_subnetwork_vecs(mlp.linear1.A.data, mlp.linear1.A.grad)
+            assert mlp.linear2.A.grad is not None
+            remove_grad_parallel_to_subnetwork_vecs(mlp.linear2.A.data, mlp.linear2.A.grad)
 
     @classmethod
     def _load_model(

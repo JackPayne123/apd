@@ -187,7 +187,7 @@ class Config(BaseModel):
                 self.lr_exponential_halflife is not None
             ), "lr_exponential_halflife must be set if lr_schedule is exponential"
 
-        if self.spd_type in ["full_rank", "rank_penalty"]:
+        if self.spd_type in ["full_rank"]:
             assert (
                 not self.unit_norm_matrices
             ), "Can't unit norm matrices if using full rank or rank_penalty"
@@ -405,8 +405,8 @@ def calc_topk_l2_full_rank(
 def calc_topk_schatten_loss(
     As_and_Bs_vals: list[
         tuple[
-            Float[Tensor, "n_instances k d_layer_in m"],
-            Float[Tensor, "n_instances k m d_layer_out"],
+            Float[Tensor, "n_instances k d_layer_in m"] | Float[Tensor, "k d_layer_in m"],
+            Float[Tensor, "n_instances k m d_layer_out"] | Float[Tensor, "k m d_layer_out"],
         ]
     ],
     topk_mask: Bool[Tensor, "batch k"] | Bool[Tensor, "batch n_instances k"],
@@ -795,7 +795,9 @@ def optimize(
     data_iter = iter(dataloader)
     for step in tqdm(range(config.steps + 1), ncols=0):
         if config.unit_norm_matrices:
-            assert isinstance(model, SPDModel), "Can only norm matrices in SPDModel instances"
+            assert isinstance(
+                model, SPDModel | SPDRankPenaltyModel
+            ), "Can only norm matrices in SPDModel instances"
             model.set_matrices_to_unit_norm()
 
         step_lr = get_lr_with_warmup(
@@ -1111,7 +1113,9 @@ def optimize(
                     wandb.log({"grad_norm": grad_norm}, step=step)
 
             if config.unit_norm_matrices:
-                assert isinstance(model, SPDModel), "Can only norm matrices in SPDModel instances"
+                assert isinstance(
+                    model, SPDModel | SPDRankPenaltyModel
+                ), "Can only norm matrices in SPDModel instances"
                 model.fix_normalized_adam_gradients()
 
             opt.step()
