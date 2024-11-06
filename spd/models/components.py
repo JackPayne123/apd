@@ -277,9 +277,8 @@ class ParamComponentsRankPenalty(nn.Module):
         self.B = nn.Parameter(torch.empty(k, self.m, out_dim))
         self.bias = nn.Parameter(torch.zeros(k, out_dim)) if bias else None
 
-        # Initialize parameters
-        nn.init.xavier_normal_(self.A, gain=init_scale)
-        nn.init.xavier_normal_(self.B, gain=init_scale)
+        init_param_(self.A, scale=init_scale)
+        init_param_(self.B, scale=init_scale)
 
     def forward(
         self, x: Float[Tensor, "batch d_in"], topk_mask: Bool[Tensor, "batch k"] | None = None
