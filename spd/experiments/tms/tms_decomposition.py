@@ -190,6 +190,9 @@ def main(
         if task_config.handcoded:
             model.set_handcoded_spd_params(pretrained_model)
 
+        # Manually set the bias for the SPD model from the bias in the pretrained model
+        model.b_final.data[:] = pretrained_model.b_final.data.clone()
+
     param_map = None
     if task_config.pretrained_model_path:
         # Map from pretrained model's `all_decomposable_params` to the SPD models'
