@@ -188,9 +188,7 @@ class Config(BaseModel):
             ), "lr_exponential_halflife must be set if lr_schedule is exponential"
 
         if self.spd_type in ["full_rank"]:
-            assert (
-                not self.unit_norm_matrices
-            ), "Can't unit norm matrices if using full rank or rank_penalty"
+            assert not self.unit_norm_matrices, "Can't unit norm matrices if using full rank"
 
         if self.topk_schatten_coeff is not None:
             assert (
