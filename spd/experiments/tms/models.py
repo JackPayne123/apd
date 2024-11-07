@@ -371,8 +371,9 @@ class TMSSPDRankPenaltyModel(SPDRankPenaltyModel):
 
     def set_matrices_to_unit_norm(self) -> None:
         """Set the matrices that need to be normalized to unit norm."""
-        pass
+        self.A.data /= self.A.data.norm(p=2, dim=-2, keepdim=True)
 
     def fix_normalized_adam_gradients(self) -> None:
         """Modify the gradient by subtracting it's component parallel to the activation."""
-        pass
+        assert self.A.grad is not None
+        remove_grad_parallel_to_subnetwork_vecs(self.A.data, self.A.grad)
