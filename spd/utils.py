@@ -578,7 +578,7 @@ def calc_neuron_indices(
 
 @torch.inference_mode()
 def remove_grad_parallel_to_subnetwork_vecs(
-    A: Float[Tensor, "... d_in k_or_m"], A_grad: Float[Tensor, "... d_in k_or_m"]
+    A: Float[Tensor, "... d_in _"], A_grad: Float[Tensor, "... d_in _"]
 ) -> None:
     """Modify the gradient by subtracting it's component parallel to the activation.
 
@@ -587,9 +587,11 @@ def remove_grad_parallel_to_subnetwork_vecs(
     This is to stop Adam from changing the norm of A. Note that this will not completely prevent
     Adam from changing the norm due to Adam's (m/(sqrt(v) + eps)) term not preserving the norm
     direction.
+
+    The final dimension is k in the case of rank one and m in the case of full rank.
     """
-    parallel_component = einops.einsum(A_grad, A, "... d_in k_or_m, ... d_in k_or_m -> ... k_or_m")
-    A_grad -= einops.einsum(parallel_component, A, "... k_or_m, ... d_in k_or_m -> ... d_in k_or_m")
+    parallel_component = einops.einsum(A_grad, A, "... d_in _, ... d_in _ -> ... _")
+    A_grad -= einops.einsum(parallel_component, A, "... _, ... d_in _ -> ... d_in _")
 
 
 class SPDOutputs(NamedTuple):
