@@ -170,8 +170,6 @@ def plot_multiple_subnetwork_params(
             ax.set_yticks([])
 
             if col_idx == 0:
-                # label = f"Layer {param_idx}"
-                # ax.set_ylabel(label, rotation=0, ha="right", va="center")
                 ax.set_ylabel(param_name, rotation=0, ha="right", va="center")
 
             if row_idx == n_params - 1:
