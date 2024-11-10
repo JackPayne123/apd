@@ -162,7 +162,14 @@ def test_train_tms_happy_path():
     set_seed(0)
     # Set up a small configuration
     config = TMSTrainConfig(
-        n_features=3, n_hidden=2, n_instances=2, feature_probability=0.1, batch_size=32, steps=5
+        n_features=3,
+        n_hidden=2,
+        n_instances=2,
+        feature_probability=0.1,
+        batch_size=32,
+        steps=5,
+        lr=5e-3,
+        data_generation_type="at_least_zero_active",
     )
 
     # Initialize model, dataset, and dataloader
