@@ -4,8 +4,10 @@ metric:
   name: final_closeness
   goal: minimize
 parameters:
-  topk_schatten_coeff:
-    values: [1e-1, 1, 3, 10, 100]
+  # topk:
+  #   # values: [0.211, 0.239, 0.25, 0.261, 0.289]
+  seed:
+    values: [0, 1, 2, 3, 4]
 command:
 - ${env}
 - ${interpreter}
