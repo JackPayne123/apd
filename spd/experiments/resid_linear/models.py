@@ -186,10 +186,10 @@ class ResidualLinearSPDFullRankModel(SPDFullRankModel):
             stored_vals[f"layers.{i}.output_layer.bias"] = (
                 mlp.linear2.bias[subnet_idx, :].detach().clone()
             )
-            mlp.linear1.subnetwork_params[subnet_idx, :, :] = 0.0
-            mlp.linear1.bias[subnet_idx, :] = 0.0
-            mlp.linear2.subnetwork_params[subnet_idx, :, :] = 0.0
-            mlp.linear2.bias[subnet_idx, :] = 0.0
+            mlp.linear1.subnetwork_params.data[subnet_idx, :, :] = 0.0
+            mlp.linear1.bias.data[subnet_idx, :] = 0.0
+            mlp.linear2.subnetwork_params.data[subnet_idx, :, :] = 0.0
+            mlp.linear2.bias.data[subnet_idx, :] = 0.0
         return stored_vals
 
     def restore_subnet(
@@ -198,14 +198,14 @@ class ResidualLinearSPDFullRankModel(SPDFullRankModel):
         stored_vals: dict[str, Float[Tensor, " d_out"] | Float[Tensor, "d_in d_out"]],
     ) -> None:
         for i, mlp in enumerate(self.layers):
-            mlp.linear1.subnetwork_params[subnet_idx, :, :] = stored_vals[
+            mlp.linear1.subnetwork_params.data[subnet_idx, :, :] = stored_vals[
                 f"layers.{i}.input_layer.weight"
             ]
-            mlp.linear1.bias[subnet_idx, :] = stored_vals[f"layers.{i}.input_layer.bias"]
-            mlp.linear2.subnetwork_params[subnet_idx, :, :] = stored_vals[
+            mlp.linear1.bias.data[subnet_idx, :] = stored_vals[f"layers.{i}.input_layer.bias"]
+            mlp.linear2.subnetwork_params.data[subnet_idx, :, :] = stored_vals[
                 f"layers.{i}.output_layer.weight"
             ]
-            mlp.linear2.bias[subnet_idx, :] = stored_vals[f"layers.{i}.output_layer.bias"]
+            mlp.linear2.bias.data[subnet_idx, :] = stored_vals[f"layers.{i}.output_layer.bias"]
 
     @classmethod
     def _load_model(
