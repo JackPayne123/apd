@@ -385,12 +385,12 @@ class ResidualLinearSPDRankPenaltyModel(SPDRankPenaltyModel):
             stored_vals[f"layers.{i}.output_layer.bias"] = (
                 mlp.linear2.bias[subnet_idx].detach().clone()
             )
-            mlp.linear1.A[subnet_idx] = 0.0
-            mlp.linear1.B[subnet_idx] = 0.0
-            mlp.linear1.bias[subnet_idx] = 0.0
-            mlp.linear2.A[subnet_idx] = 0.0
-            mlp.linear2.B[subnet_idx] = 0.0
-            mlp.linear2.bias[subnet_idx] = 0.0
+            mlp.linear1.A.data[subnet_idx] = 0.0
+            mlp.linear1.B.data[subnet_idx] = 0.0
+            mlp.linear1.bias.data[subnet_idx] = 0.0
+            mlp.linear2.A.data[subnet_idx] = 0.0
+            mlp.linear2.B.data[subnet_idx] = 0.0
+            mlp.linear2.bias.data[subnet_idx] = 0.0
         return stored_vals
 
     def restore_subnet(
@@ -399,12 +399,12 @@ class ResidualLinearSPDRankPenaltyModel(SPDRankPenaltyModel):
         stored_vals: dict[str, Float[Tensor, " d_out"] | Float[Tensor, "d_in d_out"]],
     ) -> None:
         for i, mlp in enumerate(self.layers):
-            mlp.linear1.A[subnet_idx] = stored_vals[f"layers.{i}.input_layer.A"]
-            mlp.linear1.B[subnet_idx] = stored_vals[f"layers.{i}.input_layer.B"]
-            mlp.linear1.bias[subnet_idx] = stored_vals[f"layers.{i}.input_layer.bias"]
-            mlp.linear2.A[subnet_idx] = stored_vals[f"layers.{i}.output_layer.A"]
-            mlp.linear2.B[subnet_idx] = stored_vals[f"layers.{i}.output_layer.B"]
-            mlp.linear2.bias[subnet_idx] = stored_vals[f"layers.{i}.output_layer.bias"]
+            mlp.linear1.A[subnet_idx].data = stored_vals[f"layers.{i}.input_layer.A"]
+            mlp.linear1.B[subnet_idx].data = stored_vals[f"layers.{i}.input_layer.B"]
+            mlp.linear1.bias[subnet_idx].data = stored_vals[f"layers.{i}.input_layer.bias"]
+            mlp.linear2.A[subnet_idx].data = stored_vals[f"layers.{i}.output_layer.A"]
+            mlp.linear2.B[subnet_idx].data = stored_vals[f"layers.{i}.output_layer.B"]
+            mlp.linear2.bias[subnet_idx].data = stored_vals[f"layers.{i}.output_layer.bias"]
 
     def all_As_and_Bs(
         self,
