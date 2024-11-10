@@ -34,9 +34,7 @@ class TMSTrainConfig(BaseModel):
     steps: PositiveInt
     seed: int = 0
     lr: float
-    data_generation_type: Literal[
-        "at_least_one_active", "at_least_zero_active", "exactly_one_active"
-    ]
+    data_generation_type: Literal["at_least_zero_active", "exactly_one_active"]
 
 
 def linear_lr(step: int, steps: int) -> float:

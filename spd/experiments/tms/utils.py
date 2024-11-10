@@ -49,7 +49,7 @@ class TMSDataset(
         feature_probability: float,
         device: str,
         data_generation_type: Literal[
-            "exactly_one_active", "at_least_zero_active", "at_least_one_active"
+            "exactly_one_active", "at_least_zero_active"
         ] = "at_least_zero_active",
     ):
         self.n_instances = n_instances
@@ -70,8 +70,6 @@ class TMSDataset(
             batch = self._generate_one_feature_active_batch(batch_size)
         elif self.data_generation_type == "at_least_zero_active":
             batch = self._generate_multi_feature_batch(batch_size)
-        elif self.data_generation_type == "at_least_one_active":
-            batch = self._generate_at_least_one_active_batch(batch_size)
         else:
             raise ValueError(f"Invalid generation type: {self.data_generation_type}")
         return batch, batch.clone().detach()
@@ -97,16 +95,3 @@ class TMSDataset(
         batch = torch.rand(batch_size, self.n_instances, self.n_features, device=self.device)
         mask = torch.rand_like(batch) < self.feature_probability
         return batch * mask
-
-    def _generate_at_least_one_active_batch(
-        self, batch_size: int
-    ) -> Float[Tensor, "batch n_instances n_features"]:
-        """Generate a batch with at least one feature active per sample and instance.
-        Values are uniformly distributed in [0,1] for active features."""
-        binomial_batch = self._generate_multi_feature_batch(batch_size)
-
-        # If no features are active, use a row from _generate_one_feature_active_batch
-        any_active = binomial_batch.any(dim=-1, keepdim=True)
-        backup = self._generate_one_feature_active_batch(batch_size)
-
-        return torch.where(any_active, binomial_batch, backup)

@@ -40,9 +40,9 @@ class TMSConfig(BaseModel):
     train_bias: bool
     bias_val: float
     pretrained_model_path: RootPath | None = None
-    data_generation_type: Literal[
-        "exactly_one_active", "at_least_zero_active", "at_least_one_active"
-    ] = "at_least_zero_active"
+    data_generation_type: Literal["exactly_one_active", "at_least_zero_active"] = (
+        "at_least_zero_active"
+    )
     handcoded: bool = False
 
 
@@ -80,9 +80,9 @@ class ResidualLinearConfig(BaseModel):
     k: PositiveInt
     feature_probability: Probability
     init_scale: float = 1.0
-    data_generation_type: Literal[
-        "exactly_one_active", "at_least_zero_active", "at_least_one_active"
-    ] = "at_least_zero_active"
+    data_generation_type: Literal["exactly_one_active", "at_least_zero_active"] = (
+        "at_least_zero_active"
+    )
     pretrained_model_path: RootPath
 
 
@@ -193,7 +193,7 @@ class Config(BaseModel):
         if self.topk_schatten_coeff is not None:
             assert (
                 self.spd_type == "rank_penalty"
-            ), "topk_schatten_coeff must be set if using rank_penalty"
+            ), "topk_schatten_coeff is not None but spd_type is not rank_penalty"
 
         if (
             self.spd_type != "rank_one"
