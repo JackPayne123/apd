@@ -458,8 +458,12 @@ def test_tms_spd_rank_penalty_full_rank_equivalence() -> None:
 
             # Set A to U * sqrt(S) and B to sqrt(S) * Vh
             sqrt_S = torch.sqrt(S)
-            rank_penalty_model.A.data[i, j] = U * sqrt_S.view(1, -1)  # [n_features, m]
-            rank_penalty_model.B.data[i, j] = sqrt_S.view(-1, 1) * Vh  # [m, n_hidden]
+            # Note that since m = min(n_features, n_hidden) + 1, we need to add an extra column
+            # of zeros to A and an extra row to B
+            rank_penalty_model.A.data[i, j, :, -1] = 0
+            rank_penalty_model.A.data[i, j, :, :-1] = U * sqrt_S.view(1, -1)  # [n_features, m]
+            rank_penalty_model.B.data[i, j, -1, :] = 0
+            rank_penalty_model.B.data[i, j, :-1, :] = sqrt_S.view(-1, 1) * Vh  # [m, n_hidden]
 
     # Create a random input
     input_data: Float[torch.Tensor, "batch n_instances n_features"] = torch.rand(
