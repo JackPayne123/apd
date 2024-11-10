@@ -278,8 +278,7 @@ class TMSSPDRankPenaltyModel(SPDRankPenaltyModel):
         self.bias_val = bias_val
         self.train_bias = train_bias
 
-        # Use min dimension for m as in ParamComponentsSchatten
-        self.m = min(n_features, n_hidden)
+        self.m = min(n_features, n_hidden) + 1
 
         self.A = nn.Parameter(torch.empty((n_instances, self.k, n_features, self.m), device=device))
         self.B = nn.Parameter(torch.empty((n_instances, self.k, self.m, n_hidden), device=device))
