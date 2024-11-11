@@ -49,7 +49,7 @@ class TMSModel(Model):
 
     def all_decomposable_params(self) -> dict[str, Float[Tensor, "n_instances d_in d_out"]]:
         """Dictionary of all parameters which will be decomposed with SPD."""
-        return {"W": self.W, "W_T": rearrange(self.W, "i f h -> i h f")}
+        return {"W": self.W, "W_T": rearrange(self.W, "i f h -> i h f"), "b_final": self.b_final}
 
 
 class TMSSPDModel(SPDModel):
@@ -283,7 +283,7 @@ class TMSSPDRankPenaltyModel(SPDRankPenaltyModel):
         self.A = nn.Parameter(torch.empty((n_instances, self.k, n_features, self.m), device=device))
         self.B = nn.Parameter(torch.empty((n_instances, self.k, self.m, n_hidden), device=device))
 
-        bias_data = torch.zeros((n_instances, n_features), device=device) + bias_val
+        bias_data = torch.zeros((n_instances, self.k, n_features), device=device) + bias_val
         self.b_final = nn.Parameter(bias_data) if train_bias else bias_data
 
         nn.init.xavier_normal_(self.A)
@@ -294,12 +294,14 @@ class TMSSPDRankPenaltyModel(SPDRankPenaltyModel):
     def all_subnetwork_params(self) -> dict[str, Float[Tensor, "n_instances k d_in d_out"]]:
         """Get all subnetwork parameters."""
         W = torch.einsum("ikfm,ikmh->ikfh", self.A, self.B)
-        return {"W": W, "W_T": rearrange(W, "i k f h -> i k h f")}
+        return {"W": W, "W_T": rearrange(W, "i k f h -> i k h f"), "b_final": self.b_final}
 
     def all_subnetwork_params_summed(self) -> dict[str, Float[Tensor, "n_instances d_in d_out"]]:
         """All subnetwork params summed over the subnetwork dimension."""
         W = torch.einsum("ikfm,ikmh->ifh", self.A, self.B)
-        return {"W": W, "W_T": rearrange(W, "i f h -> i h f")}
+        W_T = rearrange(W, "i f h -> i h f")
+        b_final = torch.einsum("ikf->if", self.b_final)
+        return {"W": W, "W_T": W_T, "b_final": b_final}
 
     def forward(
         self,
@@ -323,8 +325,8 @@ class TMSSPDRankPenaltyModel(SPDRankPenaltyModel):
         if topk_mask is not None:
             assert topk_mask.shape == pre_inner_act_1.shape[:-1]
             pre_inner_act_1 = torch.einsum("bikm,bik->bikm", pre_inner_act_1, topk_mask)
-        inner_act_1 = torch.einsum("bikm,ikfm->bikf", pre_inner_act_1, self.A)
-        layer_act_1 = torch.einsum("bikf->bif", inner_act_1) + self.b_final
+        inner_act_1 = torch.einsum("bikm,ikfm->bikf", pre_inner_act_1, self.A) + self.b_final
+        layer_act_1 = torch.einsum("bikf->bif", inner_act_1)
 
         out = F.relu(layer_act_1)
         layer_acts = {"W": layer_act_0, "W_T": layer_act_1}
@@ -337,9 +339,11 @@ class TMSSPDRankPenaltyModel(SPDRankPenaltyModel):
         stored_vals = {
             "A": self.A.data[:, subnet_idx, :, :].detach().clone(),
             "B": self.B.data[:, subnet_idx, :, :].detach().clone(),
+            "b_final": self.b_final.data[:, subnet_idx, :].detach().clone(),
         }
         self.A.data[:, subnet_idx, :, :] = 0.0
         self.B.data[:, subnet_idx, :, :] = 0.0
+        self.b_final.data[:, subnet_idx, :] = 0.0
         return stored_vals
 
     def restore_subnet(
@@ -349,6 +353,7 @@ class TMSSPDRankPenaltyModel(SPDRankPenaltyModel):
     ) -> None:
         self.A.data[:, subnet_idx, :, :] = stored_vals["A"]
         self.B.data[:, subnet_idx, :, :] = stored_vals["B"]
+        self.b_final.data[:, subnet_idx, :] = stored_vals["b_final"]
 
     @classmethod
     def from_pretrained(cls, path: str | RootPath) -> "TMSSPDRankPenaltyModel":  # type: ignore
@@ -367,6 +372,9 @@ class TMSSPDRankPenaltyModel(SPDRankPenaltyModel):
                 rearrange(self.A, "i k f m -> i k m f"),
             ),
         }
+
+    def all_biases(self) -> dict[str, Float[Tensor, "n_instances k d_layer_out"]]:
+        return {"b_final": self.b_final}
 
     def set_matrices_to_unit_norm(self) -> None:
         """Set the matrices that need to be normalized to unit norm."""

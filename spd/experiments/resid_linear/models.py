@@ -416,6 +416,9 @@ class ResidualLinearSPDRankPenaltyModel(SPDRankPenaltyModel):
             params[f"layers.{i}.output_layer.weight"] = (mlp.linear2.A, mlp.linear2.B)
         return params
 
+    def all_biases(self) -> dict[str, Float[Tensor, "k d_layer_out"]]:
+        raise NotImplementedError("ResidualLinearSPDRankPenaltyModel does not have biases")
+
     def set_matrices_to_unit_norm(self):
         for mlp in self.layers:
             mlp.linear1.A.data /= mlp.linear1.A.data.norm(p=2, dim=-2, keepdim=True)

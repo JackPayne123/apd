@@ -8,10 +8,10 @@ from pathlib import Path
 
 import fire
 import matplotlib.pyplot as plt
+import numpy as np
 import torch
 import wandb
 import yaml
-from matplotlib.colors import CenteredNorm
 from tqdm import tqdm
 
 from spd.experiments.tms.models import (
@@ -84,10 +84,13 @@ def plot_subnetwork_params(
     )
 
     for i in range(n_instances):
+        # Find max absolute value for this instance across all k
+        instance_params = subnet_params[i].detach().cpu().numpy()  # [k, n_features, n_hidden]
+        instance_max = np.abs(instance_params).max()
         for j in range(k):
             ax = axs[j, i]  # type: ignore
             param = subnet_params[i, j].detach().cpu().numpy()
-            ax.matshow(param, cmap="RdBu", norm=CenteredNorm())
+            ax.matshow(param, cmap="RdBu", vmin=-instance_max, vmax=instance_max)
             ax.set_xticks([])
             ax.set_yticks([])
 
@@ -190,14 +193,11 @@ def main(
         if task_config.handcoded:
             model.set_handcoded_spd_params(pretrained_model)
 
-        # Manually set the bias for the SPD model from the bias in the pretrained model
-        model.b_final.data[:] = pretrained_model.b_final.data.clone()
-
     param_map = None
     if task_config.pretrained_model_path:
         # Map from pretrained model's `all_decomposable_params` to the SPD models'
         # `all_subnetwork_params_summed`.
-        param_map = {"W": "W", "W_T": "W_T"}
+        param_map = {"W": "W", "W_T": "W_T", "b_final": "b_final"}
 
     dataset = TMSDataset(
         n_instances=task_config.n_instances,

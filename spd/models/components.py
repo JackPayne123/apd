@@ -302,17 +302,19 @@ class ParamComponentsRankPenalty(nn.Module):
             )
 
         # Then multiply by B to get to output dimension
-        inner_acts = einops.einsum(pre_inner_acts, self.B, "batch k m, k m h -> batch k h")
+        inner_acts = einops.einsum(pre_inner_acts, self.B, "batch k m, k m d_out -> batch k d_out")
 
         # Add the bias if it exists
         if self.bias is not None:
             inner_acts += self.bias
 
         if topk_mask is not None:
-            inner_acts = einops.einsum(inner_acts, topk_mask, "batch k h, batch k -> batch k h")
+            inner_acts = einops.einsum(
+                inner_acts, topk_mask, "batch k d_out, batch k -> batch k d_out"
+            )
 
         # Sum over subnetwork dimension
-        out = einops.einsum(inner_acts, "batch k h -> batch h")
+        out = einops.einsum(inner_acts, "batch k d_out -> batch d_out")
         return out, inner_acts
 
 

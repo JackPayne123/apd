@@ -407,6 +407,7 @@ def calc_topk_schatten_loss(
             Float[Tensor, "n_instances k m d_layer_out"] | Float[Tensor, "k m d_layer_out"],
         ]
     ],
+    biases: list[Float[Tensor, "n_instances k d_layer_out"] | Float[Tensor, "k d_layer_out"]],
     topk_mask: Bool[Tensor, "batch k"] | Bool[Tensor, "batch n_instances k"],
     p: float,
     n_params: int,
@@ -415,6 +416,7 @@ def calc_topk_schatten_loss(
 
     Args:
         As_and_Bs_vals: List of tuples containing A and B matrices for each layer
+        biases: List of decomposable bias parameters.
         topk_mask: The topk mask to use for the Schatten p-norm penalty
         p: The Schatten p-norm to use (from config.pnorm)
         n_params: The number of parameters in the model
@@ -432,7 +434,7 @@ def calc_topk_schatten_loss(
         # B: [k, m, d_out] or [n_instances, k, m, d_out]
         # topk_mask: [batch, k] or [batch, n_instances, k]
 
-        # Compute S_A = A^T A and S_B = B B^T
+        # Calculate squared l2 norm over the d_in or d_out dimension
         S_A = einops.einsum(A, A, "... k d_in m, ... k d_in m -> ... k m")
         S_B = einops.einsum(B, B, "... k m d_out, ... k m d_out -> ... k m")
 
@@ -445,6 +447,12 @@ def calc_topk_schatten_loss(
         topk_schatten_penalty = topk_schatten_penalty + ((S_AB_topk + 1e-16) ** (0.5 * p)).sum(
             dim=(0, -2, -1)
         )
+
+    for bias in biases:
+        bias_norm = einops.einsum(bias, bias, "... k d_out, ... k d_out -> ... k")
+        masked_bias_norm = einops.einsum(bias_norm, topk_mask, "... k, batch ... k -> batch ... k")
+        bias_schatten = (masked_bias_norm + 1e-16) ** (0.5 * p)
+        topk_schatten_penalty = topk_schatten_penalty + bias_schatten.sum(dim=(0, -1))
 
     return topk_schatten_penalty / n_params / batch_size
 
@@ -973,6 +981,7 @@ def optimize(
             pnorm = config.pnorm if config.pnorm is not None else 1.0
             topk_schatten_loss = calc_topk_schatten_loss(
                 As_and_Bs_vals=list(model.all_As_and_Bs().values()),
+                biases=list(model.all_biases().values()),
                 topk_mask=topk_mask,
                 p=pnorm,
                 n_params=n_params,

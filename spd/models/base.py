@@ -87,6 +87,10 @@ class SPDRankPenaltyModel(ABC, nn.Module):
         pass
 
     @abstractmethod
+    def all_biases(self) -> dict[str, Float[Tensor, "..."]]:
+        pass
+
+    @abstractmethod
     def all_subnetwork_params(self) -> dict[str, Tensor]:
         pass
 
