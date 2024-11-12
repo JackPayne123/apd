@@ -277,7 +277,6 @@ def main(
             n_features=task_config.n_features,
             n_hidden=task_config.n_hidden,
             k=task_config.k,
-            train_bias=task_config.train_bias,
             bias_val=task_config.bias_val,
             device=device,
         )
@@ -287,7 +286,6 @@ def main(
             n_features=task_config.n_features,
             n_hidden=task_config.n_hidden,
             k=task_config.k,
-            train_bias=task_config.train_bias,
             bias_val=task_config.bias_val,
             device=device,
         )
@@ -297,7 +295,6 @@ def main(
             n_features=task_config.n_features,
             n_hidden=task_config.n_hidden,
             k=task_config.k,
-            train_bias=task_config.train_bias,
             bias_val=task_config.bias_val,
             device=device,
         )
@@ -318,6 +315,9 @@ def main(
         pretrained_model.eval()
         if task_config.handcoded:
             model.set_handcoded_spd_params(pretrained_model)
+
+    if not task_config.train_bias:
+        model.b_final.requires_grad = False
 
     param_map = None
     if task_config.pretrained_model_path:
