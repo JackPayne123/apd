@@ -271,6 +271,7 @@ class ParamComponentsRankPenalty(nn.Module):
         self.out_dim = out_dim
         self.k = k
         self.m = min(in_dim, out_dim)  # Use min dimension for m as in ParamComponentsSchatten
+        # self.m = 1
 
         # Initialize A and B matrices
         self.A = nn.Parameter(torch.empty(k, in_dim, self.m))
@@ -279,6 +280,11 @@ class ParamComponentsRankPenalty(nn.Module):
 
         init_param_(self.A, scale=init_scale)
         init_param_(self.B, scale=init_scale)
+
+    # For compatibility with plotting code
+    @property
+    def subnetwork_params(self) -> Float[Tensor, "k i j"]:
+        return einops.einsum(self.A, self.B, "k i m, k m j -> k i j")
 
     def forward(
         self, x: Float[Tensor, "batch d_in"], topk_mask: Bool[Tensor, "batch k"] | None = None

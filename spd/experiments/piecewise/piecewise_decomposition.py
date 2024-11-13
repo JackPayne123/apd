@@ -15,6 +15,7 @@ from tqdm import tqdm
 
 from spd.experiments.piecewise.models import (
     PiecewiseFunctionSPDFullRankTransformer,
+    PiecewiseFunctionSPDRankPenaltyTransformer,
     PiecewiseFunctionSPDTransformer,
     PiecewiseFunctionTransformer,
 )
@@ -96,16 +97,20 @@ def piecewise_plot_results_fn(
 
     # Plot components
     if config.task_config.n_layers == 1:
-        if isinstance(model, PiecewiseFunctionSPDFullRankTransformer):
+        if isinstance(model, PiecewiseFunctionSPDFullRankTransformer) or isinstance(
+            model, PiecewiseFunctionSPDRankPenaltyTransformer
+        ):
             fig_dict_components = plot_components_fullrank(
                 model=model, step=step, out_dir=out_dir, slow_images=slow_images
             )
             fig_dict.update(fig_dict_components)
-        else:
+        elif isinstance(model, PiecewiseFunctionSPDTransformer):
             fig_dict_components = plot_components(
                 model=model, step=step, out_dir=out_dir, device=device, slow_images=slow_images
             )
             fig_dict.update(fig_dict_components)
+        else:
+            tqdm.write(f"Skipping component plots for {type(model)}")
     else:
         tqdm.write("Skipping component plots for >1 layer models")
     # Save plots to files
@@ -139,7 +144,9 @@ def get_model_and_dataloader(
     out_dir: Path | None = None,
 ) -> tuple[
     PiecewiseFunctionTransformer,
-    PiecewiseFunctionSPDTransformer | PiecewiseFunctionSPDFullRankTransformer,
+    PiecewiseFunctionSPDTransformer
+    | PiecewiseFunctionSPDFullRankTransformer
+    | PiecewiseFunctionSPDRankPenaltyTransformer,
     BatchedDataLoader[tuple[Float[Tensor, " n_inputs"], Float[Tensor, ""]]],
     BatchedDataLoader[tuple[Float[Tensor, " n_inputs"], Float[Tensor, ""]]],
 ]:
@@ -185,8 +192,13 @@ def get_model_and_dataloader(
     ]
 
     set_seed(config.seed)
-    if config.spd_type == "full_rank":
-        piecewise_model_spd = PiecewiseFunctionSPDFullRankTransformer(
+    if config.spd_type == "full_rank" or config.spd_type == "rank_penalty":
+        model_class = (
+            PiecewiseFunctionSPDFullRankTransformer
+            if config.spd_type == "full_rank"
+            else PiecewiseFunctionSPDRankPenaltyTransformer
+        )
+        piecewise_model_spd = model_class(
             n_inputs=piecewise_model.n_inputs,
             d_mlp=piecewise_model.d_mlp,
             n_layers=piecewise_model.n_layers,
@@ -326,7 +338,7 @@ def main(
     param_map = {}
     for i in range(piecewise_model_spd.n_layers):
         param_map[f"mlp_{i}.input_layer.weight"] = f"mlp_{i}.input_layer.weight"
-        if config.spd_type == "full_rank" and config.task_config.decompose_bias:
+        if config.spd_type != "rank_one" and config.task_config.decompose_bias:
             param_map[f"mlp_{i}.input_layer.bias"] = f"mlp_{i}.input_layer.bias"
         param_map[f"mlp_{i}.output_layer.weight"] = f"mlp_{i}.output_layer.weight"
 

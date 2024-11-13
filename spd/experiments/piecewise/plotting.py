@@ -14,10 +14,15 @@ from torch import Tensor
 
 from spd.experiments.piecewise.models import (
     PiecewiseFunctionSPDFullRankTransformer,
+    PiecewiseFunctionSPDRankPenaltyTransformer,
     PiecewiseFunctionSPDTransformer,
     PiecewiseFunctionTransformer,
 )
-from spd.models.components import ParamComponents, ParamComponentsFullRank
+from spd.models.components import (
+    ParamComponents,
+    ParamComponentsFullRank,
+    ParamComponentsRankPenalty,
+)
 from spd.run_spd import (
     calc_recon_mse,
 )
@@ -28,7 +33,9 @@ from spd.utils import (
 
 
 def get_weight_matrix(
-    general_param_components: ParamComponents | ParamComponentsFullRank,
+    general_param_components: ParamComponents
+    | ParamComponentsFullRank
+    | ParamComponentsRankPenalty,
 ) -> Float[Tensor, "k i j"]:
     if isinstance(general_param_components, ParamComponentsFullRank):
         weight: Float[Tensor, "k i j"] = general_param_components.subnetwork_params
@@ -37,6 +44,11 @@ def get_weight_matrix(
         a: Float[Tensor, "i k"] = general_param_components.A
         b: Float[Tensor, "k j"] = general_param_components.B
         weight: Float[Tensor, "k i j"] = einsum(a, b, "i k, k j -> k i j")
+        return weight
+    elif isinstance(general_param_components, ParamComponentsRankPenalty):
+        a: Float[Tensor, "k i m"] = general_param_components.A
+        b: Float[Tensor, "k m j"] = general_param_components.B
+        weight: Float[Tensor, "k i j"] = einsum(a, b, "k i m, k m j -> k i j")
         return weight
     else:
         raise ValueError(f"Unknown type: {type(general_param_components)}")
@@ -73,7 +85,7 @@ def plot_matrix(
 
 
 def plot_components_fullrank(
-    model: PiecewiseFunctionSPDFullRankTransformer,
+    model: PiecewiseFunctionSPDFullRankTransformer | PiecewiseFunctionSPDRankPenaltyTransformer,
     step: int,
     out_dir: Path | None,
     slow_images: bool,

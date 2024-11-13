@@ -196,7 +196,7 @@ class Config(BaseModel):
             ), "topk_schatten_coeff is not None but spd_type is not rank_penalty"
 
         if (
-            self.spd_type != "rank_one"
+            self.spd_type == "full_rank"
             and isinstance(self.task_config, PiecewiseConfig)
             and not self.task_config.handcoded_AB
             and not self.task_config.decompose_bias
@@ -565,7 +565,7 @@ def calc_lp_sparsity_loss_rank_one(
 
     Args:
         out: The output of the model.
-        layer_acts: Activations at the output of each layer (i.e. after both A and B transformations).
+        layer_acts: Activations at the output of each layer, i.e. after both A and B transformations
         inner_acts: The inner acts of the model (i.e. the set of subnetwork activations after the A
             transformation for each parameter matrix).
         B_params: The B matrix of each rank one layer.
@@ -765,7 +765,6 @@ def optimize(
     out_dir: Path | None = None,
 ) -> None:
     model.to(device=device)
-
     has_instance_dim = hasattr(model, "n_instances")
 
     # Note that we expect weight decay to be problematic for spd
@@ -1071,6 +1070,7 @@ def optimize(
             plot_results_fn is not None
             and config.image_freq is not None
             and step % config.image_freq == 0
+            # and step > 0
         ):
             fig_dict = plot_results_fn(
                 model=model,
