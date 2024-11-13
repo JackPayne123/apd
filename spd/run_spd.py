@@ -923,7 +923,7 @@ def optimize(
 
             if config.topk_l2_coeff is not None:
                 if config.spd_type == "full_rank" or config.spd_type == "rank_penalty":
-                    # assert isinstance(model, SPDFullRankModel)
+                    assert isinstance(model, SPDFullRankModel | SPDRankPenaltyModel)
                     topk_l2_loss = calc_topk_l2_full_rank(
                         subnet_param_vals=list(model.all_subnetwork_params().values()),
                         topk_mask=topk_mask,
