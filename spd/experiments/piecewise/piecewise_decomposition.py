@@ -221,6 +221,19 @@ def get_model_and_dataloader(
         if config.distil_from_target:
             piecewise_model_spd.set_subnet_to_target(piecewise_model)
 
+        # Copy rank1 initialization
+        assert config.spd_type == "rank_penalty"
+        set_seed(config.seed)
+        rank_one_spd_model = PiecewiseFunctionSPDTransformer(
+            n_inputs=piecewise_model.n_inputs,
+            d_mlp=piecewise_model.d_mlp,
+            n_layers=piecewise_model.n_layers,
+            k=config.task_config.k,
+            init_scale=config.task_config.init_scale,
+            input_biases=input_biases,
+        )
+        piecewise_model_spd.copy_rank1_spd_params(rank_one_spd_model)
+
         for i in range(piecewise_model_spd.n_layers):
             # Assert output bias is 0
             assert piecewise_model_spd.mlps[i].linear2.bias is None or torch.allclose(

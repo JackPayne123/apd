@@ -635,8 +635,8 @@ class PiecewiseFunctionSPDTransformer(SPDModel):
                     k=k,
                     init_scale=init_scale,
                     input_bias=input_biases[i] if input_biases is not None else None,
-                    input_component=self.input_component,  # type: ignore
-                    output_component=self.output_component,  # type: ignore
+                    # input_component=self.input_component,  # type: ignore
+                    # output_component=self.output_component,  # type: ignore
                 )
                 for i in range(n_layers)
             ]
@@ -773,6 +773,7 @@ class PiecewiseFunctionSPDTransformer(SPDModel):
         for i, layer in enumerate(self.mlps):
             layer_out, layer_acts_i, inner_acts_i = layer(residual, topk_mask)
             residual = residual + layer_out
+            print(f"residual.sum(): {residual.sum()}")
             layer_acts[f"mlp_{i}.input_layer.weight"] = layer_acts_i[0]
             layer_acts[f"mlp_{i}.output_layer.weight"] = layer_acts_i[1]
             inner_acts[f"mlp_{i}.input_layer.weight"] = inner_acts_i[0]
@@ -1092,6 +1093,7 @@ class PiecewiseFunctionSPDRankPenaltyTransformer(SPDRankPenaltyModel):
         return {p_name: p.sum(dim=0) for p_name, p in self.all_subnetwork_params().items()}
 
     def set_subnet_to_zero(self, subnet_idx: int) -> dict[str, Float[Tensor, "k dim"]]:
+        raise NotImplementedError
         stored_vals = {}
         for i, mlp in enumerate(self.mlps):
             stored_vals[f"mlp_{i}_linear1_A"] = mlp.linear1.A.data[subnet_idx].detach().clone()
@@ -1134,6 +1136,7 @@ class PiecewiseFunctionSPDRankPenaltyTransformer(SPDRankPenaltyModel):
             layer_out, layer_acts_i, inner_acts_i = layer(residual, topk_mask)
             assert len(layer_acts_i) == len(inner_acts_i) == 2
             residual = residual + layer_out
+            print(f"residual.sum(): {residual.sum()}")
             layer_acts[f"mlp_{i}.input_layer.weight"] = layer_acts_i[0]
             layer_acts[f"mlp_{i}.output_layer.weight"] = layer_acts_i[1]
             inner_acts[f"mlp_{i}.input_layer.weight"] = inner_acts_i[0]
@@ -1156,3 +1159,31 @@ class PiecewiseFunctionSPDRankPenaltyTransformer(SPDRankPenaltyModel):
         for mlp in self.mlps:
             remove_grad_parallel_to_subnetwork_vecs(mlp.linear1.A.data, mlp.linear1.A.grad)
             remove_grad_parallel_to_subnetwork_vecs(mlp.linear2.A.data, mlp.linear2.A.grad)
+
+    def copy_rank1_spd_params(self, target_transformer: PiecewiseFunctionSPDTransformer):
+        assert self.n_inputs == target_transformer.n_inputs
+        assert self.n_layers == target_transformer.n_layers
+        assert self.d_embed == target_transformer.d_embed
+        assert self.d_control == target_transformer.d_control
+        self.to(target_transformer.W_E.weight.device)
+        for i, mlp in enumerate(self.mlps):
+            mlp.linear1.A.data[:, :, :] = einops.rearrange(
+                target_transformer.mlps[i].linear1.A,
+                "i k -> k i 1",
+            )
+            mlp.linear1.B.data[:, :, :] = einops.rearrange(
+                target_transformer.mlps[i].linear1.B,
+                "k j -> k 1 j",
+            )
+            mlp.linear2.A.data[:, :, :] = einops.rearrange(
+                target_transformer.mlps[i].linear2.A,
+                "i k -> k i 1",
+            )
+            mlp.linear2.B.data[:, :, :] = einops.rearrange(
+                target_transformer.mlps[i].linear2.B,
+                "k j -> k 1 j",
+            )
+            mlp.linear1.bias.data[:] = einops.rearrange(
+                target_transformer.mlps[i].bias1,
+                "d_out -> d_out",
+            )

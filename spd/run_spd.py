@@ -23,6 +23,10 @@ from torch import Tensor
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
+from spd.experiments.piecewise.models import (
+    PiecewiseFunctionSPDRankPenaltyTransformer,
+    PiecewiseFunctionSPDTransformer,
+)
 from spd.log import logger
 from spd.models.base import Model, SPDFullRankModel, SPDModel, SPDRankPenaltyModel
 from spd.types import Probability, RootPath
@@ -765,6 +769,11 @@ def optimize(
     out_dir: Path | None = None,
 ) -> None:
     model.to(device=device)
+    if isinstance(model, PiecewiseFunctionSPDTransformer):
+        model.mlps[0].bias1.data = torch.zeros_like(model.mlps[0].bias1)
+    elif isinstance(model, PiecewiseFunctionSPDRankPenaltyTransformer):
+        model.mlps[0].linear1.bias.data = torch.zeros_like(model.mlps[0].linear1.bias)
+
     has_instance_dim = hasattr(model, "n_instances")
 
     # Note that we expect weight decay to be problematic for spd
@@ -790,7 +799,7 @@ def optimize(
     epoch = 0
     total_samples = 0
     data_iter = iter(dataloader)
-    for step in tqdm(range(config.steps + 1), ncols=0):
+    for step in range(config.steps + 1):
         if config.unit_norm_matrices:
             assert isinstance(
                 model, SPDModel | SPDRankPenaltyModel
@@ -844,7 +853,10 @@ def optimize(
             )
 
         # Do a forward pass with all subnetworks
+        print(f"batch.sum(): {batch.sum()}")
+        print(f"labels.sum(): {labels.sum()}")
         out, layer_acts, inner_acts = model(batch)
+        print(f"out.sum(): {out.sum()}")
 
         # Calculate losses
         out_recon_loss = calc_recon_mse(out, labels, has_instance_dim)
@@ -882,6 +894,7 @@ def optimize(
             attribution_type=config.attribution_type,
             spd_type=config.spd_type,
         )
+        print(f"attributions.sum(): {attributions.sum()}")
         lp_sparsity_loss = None
         if config.lp_sparsity_coeff is not None:
             step_pnorm = config.pnorm or get_step_pnorm(step, config.steps, config.pnorm_end)
@@ -920,7 +933,7 @@ def optimize(
 
             # Do a forward pass with only the topk subnetworks
             out_topk, layer_acts_topk, inner_acts_topk = model(batch, topk_mask=topk_mask)
-
+            print(f"out_topk.sum(): {out_topk.sum()}")
             if config.topk_l2_coeff is not None:
                 if config.spd_type == "full_rank" or config.spd_type == "rank_penalty":
                     assert isinstance(model, SPDFullRankModel | SPDRankPenaltyModel)
@@ -1115,5 +1128,13 @@ def optimize(
                     model, SPDModel | SPDRankPenaltyModel
                 ), "Can only norm matrices in SPDModel instances"
                 model.fix_normalized_adam_gradients()
-
+            if step % 1 == 0:
+                tqdm.write(
+                    f"STEP {step}: {model.mlps[0].linear1.A.squeeze(-1)}. LOSS {topk_recon_loss.mean()}"
+                )
+                print(f"A.sum(): {model.mlps[0].linear1.A.sum()}")
+                # f"{model.mlps[0].linear1.A[0,0,0]:.10f}"
+                pass
+            if step > 199:
+                pass
             opt.step()
