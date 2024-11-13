@@ -1143,6 +1143,12 @@ class PiecewiseFunctionSPDRankPenaltyTransformer(SPDRankPenaltyModel):
     def all_As_and_Bs(self) -> dict[str, tuple[Float[Tensor, "dim k"], Float[Tensor, "k dim"]]]:
         As_and_Bs = {}
         for i, mlp in enumerate(self.mlps):
+            # A = einops.rearrange(mlp.linear1.A, "k i 1 -> i k")
+            # B = einops.rearrange(mlp.linear1.B, "k 1 j -> k j")
+            # As_and_Bs[f"mlp_{i}.input_layer.weight"] = (A, B)
+            # A = einops.rearrange(mlp.linear2.A, "k i 1 -> i k")
+            # B = einops.rearrange(mlp.linear2.B, "k 1 j -> k j")
+            # As_and_Bs[f"mlp_{i}.output_layer.weight"] = (A, B)
             As_and_Bs[f"mlp_{i}.input_layer.weight"] = (mlp.linear1.A, mlp.linear1.B)
             As_and_Bs[f"mlp_{i}.output_layer.weight"] = (mlp.linear2.A, mlp.linear2.B)
         return As_and_Bs

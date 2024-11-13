@@ -319,7 +319,9 @@ class ParamComponentsRankPenalty(nn.Module):
 
         # Sum over subnetwork dimension
         out = einops.einsum(inner_acts, "batch k h -> batch h")
-        return out, inner_acts
+        return out, pre_inner_acts
+        # return out, inner_acts
+        # torch.autograd.grad(out.sum(), pre_inner_acts)
 
 
 class MLPComponentsRankPenalty(nn.Module):

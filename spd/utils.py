@@ -274,11 +274,11 @@ def calc_grad_attributions_rank_one(
         The sum of the (squared) attributions from each output dimension.
     """
     attribution_scores: Float[Tensor, " k"] | Float[Tensor, "n_instances k"] = torch.zeros_like(
-        inner_acts_vals[0]
+        inner_acts_vals[0].squeeze(-1)
     )
     for feature_idx in range(out.shape[-1]):
         feature_attributions: Float[Tensor, " k"] | Float[Tensor, "n_instances k"] = (
-            torch.zeros_like(inner_acts_vals[0])
+            torch.zeros_like(inner_acts_vals[0].squeeze(-1))
         )
         feature_grads: tuple[
             Float[Tensor, "batch k"] | Float[Tensor, "batch n_instances k"], ...
@@ -287,7 +287,7 @@ def calc_grad_attributions_rank_one(
         for param_matrix_idx in range(len(inner_acts_vals)):
             feature_attributions += (
                 feature_grads[param_matrix_idx] * inner_acts_vals[param_matrix_idx]
-            )
+            ).squeeze(-1)
 
         attribution_scores += feature_attributions**2
 
@@ -488,7 +488,7 @@ def calculate_attributions(
     if attribution_type == "ablation":
         attributions = calc_ablation_attributions(model=model, batch=batch, out=out)
     elif attribution_type == "gradient":
-        if spd_type == "rank_one":
+        if spd_type == "rank_one" or spd_type == "rank_penalty":
             attributions = calc_grad_attributions_rank_one(
                 out=out, inner_acts_vals=list(inner_acts.values())
             )

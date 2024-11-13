@@ -338,8 +338,8 @@ def calc_topk_l2_rank_one(
         # A: [d_in, k] or [n_instances, d_in, k]
         # B: [k, d_out] or [n_instances, k, d_out]
         # topk_mask: [batch, k] or [batch, n_instances, k]
-        A_topk = torch.einsum("...fk,b...k ->b...fk", A, topk_mask)
-        AB_topk = torch.einsum("b...fk,...kh->b...fh", A_topk, B)
+        # print(A.shape, B.shape, topk_mask.shape)
+        AB_topk = torch.einsum("ki,jk,bk ->bij", A, B, topk_mask.float())  # TODO was wrong?
         topk_l2_penalty = topk_l2_penalty + ((AB_topk) ** 2).sum(dim=(0, -2, -1))
 
     return topk_l2_penalty / n_params / batch_size
@@ -922,7 +922,7 @@ def optimize(
             out_topk, layer_acts_topk, inner_acts_topk = model(batch, topk_mask=topk_mask)
 
             if config.topk_l2_coeff is not None:
-                if config.spd_type == "full_rank" or config.spd_type == "rank_penalty":
+                if config.spd_type == "full_rank":
                     assert isinstance(model, SPDFullRankModel | SPDRankPenaltyModel)
                     topk_l2_loss = calc_topk_l2_full_rank(
                         subnet_param_vals=list(model.all_subnetwork_params().values()),
@@ -930,9 +930,18 @@ def optimize(
                         n_params=n_params,
                         n_instances=getattr(model, "n_instances", None),
                     )
-                elif config.spd_type == "rank_one":
+                elif config.spd_type == "rank_one" or config.spd_type == "rank_penalty":
+                    if config.spd_type == "rank_penalty":
+                        As_Bs_from_rank_penalty = model.all_As_and_Bs()
+                        As_Bs_for_l2 = [
+                            (A.squeeze(-1), B.squeeze(-2).T)
+                            for A, B in As_Bs_from_rank_penalty.values()
+                        ]
+
+                    else:
+                        As_Bs_for_l2 = list(model.all_As_and_Bs().values())
                     topk_l2_loss = calc_topk_l2_rank_one(
-                        As_and_Bs_vals=list(model.all_As_and_Bs().values()),
+                        As_and_Bs_vals=As_Bs_for_l2,
                         topk_mask=topk_mask,
                         n_params=n_params,
                     )
