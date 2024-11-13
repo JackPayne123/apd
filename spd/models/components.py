@@ -270,13 +270,13 @@ class ParamComponentsRankPenalty(nn.Module):
         self.in_dim = in_dim
         self.out_dim = out_dim
         self.k = k
-        self.m = min(in_dim, out_dim)  # Use min dimension for m as in ParamComponentsSchatten
-        # self.m = 1
+        # self.m = min(in_dim, out_dim)  # Use min dimension for m as in ParamComponentsSchatten
+        self.m = 1
 
         # Initialize A and B matrices
         self.A = nn.Parameter(torch.empty(k, in_dim, self.m))
         self.B = nn.Parameter(torch.empty(k, self.m, out_dim))
-        self.bias = nn.Parameter(torch.zeros(k, out_dim)) if bias else None
+        self.bias = nn.Parameter(torch.zeros(out_dim)) if bias else None
 
         init_param_(self.A, scale=init_scale)
         init_param_(self.B, scale=init_scale)

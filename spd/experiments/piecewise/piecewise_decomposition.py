@@ -240,6 +240,13 @@ def get_model_and_dataloader(
             logger.info("Setting handcoded A and B matrices (!)")
             piecewise_model_spd.set_handcoded_spd_params(piecewise_model)
 
+    # Copy biases for rank penalty
+    if config.spd_type == "rank_penalty":
+        for i in range(piecewise_model_spd.n_layers):
+            piecewise_model_spd.mlps[i].linear1.bias.data = (
+                piecewise_model.mlps[i].input_layer.bias.data.detach().clone()
+            )
+
     piecewise_model_spd.to(device)
 
     # Set requires_grad to False for params we want to fix (embeds, sometimes biases)
@@ -248,6 +255,10 @@ def get_model_and_dataloader(
             piecewise_model_spd.mlps[i].linear1.bias.requires_grad_(False)
         elif config.spd_type == "rank_one":
             piecewise_model_spd.mlps[i].bias1.requires_grad_(False)
+        elif config.spd_type == "rank_penalty":
+            piecewise_model_spd.mlps[i].linear1.bias.requires_grad_(False)
+        else:
+            logger.warning(f"Not fixing bias for {config.spd_type}")
 
     piecewise_model_spd.W_E.requires_grad_(False)
     piecewise_model_spd.W_U.requires_grad_(False)

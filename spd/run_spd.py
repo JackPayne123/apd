@@ -922,8 +922,8 @@ def optimize(
             out_topk, layer_acts_topk, inner_acts_topk = model(batch, topk_mask=topk_mask)
 
             if config.topk_l2_coeff is not None:
-                if config.spd_type == "full_rank":
-                    assert isinstance(model, SPDFullRankModel)
+                if config.spd_type == "full_rank" or config.spd_type == "rank_penalty":
+                    # assert isinstance(model, SPDFullRankModel)
                     topk_l2_loss = calc_topk_l2_full_rank(
                         subnet_param_vals=list(model.all_subnetwork_params().values()),
                         topk_mask=topk_mask,
@@ -1070,7 +1070,7 @@ def optimize(
             plot_results_fn is not None
             and config.image_freq is not None
             and step % config.image_freq == 0
-            # and step > 0
+            and step > 0
         ):
             fig_dict = plot_results_fn(
                 model=model,

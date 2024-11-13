@@ -113,13 +113,14 @@ def plot_components_fullrank(
         "Neuron index",
         "Embedding index",
     )
-    plot_matrix(
-        axs[0, 1],
-        torch.einsum("kd->d", model.mlps[0].linear1.bias).unsqueeze(0),
-        "Bias, sum over k",
-        "Neuron index",
-        "",
-    )
+    if len(model.mlps[0].linear1.bias.shape) > 1:
+        plot_matrix(
+            axs[0, 1],
+            torch.einsum("kd->d", model.mlps[0].linear1.bias).unsqueeze(0),
+            "Bias, sum over k",
+            "Neuron index",
+            "",
+        )
     plot_matrix(
         axs[0, 2],
         einops.einsum(model.mlps[0].linear2.subnetwork_params, "k ... -> ...").T,
@@ -134,9 +135,10 @@ def plot_components_fullrank(
             W_in_k = mlp.linear1.subnetwork_params[k]
             ax = axs[k + 1, 0]  # type: ignore
             plot_matrix(ax, W_in_k, f"W_in_k, k={k}", "Neuron index", "Embedding index")
-            bias_k = mlp.linear1.bias[None, k]
-            ax = axs[k + 1, 1]  # type: ignore
-            plot_matrix(ax, bias_k, f"Bias_k, k={k}", "Neuron index", "")
+            if len(mlp.linear1.bias.shape) > 1:
+                bias_k = mlp.linear1.bias[None, k]
+                ax = axs[k + 1, 1]  # type: ignore
+                plot_matrix(ax, bias_k, f"Bias_k, k={k}", "Neuron index", "")
             W_out_k = mlp.linear2.subnetwork_params[k].T
             ax = axs[k + 1, 2]  # type: ignore
             plot_matrix(ax, W_out_k, f"W_out_k.T, k={k}", "Neuron index", "")
