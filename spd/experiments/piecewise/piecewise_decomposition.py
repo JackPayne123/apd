@@ -97,8 +97,9 @@ def piecewise_plot_results_fn(
 
     # Plot components
     if config.task_config.n_layers == 1:
-        if isinstance(model, PiecewiseFunctionSPDFullRankTransformer) or isinstance(
-            model, PiecewiseFunctionSPDRankPenaltyTransformer
+        if isinstance(
+            model,
+            PiecewiseFunctionSPDFullRankTransformer | PiecewiseFunctionSPDRankPenaltyTransformer,
         ):
             fig_dict_components = plot_components_fullrank(
                 model=model, step=step, out_dir=out_dir, slow_images=slow_images
