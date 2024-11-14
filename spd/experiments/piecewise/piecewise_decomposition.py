@@ -350,7 +350,7 @@ def main(
     param_map = {}
     for i in range(piecewise_model_spd.n_layers):
         param_map[f"mlp_{i}.input_layer.weight"] = f"mlp_{i}.input_layer.weight"
-        if config.spd_type != "rank_one" and config.task_config.decompose_bias:
+        if config.spd_type == "full_rank" and config.task_config.decompose_bias:
             param_map[f"mlp_{i}.input_layer.bias"] = f"mlp_{i}.input_layer.bias"
         param_map[f"mlp_{i}.output_layer.weight"] = f"mlp_{i}.output_layer.weight"
 

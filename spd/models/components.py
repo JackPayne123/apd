@@ -280,9 +280,9 @@ class ParamComponentsRankPenalty(nn.Module):
         init_param_(self.A, scale=init_scale)
         init_param_(self.B, scale=init_scale)
 
-    # For compatibility with plotting code
     @property
     def subnetwork_params(self) -> Float[Tensor, "k i j"]:
+        """For compatibility with plotting code."""
         return einops.einsum(self.A, self.B, "k i m, k m j -> k i j")
 
     def forward(
