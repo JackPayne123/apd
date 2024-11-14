@@ -228,13 +228,13 @@ def get_model_and_dataloader(
                 piecewise_model.mlps[i].input_layer.bias.data.detach().clone()
             )
             piecewise_model_spd.mlps[i].bias1.requires_grad_(False)
-            # Make sure that there is no output bias
-            assert piecewise_model_spd.mlps[i].linear2.bias is None
         else:
-            piecewise_model_spd.mlps[i].bias1.data[:] = (
+            piecewise_model_spd.mlps[i].linear1.data[:] = (
                 piecewise_model.mlps[i].input_layer.bias.data.detach().clone()
             )
-            piecewise_model_spd.mlps[i].bias1.requires_grad_(False)
+            piecewise_model_spd.mlps[i].linear1.requires_grad_(False)
+            # Make sure that there is no output bias
+            assert piecewise_model_spd.mlps[i].linear2.bias is None
 
     # Handcoded the parameters if requested
     if config.task_config.handcoded_AB:
