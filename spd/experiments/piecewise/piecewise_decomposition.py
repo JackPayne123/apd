@@ -188,37 +188,24 @@ def get_model_and_dataloader(
     set_seed(config.seed)
 
     # Initialize the SPD model
-    if config.spd_type == "full_rank" or config.spd_type == "rank_penalty":
-        if config.spd_type == "full_rank":
-            piecewise_model_spd = PiecewiseFunctionSPDFullRankTransformer(
-                n_inputs=piecewise_model.n_inputs,
-                d_mlp=piecewise_model.d_mlp,
-                n_layers=piecewise_model.n_layers,
-                k=config.task_config.k,
-                init_scale=config.task_config.init_scale,
-            )
-        else:
-            assert config.spd_type == "rank_penalty"
-            piecewise_model_spd = PiecewiseFunctionSPDRankPenaltyTransformer(
-                n_inputs=piecewise_model.n_inputs,
-                d_mlp=piecewise_model.d_mlp,
-                n_layers=piecewise_model.n_layers,
-                k=config.task_config.k,
-                init_scale=config.task_config.init_scale,
-                m=config.m,
-            )
-
-        if config.distil_from_target:
-            piecewise_model_spd.set_subnet_to_target(piecewise_model)
-
-        for i in range(piecewise_model_spd.n_layers):
-            assert piecewise_model_spd.mlps[i].linear2.bias is None  # Output bias should be None
-
-        bias_params = {
-            i: piecewise_model_spd.mlps[i].linear1.bias for i in range(piecewise_model_spd.n_layers)
-        }
-    else:
-        assert config.spd_type == "rank_one"
+    if config.spd_type == "full_rank":
+        piecewise_model_spd = PiecewiseFunctionSPDFullRankTransformer(
+            n_inputs=piecewise_model.n_inputs,
+            d_mlp=piecewise_model.d_mlp,
+            n_layers=piecewise_model.n_layers,
+            k=config.task_config.k,
+            init_scale=config.task_config.init_scale,
+        )
+    elif config.spd_type == "rank_penalty":
+        piecewise_model_spd = PiecewiseFunctionSPDRankPenaltyTransformer(
+            n_inputs=piecewise_model.n_inputs,
+            d_mlp=piecewise_model.d_mlp,
+            n_layers=piecewise_model.n_layers,
+            k=config.task_config.k,
+            init_scale=config.task_config.init_scale,
+            m=config.m,
+        )
+    elif config.spd_type == "rank_one":
         piecewise_model_spd = PiecewiseFunctionSPDTransformer(
             n_inputs=piecewise_model.n_inputs,
             d_mlp=piecewise_model.d_mlp,
@@ -226,15 +213,28 @@ def get_model_and_dataloader(
             k=config.task_config.k,
             init_scale=config.task_config.init_scale,
         )
+    else:
+        raise ValueError(f"Unknown SPD type: {config.spd_type}")
 
-        bias_params = {
-            i: piecewise_model_spd.mlps[i].bias1 for i in range(piecewise_model_spd.n_layers)
-        }
+    if config.distil_from_target:
+        assert config.spd_type == "full_rank", "Distillation only supported for full rank"
+        piecewise_model_spd.set_subnet_to_target(piecewise_model)
 
-    # Copy the biases from the original model and set them to require_grad=False
-    for i, bias_param in bias_params.items():
-        bias_param.data[:] = piecewise_model.mlps[i].input_layer.bias.data.detach().clone()
-        bias_param.requires_grad_(False)
+    # Copy the biases (never decomposed)
+    for i in range(piecewise_model_spd.n_layers):
+        # Copy input biases from model & set requires_grad=False
+        if config.spd_type == "rank_one":
+            piecewise_model_spd.mlps[i].bias1.data[:] = (
+                piecewise_model.mlps[i].input_layer.bias.data.detach().clone()
+            )
+            piecewise_model_spd.mlps[i].bias1.requires_grad_(False)
+            # Make sure that there is no output bias
+            assert piecewise_model_spd.mlps[i].linear2.bias is None
+        else:
+            piecewise_model_spd.mlps[i].bias1.data[:] = (
+                piecewise_model.mlps[i].input_layer.bias.data.detach().clone()
+            )
+            piecewise_model_spd.mlps[i].bias1.requires_grad_(False)
 
     # Handcoded the parameters if requested
     if config.task_config.handcoded_AB:
@@ -242,14 +242,14 @@ def get_model_and_dataloader(
         if config.spd_type == "rank_one":
             assert isinstance(piecewise_model_spd, PiecewiseFunctionSPDTransformer)
             piecewise_model_spd.set_handcoded_spd_params(piecewise_model)
-        else:
-            assert config.spd_type == "full_rank" or config.spd_type == "rank_penalty"
+        elif config.spd_type in ["full_rank", "rank_penalty"]:
             assert isinstance(
                 piecewise_model_spd,
                 PiecewiseFunctionSPDFullRankTransformer
                 | PiecewiseFunctionSPDRankPenaltyTransformer,
             )
             logger.info("Setting handcoded A and B matrices (!)")
+            # Create a rank-one handcoded model & copy its SPD weights
             rank_one_spd_model = PiecewiseFunctionSPDTransformer(
                 n_inputs=piecewise_model.n_inputs,
                 d_mlp=piecewise_model.d_mlp,
@@ -259,6 +259,8 @@ def get_model_and_dataloader(
             )
             rank_one_spd_model.set_handcoded_spd_params(piecewise_model)
             piecewise_model_spd.set_handcoded_spd_params(rank_one_spd_model)
+        else:
+            raise ValueError(f"Unknown SPD type for handcoded AB: {config.spd_type}")
 
     piecewise_model_spd.to(device)
 
