@@ -23,7 +23,7 @@ RESID_LINEAR_TASK_CONFIG = ResidualLinearConfig(
 )
 
 
-def test_resid_linear_decomposition_happy_path() -> None:
+def test_resid_linear_rank_penalty_decomposition_happy_path() -> None:
     set_seed(0)
     n_features = 3
     d_embed = 2
@@ -34,7 +34,7 @@ def test_resid_linear_decomposition_happy_path() -> None:
     device = "cpu"
     config = Config(
         seed=0,
-        spd_type="full_rank",
+        spd_type="rank_penalty",
         unit_norm_matrices=False,
         topk=1,
         batch_topk=True,
@@ -60,11 +60,11 @@ def test_resid_linear_decomposition_happy_path() -> None:
     ).to(device)
 
     # Create the SPD model
-    model = ResidualLinearSPDFullRankModel(
-        n_features=n_features,
-        d_embed=d_embed,
-        d_mlp=d_mlp,
-        n_layers=n_layers,
+    model = ResidualLinearSPDRankPenaltyModel(
+        n_features=pretrained_model.n_features,
+        d_embed=pretrained_model.d_embed,
+        d_mlp=pretrained_model.d_mlp,
+        n_layers=pretrained_model.n_layers,
         k=config.task_config.k,
         init_scale=config.task_config.init_scale,
     ).to(device)
@@ -72,6 +72,17 @@ def test_resid_linear_decomposition_happy_path() -> None:
     # Use the pretrained model's embedding matrix and don't train it further
     model.W_E.data[:, :] = pretrained_model.W_E.data.detach().clone()
     model.W_E.requires_grad = False
+
+    # Copy the biases from the target model to the SPD model and set requires_grad to False
+    for i in range(pretrained_model.n_layers):
+        model.layers[i].linear1.bias.data[:] = (
+            pretrained_model.layers[i].input_layer.bias.data.detach().clone()
+        )
+        model.layers[i].linear1.bias.requires_grad = False
+        model.layers[i].linear2.bias.data[:] = (
+            pretrained_model.layers[i].output_layer.bias.data.detach().clone()
+        )
+        model.layers[i].linear2.bias.requires_grad = False
 
     # Create dataset and dataloader
     dataset = ResidualLinearDataset(
@@ -87,9 +98,7 @@ def test_resid_linear_decomposition_happy_path() -> None:
     param_map = {}
     for i in range(pretrained_model.n_layers):
         param_map[f"layers.{i}.input_layer.weight"] = f"layers.{i}.input_layer.weight"
-        param_map[f"layers.{i}.input_layer.bias"] = f"layers.{i}.input_layer.bias"
         param_map[f"layers.{i}.output_layer.weight"] = f"layers.{i}.output_layer.weight"
-        param_map[f"layers.{i}.output_layer.bias"] = f"layers.{i}.output_layer.bias"
 
     # Calculate initial loss
     batch, labels = next(iter(dataloader))
