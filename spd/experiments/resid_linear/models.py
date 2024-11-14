@@ -292,7 +292,14 @@ class ResidualLinearSPDFullRankModel(SPDFullRankModel):
 
 class ResidualLinearSPDRankPenaltyModel(SPDRankPenaltyModel):
     def __init__(
-        self, n_features: int, d_embed: int, d_mlp: int, n_layers: int, k: int, init_scale: float
+        self,
+        n_features: int,
+        d_embed: int,
+        d_mlp: int,
+        n_layers: int,
+        k: int,
+        init_scale: float,
+        m: int | None = None,
     ):
         super().__init__()
         self.n_features = n_features
@@ -304,7 +311,7 @@ class ResidualLinearSPDRankPenaltyModel(SPDRankPenaltyModel):
         self.W_E = nn.Parameter(torch.empty(n_features, d_embed))
 
         # Use min dimension for m as in ParamComponentsSchatten
-        self.m = min(d_embed, d_mlp)
+        self.m = min(d_embed, d_mlp) if m is None else m
 
         self.layers = nn.ModuleList(
             [

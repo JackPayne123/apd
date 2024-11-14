@@ -265,12 +265,20 @@ class ParamComponentsRankPenalty(nn.Module):
     The weight matrix W is decomposed as W = A @ B, where A and B are learned parameters.
     """
 
-    def __init__(self, in_dim: int, out_dim: int, k: int, bias: bool, init_scale: float = 1.0):
+    def __init__(
+        self,
+        in_dim: int,
+        out_dim: int,
+        k: int,
+        bias: bool,
+        init_scale: float = 1.0,
+        m: int | None = None,
+    ):
         super().__init__()
         self.in_dim = in_dim
         self.out_dim = out_dim
         self.k = k
-        self.m = min(in_dim, out_dim)
+        self.m = min(in_dim, out_dim) if m is None else m
 
         # Initialize A and B matrices
         self.A = nn.Parameter(torch.empty(k, in_dim, self.m))
@@ -337,14 +345,15 @@ class MLPComponentsRankPenalty(nn.Module):
         in_bias: bool = True,
         out_bias: bool = False,
         act_fn: Callable[[Tensor], Tensor] = F.relu,
+        m: int | None = None,
     ):
         super().__init__()
         self.act_fn = act_fn
         self.linear1 = ParamComponentsRankPenalty(
-            in_dim=d_embed, out_dim=d_mlp, k=k, bias=in_bias, init_scale=init_scale
+            in_dim=d_embed, out_dim=d_mlp, k=k, bias=in_bias, init_scale=init_scale, m=m
         )
         self.linear2 = ParamComponentsRankPenalty(
-            in_dim=d_mlp, out_dim=d_embed, k=k, bias=out_bias, init_scale=init_scale
+            in_dim=d_mlp, out_dim=d_embed, k=k, bias=out_bias, init_scale=init_scale, m=m
         )
 
     def forward(

@@ -114,6 +114,7 @@ class Config(BaseModel):
     distil_from_target: bool = False
     pnorm: PositiveFloat | None = None
     pnorm_end: PositiveFloat | None = None
+    m: PositiveInt | None = None
     lr_schedule: Literal["linear", "constant", "cosine", "exponential"] = "constant"
     lr_exponential_halflife: PositiveFloat | None = None
     lr_warmup_pct: Probability = 0.0
@@ -217,6 +218,9 @@ class Config(BaseModel):
 
         if self.distil_from_target and not isinstance(self.task_config, PiecewiseConfig):
             raise ValueError("distil_from_target is currently only supported for piecewise")
+
+        if self.m is not None:
+            assert self.spd_type == "rank_penalty", "Cannot set m for non-rank penalty SPD"
 
         return self
 

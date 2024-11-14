@@ -194,19 +194,26 @@ def get_model_and_dataloader(
 
     set_seed(config.seed)
     if config.spd_type == "full_rank" or config.spd_type == "rank_penalty":
-        model_class = (
-            PiecewiseFunctionSPDFullRankTransformer
-            if config.spd_type == "full_rank"
-            else PiecewiseFunctionSPDRankPenaltyTransformer
-        )
-        piecewise_model_spd = model_class(
-            n_inputs=piecewise_model.n_inputs,
-            d_mlp=piecewise_model.d_mlp,
-            n_layers=piecewise_model.n_layers,
-            k=config.task_config.k,
-            init_scale=config.task_config.init_scale,
-            decompose_bias=config.task_config.decompose_bias,
-        )
+        if config.spd_type == "full_rank":
+            piecewise_model_spd = PiecewiseFunctionSPDFullRankTransformer(
+                n_inputs=piecewise_model.n_inputs,
+                d_mlp=piecewise_model.d_mlp,
+                n_layers=piecewise_model.n_layers,
+                k=config.task_config.k,
+                init_scale=config.task_config.init_scale,
+                decompose_bias=config.task_config.decompose_bias,
+            )
+        else:
+            assert config.spd_type == "rank_penalty"
+            piecewise_model_spd = PiecewiseFunctionSPDRankPenaltyTransformer(
+                n_inputs=piecewise_model.n_inputs,
+                d_mlp=piecewise_model.d_mlp,
+                n_layers=piecewise_model.n_layers,
+                k=config.task_config.k,
+                init_scale=config.task_config.init_scale,
+                decompose_bias=config.task_config.decompose_bias,
+                m=config.m,
+            )
         if config.task_config.handcoded_AB:
             logger.info("Setting handcoded A and B matrices (!)")
             rank_one_spd_model = PiecewiseFunctionSPDTransformer(

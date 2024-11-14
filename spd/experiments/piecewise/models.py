@@ -1034,6 +1034,7 @@ class PiecewiseFunctionSPDRankPenaltyTransformer(SPDRankPenaltyModel):
         k: The number of components to keep
         d_embed: The dimension of the embedding space
         decompose_bias: Whether to decompose the bias term in the MLP layers
+        m: The rank of each subnetwork. If None, use the default min(d_in, d_out)
     """
 
     def __init__(
@@ -1045,6 +1046,7 @@ class PiecewiseFunctionSPDRankPenaltyTransformer(SPDRankPenaltyModel):
         init_scale: float,
         d_embed: int | None = None,
         decompose_bias: bool = True,
+        m: int | None = None,
     ):
         super().__init__()
         self.n_inputs = n_inputs
@@ -1054,7 +1056,7 @@ class PiecewiseFunctionSPDRankPenaltyTransformer(SPDRankPenaltyModel):
         self.d_control = self.d_embed - 2
         self.n_param_matrices = n_layers * 2
         self.decompose_bias = decompose_bias
-
+        self.m = m
         self.num_functions = n_inputs - 1
         self.n_outputs = 1  # this is hardcoded. This class isn't defined for multiple outputs
 
@@ -1069,7 +1071,7 @@ class PiecewiseFunctionSPDRankPenaltyTransformer(SPDRankPenaltyModel):
         self.mlps = nn.ModuleList(
             [
                 MLPComponentsRankPenalty(
-                    d_embed=self.d_embed, d_mlp=d_mlp, k=k, init_scale=init_scale
+                    d_embed=self.d_embed, d_mlp=d_mlp, k=k, init_scale=init_scale, m=m
                 )
                 for _ in range(n_layers)
             ]

@@ -291,6 +291,7 @@ def main(
             n_layers=target_model.n_layers,
             k=config.task_config.k,
             init_scale=config.task_config.init_scale,
+            m=config.m,
         ).to(device)
     else:
         raise ValueError(f"Unknown spd_type: {config.spd_type}")

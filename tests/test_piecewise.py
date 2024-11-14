@@ -466,6 +466,7 @@ def test_piecewise_spd_rank_penalty_rank_one_equivalence() -> None:
     d_mlp = 8
     n_layers = 1
     k = 4
+    m = 1
     init_scale = 1.0
 
     device = "cpu"
@@ -495,6 +496,7 @@ def test_piecewise_spd_rank_penalty_rank_one_equivalence() -> None:
         k=k,
         init_scale=init_scale,
         decompose_bias=False,
+        m=m,
     ).to(device)
 
     # Copy embedding matrices
