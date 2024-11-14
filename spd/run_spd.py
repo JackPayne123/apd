@@ -1074,7 +1074,6 @@ def optimize(
             plot_results_fn is not None
             and config.image_freq is not None
             and step % config.image_freq == 0
-            and step > 0
         ):
             fig_dict = plot_results_fn(
                 model=model,

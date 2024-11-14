@@ -47,7 +47,6 @@ def test_resid_linear_decomposition_happy_path() -> None:
         steps=5,  # Run only a few steps for the test
         print_freq=2,
         image_freq=5,
-        slow_images=False,
         save_freq=None,
         lr_warmup_pct=0.01,
         lr_schedule="cosine",
