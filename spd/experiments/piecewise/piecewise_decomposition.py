@@ -186,6 +186,8 @@ def get_model_and_dataloader(
         )
 
     set_seed(config.seed)
+
+    # Initialize the SPD model
     if config.spd_type == "full_rank" or config.spd_type == "rank_penalty":
         if config.spd_type == "full_rank":
             piecewise_model_spd = PiecewiseFunctionSPDFullRankTransformer(
@@ -205,7 +207,48 @@ def get_model_and_dataloader(
                 init_scale=config.task_config.init_scale,
                 m=config.m,
             )
-        if config.task_config.handcoded_AB:
+
+        if config.distil_from_target:
+            piecewise_model_spd.set_subnet_to_target(piecewise_model)
+
+        for i in range(piecewise_model_spd.n_layers):
+            assert piecewise_model_spd.mlps[i].linear2.bias is None  # Output bias should be None
+
+        bias_params = {
+            i: piecewise_model_spd.mlps[i].linear1.bias for i in range(piecewise_model_spd.n_layers)
+        }
+    else:
+        assert config.spd_type == "rank_one"
+        piecewise_model_spd = PiecewiseFunctionSPDTransformer(
+            n_inputs=piecewise_model.n_inputs,
+            d_mlp=piecewise_model.d_mlp,
+            n_layers=piecewise_model.n_layers,
+            k=config.task_config.k,
+            init_scale=config.task_config.init_scale,
+        )
+
+        bias_params = {
+            i: piecewise_model_spd.mlps[i].bias1 for i in range(piecewise_model_spd.n_layers)
+        }
+
+    # Copy the biases from the original model and set them to require_grad=False
+    for i, bias_param in bias_params.items():
+        bias_param.data[:] = piecewise_model.mlps[i].input_layer.bias.data.detach().clone()
+        bias_param.requires_grad_(False)
+
+    # Handcoded the parameters if requested
+    if config.task_config.handcoded_AB:
+        logger.info("Setting handcoded A and B matrices (!)")
+        if config.spd_type == "rank_one":
+            assert isinstance(piecewise_model_spd, PiecewiseFunctionSPDTransformer)
+            piecewise_model_spd.set_handcoded_spd_params(piecewise_model)
+        else:
+            assert config.spd_type == "full_rank" or config.spd_type == "rank_penalty"
+            assert isinstance(
+                piecewise_model_spd,
+                PiecewiseFunctionSPDFullRankTransformer
+                | PiecewiseFunctionSPDRankPenaltyTransformer,
+            )
             logger.info("Setting handcoded A and B matrices (!)")
             rank_one_spd_model = PiecewiseFunctionSPDTransformer(
                 n_inputs=piecewise_model.n_inputs,
@@ -216,38 +259,8 @@ def get_model_and_dataloader(
             )
             rank_one_spd_model.set_handcoded_spd_params(piecewise_model)
             piecewise_model_spd.set_handcoded_spd_params(rank_one_spd_model)
-        if config.distil_from_target:
-            piecewise_model_spd.set_subnet_to_target(piecewise_model)
-
-        for i in range(piecewise_model_spd.n_layers):
-            # Assert output bias is None
-            assert piecewise_model_spd.mlps[i].linear2.bias is None
-
-        bias_params = {
-            i: piecewise_model_spd.mlps[i].linear1.bias for i in range(piecewise_model_spd.n_layers)
-        }
-    else:
-        piecewise_model_spd = PiecewiseFunctionSPDTransformer(
-            n_inputs=piecewise_model.n_inputs,
-            d_mlp=piecewise_model.d_mlp,
-            n_layers=piecewise_model.n_layers,
-            k=config.task_config.k,
-            init_scale=config.task_config.init_scale,
-        )
-        if config.task_config.handcoded_AB:
-            logger.info("Setting handcoded A and B matrices (!)")
-            piecewise_model_spd.set_handcoded_spd_params(piecewise_model)
-
-        bias_params = {
-            i: piecewise_model_spd.mlps[i].bias1 for i in range(piecewise_model_spd.n_layers)
-        }
 
     piecewise_model_spd.to(device)
-
-    # Copy the biases from the original model and set them to require_grad=False
-    for i, bias_param in bias_params.items():
-        bias_param.data[:] = piecewise_model.mlps[i].input_layer.bias.data.detach().clone()
-        bias_param.requires_grad_(False)
 
     piecewise_model_spd.W_E.requires_grad_(False)
     piecewise_model_spd.W_U.requires_grad_(False)
