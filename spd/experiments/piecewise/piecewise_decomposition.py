@@ -211,7 +211,6 @@ def get_model_and_dataloader(
                 n_layers=piecewise_model.n_layers,
                 k=config.task_config.k,
                 init_scale=config.task_config.init_scale,
-                decompose_bias=config.task_config.decompose_bias,
                 m=config.m,
             )
         if config.task_config.handcoded_AB:

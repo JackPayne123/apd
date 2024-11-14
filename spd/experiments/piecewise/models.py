@@ -1045,7 +1045,6 @@ class PiecewiseFunctionSPDRankPenaltyTransformer(SPDRankPenaltyModel):
         k: int,
         init_scale: float,
         d_embed: int | None = None,
-        decompose_bias: bool = True,
         m: int | None = None,
     ):
         super().__init__()
@@ -1055,7 +1054,6 @@ class PiecewiseFunctionSPDRankPenaltyTransformer(SPDRankPenaltyModel):
         self.d_embed = self.n_inputs + 1 if d_embed is None else d_embed
         self.d_control = self.d_embed - 2
         self.n_param_matrices = n_layers * 2
-        self.decompose_bias = decompose_bias
         self.m = m
         self.num_functions = n_inputs - 1
         self.n_outputs = 1  # this is hardcoded. This class isn't defined for multiple outputs
@@ -1086,8 +1084,6 @@ class PiecewiseFunctionSPDRankPenaltyTransformer(SPDRankPenaltyModel):
             params[f"mlp_{i}.output_layer.weight"] = einops.einsum(
                 mlp.linear2.A, mlp.linear2.B, "k d_mlp m, k m d_embed -> k d_mlp d_embed"
             )
-            if self.decompose_bias:
-                params[f"mlp_{i}.input_layer.bias"] = mlp.linear1.bias
         return params
 
     def all_subnetwork_params_summed(self) -> dict[str, Float[Tensor, "k d_in d_out"]]:

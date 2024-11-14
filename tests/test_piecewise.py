@@ -495,7 +495,6 @@ def test_piecewise_spd_rank_penalty_rank_one_equivalence() -> None:
         n_layers=n_layers,
         k=k,
         init_scale=init_scale,
-        decompose_bias=False,
         m=m,
     ).to(device)
 
