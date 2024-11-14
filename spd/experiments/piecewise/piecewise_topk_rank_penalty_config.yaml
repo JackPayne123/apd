@@ -10,7 +10,7 @@ batch_topk: true
 param_match_coeff: 0.5
 topk_recon_coeff: 1
 topk_l2_coeff: null
-topk_schatten_coeff: 0.1
+topk_schatten_coeff: 0.7
 pnorm: 1.0
 lr: 0.01
 steps: 30_000
@@ -32,7 +32,6 @@ task_config:
   init_scale: 1.0
   simple_bias: false
   handcoded_AB: false
-  decompose_bias: false 
 
 ####### See below for larger n_functions and neurons
 # wandb_project: spd-piecewise
@@ -69,4 +68,3 @@ task_config:
 #   init_scale: 1.0
 #   simple_bias: false
 #   handcoded_AB: false
-#   decompose_bias: false 

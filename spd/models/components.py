@@ -144,7 +144,6 @@ class MLPComponents(nn.Module):
         d_mlp: int,
         k: int,
         init_scale: float,
-        input_bias: Float[Tensor, " d_mlp"] | None = None,
         input_component: nn.Parameter | None = None,
         output_component: nn.Parameter | None = None,
     ):
@@ -168,8 +167,6 @@ class MLPComponents(nn.Module):
         )
 
         self.bias1 = nn.Parameter(torch.zeros(d_mlp))
-        if input_bias is not None:
-            self.bias1.data[:] = input_bias.detach().clone()
 
     def forward(
         self, x: Float[Tensor, "... d_embed"], topk_mask: Bool[Tensor, "... k"] | None = None

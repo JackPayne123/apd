@@ -71,7 +71,6 @@ class PiecewiseConfig(BaseModel):
     dataset_seed: int | None = None
     simple_bias: bool = False
     handcoded_AB: bool = False
-    decompose_bias: bool = True
 
 
 class ResidualLinearConfig(BaseModel):
@@ -195,21 +194,6 @@ class Config(BaseModel):
             assert (
                 self.spd_type == "rank_penalty"
             ), "topk_schatten_coeff is not None but spd_type is not rank_penalty"
-
-        if (
-            self.spd_type == "full_rank"
-            and isinstance(self.task_config, PiecewiseConfig)
-            and not self.task_config.handcoded_AB
-            and not self.task_config.decompose_bias
-        ):
-            raise ValueError("Must have one of handcoded_AB or decompose_bias set")
-
-        if (
-            self.spd_type == "rank_one"
-            and isinstance(self.task_config, PiecewiseConfig)
-            and self.task_config.decompose_bias
-        ):
-            raise ValueError("Cannot decompose bias in rank 1 case")
 
         if self.topk_param_attrib_coeff is not None and not isinstance(
             self.task_config, PiecewiseConfig

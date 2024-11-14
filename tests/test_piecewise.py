@@ -41,7 +41,6 @@ def get_piecewise_config(
         k=6,
         handcoded_AB=handcoded_AB,
         simple_bias=simple_bias,
-        decompose_bias=False,
     )
 
 
@@ -66,8 +65,6 @@ def piecewise_decomposition_optimize_test(config: Config, check_A_changed: bool 
     param_map = {}
     for i in range(piecewise_model_spd.n_layers):
         param_map[f"mlp_{i}.input_layer.weight"] = f"mlp_{i}.input_layer.weight"
-        if config.spd_type == "full_rank" and config.task_config.decompose_bias:
-            param_map[f"mlp_{i}.input_layer.bias"] = f"mlp_{i}.input_layer.bias"
         param_map[f"mlp_{i}.output_layer.weight"] = f"mlp_{i}.output_layer.weight"
 
     optimize(
@@ -254,8 +251,6 @@ def test_piecewise_batch_topk_rank_one_simple_bias_false_loss_stable() -> None:
     param_map = {}
     for i in range(piecewise_model_spd.n_layers):
         param_map[f"mlp_{i}.input_layer.weight"] = f"mlp_{i}.input_layer.weight"
-        if config.spd_type == "full_rank" and config.task_config.decompose_bias:
-            param_map[f"mlp_{i}.input_layer.bias"] = f"mlp_{i}.input_layer.bias"
         param_map[f"mlp_{i}.output_layer.weight"] = f"mlp_{i}.output_layer.weight"
 
     initial_param_match_loss = calc_param_match_loss(
@@ -397,10 +392,7 @@ def test_piecewise_spd_full_rank_equivalence() -> None:
 
     # Create a target PiecewiseFunctionTransformer
     target_model = PiecewiseFunctionTransformer(
-        n_inputs=n_inputs,
-        d_mlp=d_mlp,
-        n_layers=n_layers,
-        decompose_bias=True,
+        n_inputs=n_inputs, d_mlp=d_mlp, n_layers=n_layers
     ).to(device)
 
     # Init all params to random values
@@ -414,12 +406,7 @@ def test_piecewise_spd_full_rank_equivalence() -> None:
 
     # Create the SPD model with k=1
     spd_model = PiecewiseFunctionSPDFullRankTransformer(
-        n_inputs=n_inputs,
-        d_mlp=d_mlp,
-        n_layers=n_layers,
-        k=k,
-        init_scale=1.0,
-        decompose_bias=True,
+        n_inputs=n_inputs, d_mlp=d_mlp, n_layers=n_layers, k=k, init_scale=1.0
     ).to(device)
 
     # Copy parameters from target model to SPD model
