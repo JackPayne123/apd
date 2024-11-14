@@ -1033,7 +1033,6 @@ class PiecewiseFunctionSPDRankPenaltyTransformer(SPDRankPenaltyModel):
         n_layers: The number of MLP layers
         k: The number of components to keep
         d_embed: The dimension of the embedding space
-        decompose_bias: Whether to decompose the bias term in the MLP layers
         m: The rank of each subnetwork. If None, use the default min(d_in, d_out)
     """
 
