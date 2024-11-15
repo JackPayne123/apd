@@ -15,6 +15,7 @@ from tqdm import tqdm
 
 from spd.experiments.piecewise.models import (
     PiecewiseFunctionSPDFullRankTransformer,
+    PiecewiseFunctionSPDRankPenaltyTransformer,
     PiecewiseFunctionSPDTransformer,
     PiecewiseFunctionTransformer,
 )
@@ -96,16 +97,21 @@ def piecewise_plot_results_fn(
 
     # Plot components
     if config.task_config.n_layers == 1:
-        if isinstance(model, PiecewiseFunctionSPDFullRankTransformer):
+        if isinstance(
+            model,
+            PiecewiseFunctionSPDFullRankTransformer | PiecewiseFunctionSPDRankPenaltyTransformer,
+        ):
             fig_dict_components = plot_components_fullrank(
                 model=model, step=step, out_dir=out_dir, slow_images=slow_images
             )
             fig_dict.update(fig_dict_components)
-        else:
+        elif isinstance(model, PiecewiseFunctionSPDTransformer):
             fig_dict_components = plot_components(
                 model=model, step=step, out_dir=out_dir, device=device, slow_images=slow_images
             )
             fig_dict.update(fig_dict_components)
+        else:
+            tqdm.write(f"Skipping component plots for {type(model)}")
     else:
         tqdm.write("Skipping component plots for >1 layer models")
     # Save plots to files
@@ -139,7 +145,9 @@ def get_model_and_dataloader(
     out_dir: Path | None = None,
 ) -> tuple[
     PiecewiseFunctionTransformer,
-    PiecewiseFunctionSPDTransformer | PiecewiseFunctionSPDFullRankTransformer,
+    PiecewiseFunctionSPDTransformer
+    | PiecewiseFunctionSPDFullRankTransformer
+    | PiecewiseFunctionSPDRankPenaltyTransformer,
     BatchedDataLoader[tuple[Float[Tensor, " n_inputs"], Float[Tensor, ""]]],
     BatchedDataLoader[tuple[Float[Tensor, " n_inputs"], Float[Tensor, ""]]],
 ]:
@@ -185,15 +193,26 @@ def get_model_and_dataloader(
     ]
 
     set_seed(config.seed)
-    if config.spd_type == "full_rank":
-        piecewise_model_spd = PiecewiseFunctionSPDFullRankTransformer(
-            n_inputs=piecewise_model.n_inputs,
-            d_mlp=piecewise_model.d_mlp,
-            n_layers=piecewise_model.n_layers,
-            k=config.task_config.k,
-            init_scale=config.task_config.init_scale,
-            decompose_bias=config.task_config.decompose_bias,
-        )
+    if config.spd_type == "full_rank" or config.spd_type == "rank_penalty":
+        if config.spd_type == "full_rank":
+            piecewise_model_spd = PiecewiseFunctionSPDFullRankTransformer(
+                n_inputs=piecewise_model.n_inputs,
+                d_mlp=piecewise_model.d_mlp,
+                n_layers=piecewise_model.n_layers,
+                k=config.task_config.k,
+                init_scale=config.task_config.init_scale,
+                decompose_bias=config.task_config.decompose_bias,
+            )
+        else:
+            assert config.spd_type == "rank_penalty"
+            piecewise_model_spd = PiecewiseFunctionSPDRankPenaltyTransformer(
+                n_inputs=piecewise_model.n_inputs,
+                d_mlp=piecewise_model.d_mlp,
+                n_layers=piecewise_model.n_layers,
+                k=config.task_config.k,
+                init_scale=config.task_config.init_scale,
+                m=config.m,
+            )
         if config.task_config.handcoded_AB:
             logger.info("Setting handcoded A and B matrices (!)")
             rank_one_spd_model = PiecewiseFunctionSPDTransformer(
@@ -228,6 +247,13 @@ def get_model_and_dataloader(
             logger.info("Setting handcoded A and B matrices (!)")
             piecewise_model_spd.set_handcoded_spd_params(piecewise_model)
 
+    # Copy biases for rank penalty
+    if config.spd_type == "rank_penalty":
+        for i in range(piecewise_model_spd.n_layers):
+            piecewise_model_spd.mlps[i].linear1.bias.data = (
+                piecewise_model.mlps[i].input_layer.bias.data.detach().clone()
+            )
+
     piecewise_model_spd.to(device)
 
     # Set requires_grad to False for params we want to fix (embeds, sometimes biases)
@@ -236,6 +262,10 @@ def get_model_and_dataloader(
             piecewise_model_spd.mlps[i].linear1.bias.requires_grad_(False)
         elif config.spd_type == "rank_one":
             piecewise_model_spd.mlps[i].bias1.requires_grad_(False)
+        elif config.spd_type == "rank_penalty":
+            piecewise_model_spd.mlps[i].linear1.bias.requires_grad_(False)
+        else:
+            logger.warning(f"Not fixing bias for {config.spd_type}")
 
     piecewise_model_spd.W_E.requires_grad_(False)
     piecewise_model_spd.W_U.requires_grad_(False)

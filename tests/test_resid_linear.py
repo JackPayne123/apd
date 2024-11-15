@@ -211,6 +211,7 @@ def test_resid_linear_spd_rank_penalty_full_rank_equivalence() -> None:
     d_mlp = 3
     n_layers = 2
     k = 2
+    m = 1
 
     device = "cpu"
 
@@ -236,17 +237,20 @@ def test_resid_linear_spd_rank_penalty_full_rank_equivalence() -> None:
         n_layers=n_layers,
         k=k,
         init_scale=1.0,
+        m=m,
     ).to(device)
 
     # Copy embedding matrix and biases
     rank_penalty_model.W_E.data = full_rank_model.W_E.data.clone()
     for i in range(n_layers):
-        rank_penalty_model.layers[i].linear1.bias.data = full_rank_model.layers[
-            i
-        ].linear1.bias.data.clone()
-        rank_penalty_model.layers[i].linear2.bias.data = full_rank_model.layers[
-            i
-        ].linear2.bias.data.clone()
+        # Full rank has a bias for each k index, whereas rank penalty has no k index.
+        # We thus sum over the k index in the full rank biases before copying to the rank penalty
+        rank_penalty_model.layers[i].linear1.bias.data = (
+            full_rank_model.layers[i].linear1.bias.data.sum(dim=0).clone()
+        )
+        rank_penalty_model.layers[i].linear2.bias.data = (
+            full_rank_model.layers[i].linear2.bias.data.sum(dim=0).clone()
+        )
 
     # For each layer and subnetwork, decompose the full rank parameters using SVD
     for i in range(n_layers):

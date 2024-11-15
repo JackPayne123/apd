@@ -11,8 +11,13 @@ from jaxtyping import Bool, Float
 from torch import Tensor
 
 from spd.log import logger
-from spd.models.base import Model, SPDFullRankModel, SPDModel
-from spd.models.components import MLP, MLPComponents, MLPComponentsFullRank
+from spd.models.base import Model, SPDFullRankModel, SPDModel, SPDRankPenaltyModel
+from spd.models.components import (
+    MLP,
+    MLPComponents,
+    MLPComponentsFullRank,
+    MLPComponentsRankPenalty,
+)
 from spd.utils import calc_neuron_indices, remove_grad_parallel_to_subnetwork_vecs
 
 
@@ -1017,3 +1022,134 @@ class PiecewiseFunctionSPDFullRankTransformer(SPDFullRankModel):
             mlp.linear2.subnetwork_params.data[subnet_idx, :, :] = stored_vals[f"mlp_{i}_linear2"]
             if self.decompose_bias:
                 mlp.linear1.bias.data[subnet_idx] = stored_vals[f"mlp_{i}_linear1_bias"]
+
+
+class PiecewiseFunctionSPDRankPenaltyTransformer(SPDRankPenaltyModel):
+    """An Schatten SPD model for piecewise functions.
+
+    Args:
+        n_inputs: The number of input features
+        d_mlp: The number of neurons in each MLP layer
+        n_layers: The number of MLP layers
+        k: The number of components to keep
+        d_embed: The dimension of the embedding space
+        m: The rank of each subnetwork. If None, use the default min(d_in, d_out)
+    """
+
+    def __init__(
+        self,
+        n_inputs: int,
+        d_mlp: int,
+        n_layers: int,
+        k: int,
+        init_scale: float,
+        d_embed: int | None = None,
+        m: int | None = None,
+    ):
+        super().__init__()
+        self.n_inputs = n_inputs
+        self.n_layers = n_layers
+        self.k = k
+        self.d_embed = self.n_inputs + 1 if d_embed is None else d_embed
+        self.d_control = self.d_embed - 2
+        self.n_param_matrices = n_layers * 2
+        self.m = m
+        self.num_functions = n_inputs - 1
+        self.n_outputs = 1  # this is hardcoded. This class isn't defined for multiple outputs
+
+        self.superposition = self.num_functions > self.d_control
+        if not self.superposition:
+            assert self.num_functions == self.d_control
+
+        self.W_E = nn.Linear(n_inputs, self.d_embed, bias=False)
+        self.W_U = nn.Linear(self.d_embed, self.n_outputs, bias=False)
+        initialize_embeds(self.W_E, self.W_U, n_inputs, self.d_embed, self.superposition)
+
+        self.mlps = nn.ModuleList(
+            [
+                MLPComponentsRankPenalty(
+                    d_embed=self.d_embed, d_mlp=d_mlp, k=k, init_scale=init_scale, m=m
+                )
+                for _ in range(n_layers)
+            ]
+        )
+
+    def all_subnetwork_params(self) -> dict[str, Float[Tensor, "k d_in d_out"]]:
+        params = {}
+        for i, mlp in enumerate(self.mlps):
+            params[f"mlp_{i}.input_layer.weight"] = einops.einsum(
+                mlp.linear1.A, mlp.linear1.B, "k d_embed m, k m d_mlp -> k d_embed d_mlp"
+            )
+            params[f"mlp_{i}.output_layer.weight"] = einops.einsum(
+                mlp.linear2.A, mlp.linear2.B, "k d_mlp m, k m d_embed -> k d_mlp d_embed"
+            )
+        return params
+
+    def all_subnetwork_params_summed(self) -> dict[str, Float[Tensor, "k d_in d_out"]]:
+        return {p_name: p.sum(dim=0) for p_name, p in self.all_subnetwork_params().items()}
+
+    def set_subnet_to_zero(self, subnet_idx: int) -> dict[str, Float[Tensor, "k dim"]]:
+        stored_vals = {}
+        for i, mlp in enumerate(self.mlps):
+            stored_vals[f"mlp_{i}_linear1_A"] = mlp.linear1.A.data[subnet_idx].detach().clone()
+            stored_vals[f"mlp_{i}_linear2_A"] = mlp.linear2.A.data[subnet_idx].detach().clone()
+            stored_vals[f"mlp_{i}_linear1_B"] = mlp.linear1.B.data[subnet_idx].detach().clone()
+            stored_vals[f"mlp_{i}_linear2_B"] = mlp.linear2.B.data[subnet_idx].detach().clone()
+            mlp.linear1.A.data[subnet_idx] = 0.0
+            mlp.linear2.A.data[subnet_idx] = 0.0
+            mlp.linear1.B.data[subnet_idx] = 0.0
+            mlp.linear2.B.data[subnet_idx] = 0.0
+        return stored_vals
+
+    def restore_subnet(
+        self, subnet_idx: int, stored_vals: dict[str, Float[Tensor, " dim"]]
+    ) -> None:
+        for i, mlp in enumerate(self.mlps):
+            mlp.linear1.A.data[subnet_idx] = stored_vals[f"mlp_{i}_linear1_A"]
+            mlp.linear2.A.data[subnet_idx] = stored_vals[f"mlp_{i}_linear2_A"]
+            mlp.linear1.B.data[subnet_idx] = stored_vals[f"mlp_{i}_linear1_B"]
+            mlp.linear2.B.data[subnet_idx] = stored_vals[f"mlp_{i}_linear2_B"]
+
+    def forward(
+        self, x: Float[Tensor, "... inputs"], topk_mask: Bool[Tensor, "... k"] | None = None
+    ) -> tuple[
+        Float[Tensor, "... outputs"],
+        dict[str, Float[Tensor, "... d_embed"] | Float[Tensor, "... d_mlp"]],
+        dict[str, Float[Tensor, "... k d_embed"]],
+    ]:
+        """
+        Returns:
+            x: The output of the model
+            layer_acts: A dictionary of activations for each layer in each MLP.
+            inner_acts: A dictionary of component activations (just after the A matrix) for each
+                layer in each MLP.
+        """
+        layer_acts = {}
+        inner_acts = {}
+        residual = self.W_E(x)
+        for i, layer in enumerate(self.mlps):
+            layer_out, layer_acts_i, inner_acts_i = layer(residual, topk_mask)
+            assert len(layer_acts_i) == len(inner_acts_i) == 2
+            residual = residual + layer_out
+            layer_acts[f"mlp_{i}.input_layer.weight"] = layer_acts_i[0]
+            layer_acts[f"mlp_{i}.output_layer.weight"] = layer_acts_i[1]
+            inner_acts[f"mlp_{i}.input_layer.weight"] = inner_acts_i[0]
+            inner_acts[f"mlp_{i}.output_layer.weight"] = inner_acts_i[1]
+        return self.W_U(residual), layer_acts, inner_acts
+
+    def all_As_and_Bs(self) -> dict[str, tuple[Float[Tensor, "dim k"], Float[Tensor, "k dim"]]]:
+        As_and_Bs = {}
+        for i, mlp in enumerate(self.mlps):
+            As_and_Bs[f"mlp_{i}.input_layer.weight"] = (mlp.linear1.A, mlp.linear1.B)
+            As_and_Bs[f"mlp_{i}.output_layer.weight"] = (mlp.linear2.A, mlp.linear2.B)
+        return As_and_Bs
+
+    def set_matrices_to_unit_norm(self):
+        for mlp in self.mlps:
+            mlp.linear1.A.data /= mlp.linear1.A.data.norm(p=2, dim=-2, keepdim=True)
+            mlp.linear2.A.data /= mlp.linear2.A.data.norm(p=2, dim=-2, keepdim=True)
+
+    def fix_normalized_adam_gradients(self):
+        for mlp in self.mlps:
+            remove_grad_parallel_to_subnetwork_vecs(mlp.linear1.A.data, mlp.linear1.A.grad)
+            remove_grad_parallel_to_subnetwork_vecs(mlp.linear2.A.data, mlp.linear2.A.grad)

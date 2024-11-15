@@ -265,20 +265,33 @@ class ParamComponentsRankPenalty(nn.Module):
     The weight matrix W is decomposed as W = A @ B, where A and B are learned parameters.
     """
 
-    def __init__(self, in_dim: int, out_dim: int, k: int, bias: bool, init_scale: float = 1.0):
+    def __init__(
+        self,
+        in_dim: int,
+        out_dim: int,
+        k: int,
+        bias: bool,
+        init_scale: float = 1.0,
+        m: int | None = None,
+    ):
         super().__init__()
         self.in_dim = in_dim
         self.out_dim = out_dim
         self.k = k
-        self.m = min(in_dim, out_dim)  # Use min dimension for m as in ParamComponentsSchatten
+        self.m = min(in_dim, out_dim) if m is None else m
 
         # Initialize A and B matrices
         self.A = nn.Parameter(torch.empty(k, in_dim, self.m))
         self.B = nn.Parameter(torch.empty(k, self.m, out_dim))
-        self.bias = nn.Parameter(torch.zeros(k, out_dim)) if bias else None
+        self.bias = nn.Parameter(torch.zeros(out_dim)) if bias else None
 
         init_param_(self.A, scale=init_scale)
         init_param_(self.B, scale=init_scale)
+
+    @property
+    def subnetwork_params(self) -> Float[Tensor, "k i j"]:
+        """For compatibility with plotting code."""
+        return einops.einsum(self.A, self.B, "k i m, k m j -> k i j")
 
     def forward(
         self, x: Float[Tensor, "batch d_in"], topk_mask: Bool[Tensor, "batch k"] | None = None
@@ -304,15 +317,15 @@ class ParamComponentsRankPenalty(nn.Module):
         # Then multiply by B to get to output dimension
         inner_acts = einops.einsum(pre_inner_acts, self.B, "batch k m, k m h -> batch k h")
 
-        # Add the bias if it exists
-        if self.bias is not None:
-            inner_acts += self.bias
-
         if topk_mask is not None:
             inner_acts = einops.einsum(inner_acts, topk_mask, "batch k h, batch k -> batch k h")
 
         # Sum over subnetwork dimension
         out = einops.einsum(inner_acts, "batch k h -> batch h")
+
+        # Add the bias if it exists
+        if self.bias is not None:
+            out += self.bias
         return out, inner_acts
 
 
@@ -332,14 +345,15 @@ class MLPComponentsRankPenalty(nn.Module):
         in_bias: bool = True,
         out_bias: bool = False,
         act_fn: Callable[[Tensor], Tensor] = F.relu,
+        m: int | None = None,
     ):
         super().__init__()
         self.act_fn = act_fn
         self.linear1 = ParamComponentsRankPenalty(
-            in_dim=d_embed, out_dim=d_mlp, k=k, bias=in_bias, init_scale=init_scale
+            in_dim=d_embed, out_dim=d_mlp, k=k, bias=in_bias, init_scale=init_scale, m=m
         )
         self.linear2 = ParamComponentsRankPenalty(
-            in_dim=d_mlp, out_dim=d_embed, k=k, bias=out_bias, init_scale=init_scale
+            in_dim=d_mlp, out_dim=d_embed, k=k, bias=out_bias, init_scale=init_scale, m=m
         )
 
     def forward(

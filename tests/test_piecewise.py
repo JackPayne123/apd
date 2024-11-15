@@ -1,8 +1,11 @@
+import einops
 import torch
+import torch.nn as nn
 from jaxtyping import Float
 
 from spd.experiments.piecewise.models import (
     PiecewiseFunctionSPDFullRankTransformer,
+    PiecewiseFunctionSPDRankPenaltyTransformer,
     PiecewiseFunctionSPDTransformer,
     PiecewiseFunctionTransformer,
 )
@@ -446,3 +449,98 @@ def test_piecewise_spd_full_rank_equivalence() -> None:
             assert torch.allclose(
                 target_act, spd_act, atol=1e-6
             ), f"Activations do not match for layer {layer_name}"
+
+
+def test_piecewise_spd_rank_penalty_rank_one_equivalence() -> None:
+    """Test that PiecewiseFunctionSPDTransformer output and internal acts match
+    PiecewiseFunctionSPDRankPenaltyTransformer when m=1.
+
+    We set the bias and embeddings as the same for both models.
+    We directly copy the A and B matrices from the SPD model to the rank penalty model
+    since m=1 makes them equivalent.
+    """
+    set_seed(0)
+
+    batch_size = 4
+    n_inputs = 3
+    d_mlp = 8
+    n_layers = 1
+    k = 4
+    m = 1
+    init_scale = 1.0
+
+    device = "cpu"
+
+    # Create the SPD model
+    spd_model = PiecewiseFunctionSPDTransformer(
+        n_inputs=n_inputs,
+        d_mlp=d_mlp,
+        n_layers=n_layers,
+        k=k,
+        init_scale=init_scale,
+    ).to(device)
+
+    # Randomly initialize params again to avoid zeros
+    for param in spd_model.parameters():
+        if param.dim() >= 2:
+            nn.init.xavier_normal_(param)
+        else:
+            # # For 1D parameters (biases), initialize with small random values
+            nn.init.uniform_(param, -0.1, 0.1)
+
+    # Create the rank penalty model with m=1
+    rank_penalty_model = PiecewiseFunctionSPDRankPenaltyTransformer(
+        n_inputs=n_inputs,
+        d_mlp=d_mlp,
+        n_layers=n_layers,
+        k=k,
+        init_scale=init_scale,
+        m=m,
+    ).to(device)
+
+    # Copy embedding matrices
+    rank_penalty_model.W_E.weight.data[:] = spd_model.W_E.weight.data.clone()
+    rank_penalty_model.W_U.weight.data[:] = spd_model.W_U.weight.data.clone()
+
+    # For each MLP layer, copy the A and B matrices and biases
+    for i in range(n_layers):
+        # Copy biases
+        rank_penalty_model.mlps[i].linear1.bias.data[:] = spd_model.mlps[i].bias1.data.clone()
+
+        # Copy A and B matrices for input layer
+        rank_penalty_model.mlps[i].linear1.A.data[:, :, :] = einops.rearrange(
+            spd_model.mlps[i].linear1.A.data, "d_embed k -> k d_embed 1"
+        )
+        rank_penalty_model.mlps[i].linear1.B.data[:, :, :] = einops.rearrange(
+            spd_model.mlps[i].linear1.B.data, "k d_mlp -> k 1 d_mlp"
+        )
+
+        # Copy A and B matrices for output layer
+        rank_penalty_model.mlps[i].linear2.A.data[:, :, :] = einops.rearrange(
+            spd_model.mlps[i].linear2.A.data, "d_mlp k -> k d_mlp 1"
+        )
+        rank_penalty_model.mlps[i].linear2.B.data[:, :, :] = einops.rearrange(
+            spd_model.mlps[i].linear2.B.data, "k d_embed -> k 1 d_embed"
+        )
+
+    # Create a random input
+    input_data: Float[torch.Tensor, "batch n_inputs"] = torch.rand(
+        batch_size, n_inputs, device=device
+    )
+
+    # Forward pass through both models
+    spd_output, spd_layer_acts, spd_inner_acts = spd_model(input_data)
+    rank_penalty_output, rank_penalty_layer_acts, rank_penalty_inner_acts = rank_penalty_model(
+        input_data
+    )
+
+    # Assert outputs are the same
+    assert torch.allclose(spd_output, rank_penalty_output, atol=1e-6), "Outputs do not match"
+
+    # Assert activations are the same for all layers
+    for layer_name in spd_layer_acts:
+        spd_act = spd_layer_acts[layer_name]
+        rank_penalty_act = rank_penalty_layer_acts[layer_name]
+        assert torch.allclose(
+            spd_act, rank_penalty_act, atol=1e-6
+        ), f"Layer activations do not match for layer {layer_name}"
