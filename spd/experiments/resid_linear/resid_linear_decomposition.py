@@ -311,6 +311,26 @@ def main(
         )
         model.layers[i].linear2.bias.requires_grad = False
 
+    # A: k, in_dim, m
+    # B: k, m, out_dim
+    # target input_layer.weight: (d_mlp, d_embed)
+    # target output_layer.weight: (d_embed, d_mlp)
+    # model.layers[0].linear1.A.data[:, :, :] = torch.zeros_like(model.layers[0].linear1.A.data)
+    # model.layers[0].linear1.A.data[0, :, 0] = target_model.layers[0].input_layer.weight[0]
+    # model.layers[0].linear1.A.data[1, :, 0] = target_model.layers[0].input_layer.weight[1]
+
+    # model.layers[0].linear1.B.data[:, :, :] = torch.zeros_like(model.layers[0].linear1.B.data)
+    # model.layers[0].linear1.B.data[0, 0, :] = torch.tensor([1.0, 0], device=device)
+    # model.layers[0].linear1.B.data[1, 0, :] = torch.tensor([0.0, 1], device=device)
+
+    # model.layers[0].linear2.A.data[:, :, :] = torch.zeros_like(model.layers[0].linear2.A.data)
+    # model.layers[0].linear2.A.data[0, :, 0] = torch.tensor([1.0, 0], device=device)
+    # model.layers[0].linear2.A.data[1, :, 0] = torch.tensor([0.0, 1], device=device)
+
+    # model.layers[0].linear2.B.data[:, :, :] = torch.zeros_like(model.layers[0].linear2.B.data)
+    # model.layers[0].linear2.B.data[0, 0, :] = target_model.layers[0].output_layer.weight[:, 0]
+    # model.layers[0].linear2.B.data[1, 0, :] = target_model.layers[0].output_layer.weight[:, 1]
+
     param_map = {}
     for i in range(target_model.n_layers):
         # Map from pretrained model's `all_decomposable_params` to the SPD models'

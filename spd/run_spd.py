@@ -111,7 +111,7 @@ class Config(BaseModel):
     lp_sparsity_coeff: NonNegativeFloat | None = None
     topk_param_attrib_coeff: NonNegativeFloat | None = None
     distil_from_target: bool = False
-    pnorm: PositiveFloat | None = None
+    pnorm: NonNegativeFloat | None = None
     pnorm_end: PositiveFloat | None = None
     m: PositiveInt | None = None
     lr_schedule: Literal["linear", "constant", "cosine", "exponential"] = "constant"

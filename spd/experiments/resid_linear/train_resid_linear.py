@@ -1,6 +1,7 @@
 """Trains a residual linear model on one-hot input vectors."""
 
 import json
+import math
 from pathlib import Path
 from typing import Literal
 
@@ -104,9 +105,9 @@ if __name__ == "__main__":
     config = Config(
         seed=0,
         label_fn_seed=0,
-        n_features=5,
-        d_embed=5,
-        d_mlp=5,
+        n_features=2,
+        d_embed=2,
+        d_mlp=2,
         n_layers=1,
         feature_probability=0.2,
         batch_size=256,
@@ -117,9 +118,10 @@ if __name__ == "__main__":
     )
 
     set_seed(config.seed)
+    degrees = 45
     run_name = (
         f"resid_linear_identity_n-features{config.n_features}_d-resid{config.d_embed}_"
-        f"d-mlp{config.d_mlp}_n-layers{config.n_layers}_seed{config.seed}"
+        f"d-mlp{config.d_mlp}_n-layers{config.n_layers}_seed{config.seed}_degrees{degrees}"
     )
     out_dir = Path(__file__).parent / "out" / run_name
 
@@ -134,9 +136,25 @@ if __name__ == "__main__":
     for p in model.parameters():
         p.data = p.data.abs()
 
-    # Make W_E the identity matrix
+    # # Make W_E the identity matrix
+    # assert model.W_E.shape == (config.n_features, config.d_embed)
+    # model.W_E.data[:, :] = torch.eye(config.d_embed, device=device)
+
+    # Make W_E the desired matrix
     assert model.W_E.shape == (config.n_features, config.d_embed)
-    model.W_E.data[:, :] = torch.eye(config.d_embed, device=device)
+    # model.W_E.data[0, :] = torch.tensor([1.0, 0.0], device=device)
+    model.W_E.data[0, :] = torch.tensor([0.0, 1.0], device=device)
+    # model.W_E.data[1, :] = torch.tensor([1.0, 1.0], device=device) / torch.sqrt(
+    #     torch.tensor([2.0, 2.0], device=device)
+    # )
+    angle_base = 2 * math.pi / 360
+    # model.W_E.data[1, :] = torch.tensor(
+    #     [math.sin(degrees * angle_base), math.cos(degrees * angle_base)], device=device
+    # )
+    model.W_E.data[1, :] = torch.tensor(
+        [math.cos(degrees * angle_base), math.sin(degrees * angle_base)], device=device
+    )
+    print(model.W_E)
 
     # Don't train the Embedding matrix
     model.W_E.requires_grad = False
