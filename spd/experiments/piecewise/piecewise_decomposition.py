@@ -62,7 +62,7 @@ def piecewise_plot_results_fn(
     assert isinstance(config.task_config, PiecewiseConfig)
     slow_images = config.slow_images
     fig_dict = {}
-    # Plot functions
+    # Plot model functions and network
     if config.topk is not None:
         fig_dict_functions = plot_model_functions(
             spd_model=model,
@@ -118,7 +118,7 @@ def piecewise_plot_results_fn(
     if out_dir:
         for k, v in fig_dict.items():
             out_file = out_dir / f"{k}_s{step}.png"
-            v.savefig(out_file, dpi=200)
+            v.savefig(out_file, dpi=100)
             tqdm.write(f"Saved plot to {out_file}")
     return fig_dict
 

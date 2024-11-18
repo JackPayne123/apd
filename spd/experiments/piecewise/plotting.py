@@ -70,14 +70,18 @@ def plot_matrix(
     im = ax.matshow(matrix.detach().cpu().numpy(), cmap="coolwarm", norm=norm)
     for (j, i), label in np.ndenumerate(matrix.detach().cpu().numpy()):
         ax.text(i, j, f"{label:.2f}", ha="center", va="center", fontsize=fontsize)
-    ax.set_xlabel(xlabel)
+    if xlabel != "":
+        ax.set_xlabel(xlabel)
+        ax.xaxis.set_label_position("top")
+    else:
+        ax.set_xticklabels([])
     if ylabel != "":
         ax.set_ylabel(ylabel)
     else:
         ax.set_yticklabels([])
     ax.set_title(title)
     divider = make_axes_locatable(ax)
-    cax = divider.append_axes("right", size="5%", pad=0.05)
+    cax = divider.append_axes("right", size=0.1, pad=0.05)
     fig = ax.get_figure()
     assert fig is not None
     fig.colorbar(im, cax=cax, format=tkr.FormatStrFormatter(colorbar_format))
@@ -97,22 +101,29 @@ def plot_components_fullrank(
     decompose_bias = len(model.mlps[0].linear1.bias.shape) > 1
     show_bias = show_bias if show_bias is not None else decompose_bias
     n_layers = model.n_layers
+    _, n_neurons, d_embed = model.mlps[0].linear1.subnetwork_params.shape
     ncols_per_layer = 2 + show_bias
     ncols = ncols_per_layer * n_layers
     if slow_images:
         nrows = model.k + 1
         fig, axs = plt.subplots(
-            nrows, ncols, figsize=(5 * ncols, 3 * nrows), constrained_layout=True
+            nrows,
+            ncols,
+            figsize=(1 + d_embed / 5 * ncols, 1 + n_neurons / 5 * nrows),
+            constrained_layout=True,
         )
     else:
         nrows = 1
         fig, axs_row = plt.subplots(
-            nrows, ncols, figsize=(5 * ncols, 3 * nrows), constrained_layout=True
+            nrows,
+            ncols,
+            figsize=(d_embed / 10 * ncols, n_neurons / 10 * nrows),
+            constrained_layout=True,
         )
         axs = np.array([axs_row])
 
     # For Piecewise, we want shared normalization across layers, but separate for W_in/bias/W_out
-    def max_val(matrices: list[Float[Tensor, "i j"]]) -> float:
+    def max_val(matrices: list[Float[Tensor, "..."]]) -> float:
         return max(matrix.abs().max().item() for matrix in matrices)
 
     colors = matplotlib.colors  # type: ignore
@@ -128,9 +139,9 @@ def plot_components_fullrank(
         plot_matrix(
             axs[0, ncols_per_layer * lay],
             einops.einsum(model.mlps[lay].linear1.subnetwork_params, "k ... -> ..."),
-            f"Layer {lay} W_in, sum over k",
+            f"Layer {lay} W_in",
             "Neuron index",
-            "Embedding index",
+            "Embedding index, sum over k",
             norm=norm_w_in,
         )
         if show_bias:
@@ -139,9 +150,7 @@ def plot_components_fullrank(
                 torch.einsum("kd->d", model.mlps[lay].linear1.bias).unsqueeze(0)
                 if decompose_bias
                 else model.mlps[lay].linear1.bias.unsqueeze(0),
-                f"Layer {lay} Bias, sum over k"
-                if decompose_bias
-                else f"Layer {lay} Bias (not decomposed)",
+                f"Layer {lay} Bias" if decompose_bias else f"Layer {lay} Bias (not decomposed)",
                 "Neuron index",
                 "",
                 norm=norm_bias,
@@ -149,7 +158,7 @@ def plot_components_fullrank(
         plot_matrix(
             axs[0, ncols_per_layer * lay + 1 + show_bias],
             einops.einsum(model.mlps[lay].linear2.subnetwork_params, "k ... -> ...").T,
-            f"Layer {lay} W_out.T, sum over k",
+            f"Layer {lay} W_out.T",
             "Neuron index",
             "",
             norm=norm_w_out,
@@ -163,9 +172,9 @@ def plot_components_fullrank(
                 plot_matrix(
                     ax,
                     W_in_k,
-                    f"Layer {lay} W_in_k, k={k}",
-                    "Neuron index",
-                    "Embedding index",
+                    "",
+                    "",
+                    f"Embedding index, k={k}",
                     norm=norm_w_in,
                 )
                 if decompose_bias and show_bias:
@@ -174,8 +183,8 @@ def plot_components_fullrank(
                     plot_matrix(
                         ax,
                         bias_k,
-                        f"Layer {lay} Bias_k, k={k}",
-                        "Neuron index",
+                        "",
+                        "",
                         "",
                         norm=norm_bias,
                     )
@@ -187,8 +196,8 @@ def plot_components_fullrank(
                 plot_matrix(
                     ax,
                     W_out_k,
-                    f"Layer {lay} W_out_k.T, k={k}",
-                    "Neuron index",
+                    "",
+                    "",
                     "",
                     norm=norm_w_out,
                 )
@@ -418,16 +427,23 @@ def plot_model_functions(
             )
         ax.plot(input_xs[s], model_output_spd[s], ls="-.", color=color3)
         k_cb = attribution_scores[s].mean(dim=0).argmax()
+        # ax_attrib
+        for k in range(n_functions):
+            # Find permutation
+            if k == k_cb:
+                ax_attrib.plot(
+                    input_xs[s],
+                    attribution_scores[s][:, k],
+                    color=color0,
+                    label=f"cb={cb}, k_cb={k}",
+                )
+            else:
+                ax_attrib.plot(input_xs[s], attribution_scores[s][:, k], color=color0, alpha=0.2)
+        # ax_inner
         if len(inner_acts) <= 2:
             for k in range(n_functions):
                 # Find permutation
                 if k == k_cb:
-                    ax_attrib.plot(
-                        input_xs[s],
-                        attribution_scores[s][:, k],
-                        color=color0,
-                        label=f"cb={cb}, k_cb={k}",
-                    )
                     assert len(inner_acts) <= 2, "Didn't implement more than 2 SPD 'layers' yet"
                     for j, layer_name in enumerate(inner_acts.keys()):
                         ls = ["-", "--"][j]
@@ -440,9 +456,6 @@ def plot_model_functions(
                                 label=f"cb={cb}, k_cb={k}" if j == 0 else None,
                             )
                 else:
-                    ax_attrib.plot(
-                        input_xs[s], attribution_scores[s][:, k], color=color0, alpha=0.2
-                    )
                     for j, layer_name in enumerate(inner_acts.keys()):
                         ls = ["-", "--"][j]
                         if not isinstance(spd_model, PiecewiseFunctionSPDFullRankTransformer):
