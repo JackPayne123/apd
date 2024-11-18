@@ -109,7 +109,8 @@ def plot_components_fullrank(
         fig, axs = plt.subplots(
             nrows,
             ncols,
-            figsize=(1 + d_embed / 5 * ncols, 1 + n_neurons / 5 * nrows),
+            # 1/5 inch per dimension, 0.5 w_inches for colorbar, 4 inches for labels etc.
+            figsize=(4 + (d_embed / 5 + 0.5) * ncols, 4 + n_neurons / 5 * nrows),
             constrained_layout=True,
         )
     else:
@@ -117,7 +118,7 @@ def plot_components_fullrank(
         fig, axs_row = plt.subplots(
             nrows,
             ncols,
-            figsize=(d_embed / 10 * ncols, n_neurons / 10 * nrows),
+            figsize=(4 + (d_embed / 5 + 0.5) * ncols, 4 + n_neurons / 5 * nrows),
             constrained_layout=True,
         )
         axs = np.array([axs_row])
@@ -141,7 +142,7 @@ def plot_components_fullrank(
             einops.einsum(model.mlps[lay].linear1.subnetwork_params, "k ... -> ..."),
             f"Layer {lay} W_in",
             "Neuron index",
-            "Embedding index, sum over k",
+            "Embedding index, sum over k" if lay == 0 else "",
             norm=norm_w_in,
         )
         if show_bias:
@@ -174,7 +175,7 @@ def plot_components_fullrank(
                     W_in_k,
                     "",
                     "",
-                    f"Embedding index, k={k}",
+                    f"Embedding index, k={k}" if lay == 0 else "",
                     norm=norm_w_in,
                 )
                 if decompose_bias and show_bias:
