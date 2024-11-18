@@ -774,6 +774,7 @@ def optimize(
         n_params = n_params / model.n_instances
 
     step_lp_sparsity_coeff = None
+    step_topk_schatten_coeff = None
     step_topk_recon_coeff = None
     epoch = 0
     total_samples = 0
@@ -828,6 +829,13 @@ def optimize(
                 step=step,
                 steps=config.steps,
                 max_sparsity_coeff=config.lp_sparsity_coeff,
+                sparsity_warmup_pct=config.sparsity_warmup_pct,
+            )
+        if config.topk_schatten_coeff is not None:
+            step_topk_schatten_coeff = get_sparsity_coeff_linear_warmup(
+                step=step,
+                steps=config.steps,
+                max_sparsity_coeff=config.topk_schatten_coeff,
                 sparsity_warmup_pct=config.sparsity_warmup_pct,
             )
 
@@ -991,8 +999,8 @@ def optimize(
             assert config.topk_act_recon_coeff is not None
             loss = loss + config.topk_act_recon_coeff * topk_act_recon_loss.mean()
         if topk_schatten_loss is not None:
-            assert config.topk_schatten_coeff is not None
-            loss = loss + config.topk_schatten_coeff * topk_schatten_loss.mean()
+            assert step_topk_schatten_coeff is not None
+            loss = loss + step_topk_schatten_coeff * topk_schatten_loss.mean()
 
         # Logging
         if step % config.print_freq == 0:
