@@ -2,6 +2,7 @@ from pathlib import Path
 from typing import Literal
 
 import einops
+import matplotlib
 import matplotlib.pyplot as plt
 import matplotlib.ticker as tkr
 import numpy as np
@@ -60,11 +61,13 @@ def plot_matrix(
     title: str,
     xlabel: str,
     ylabel: str,
-    colorbar_format: str = "%.0f",
+    colorbar_format: str = "%.1f",
+    norm: plt.Normalize | None = None,
 ) -> None:
     # Useful to have bigger text for small matrices
     fontsize = 8 if matrix.numel() < 50 else 4
-    im = ax.matshow(matrix.detach().cpu().numpy(), cmap="coolwarm", norm=CenteredNorm())
+    norm = norm if norm is not None else CenteredNorm()
+    im = ax.matshow(matrix.detach().cpu().numpy(), cmap="coolwarm", norm=norm)
     for (j, i), label in np.ndenumerate(matrix.detach().cpu().numpy()):
         ax.text(i, j, f"{label:.2f}", ha="center", va="center", fontsize=fontsize)
     ax.set_xlabel(xlabel)
@@ -74,7 +77,7 @@ def plot_matrix(
         ax.set_yticklabels([])
     ax.set_title(title)
     divider = make_axes_locatable(ax)
-    cax = divider.append_axes("right", size="1%", pad=0.05)
+    cax = divider.append_axes("right", size="5%", pad=0.05)
     fig = ax.get_figure()
     assert fig is not None
     fig.colorbar(im, cax=cax, format=tkr.FormatStrFormatter(colorbar_format))
@@ -108,6 +111,18 @@ def plot_components_fullrank(
         )
         axs = np.array([axs_row])
 
+    # For Piecewise, we want shared normalization across layers, but separate for W_in/bias/W_out
+    def max_val(matrices: list[Float[Tensor, "i j"]]) -> float:
+        return max(matrix.abs().max().item() for matrix in matrices)
+
+    colors = matplotlib.colors  # type: ignore
+    norm_scale_w_in = max_val([model.mlps[i].linear1.subnetwork_params for i in range(n_layers)])
+    norm_w_in = colors.Normalize(vmin=-norm_scale_w_in, vmax=norm_scale_w_in)
+    norm_scale_bias = max_val([model.mlps[i].linear1.bias for i in range(n_layers)])
+    norm_bias = colors.Normalize(vmin=-norm_scale_bias, vmax=norm_scale_bias)
+    norm_scale_w_out = max_val([model.mlps[i].linear2.subnetwork_params for i in range(n_layers)])
+    norm_w_out = colors.Normalize(vmin=-norm_scale_w_out, vmax=norm_scale_w_out)
+
     assert isinstance(axs, np.ndarray)
     for lay in range(n_layers):
         plot_matrix(
@@ -116,6 +131,7 @@ def plot_components_fullrank(
             f"Layer {lay} W_in, sum over k",
             "Neuron index",
             "Embedding index",
+            norm=norm_w_in,
         )
         if show_bias:
             plot_matrix(
@@ -128,16 +144,15 @@ def plot_components_fullrank(
                 else f"Layer {lay} Bias (not decomposed)",
                 "Neuron index",
                 "",
+                norm=norm_bias,
             )
-        else:
-            # Remove the frame
-            axs[0, ncols_per_layer * lay + 1].axis("off")
         plot_matrix(
             axs[0, ncols_per_layer * lay + 1 + show_bias],
             einops.einsum(model.mlps[lay].linear2.subnetwork_params, "k ... -> ...").T,
             f"Layer {lay} W_out.T, sum over k",
             "Neuron index",
             "",
+            norm=norm_w_out,
         )
     if slow_images:
         for k in range(model.k):
@@ -146,18 +161,37 @@ def plot_components_fullrank(
                 W_in_k = mlp.linear1.subnetwork_params[k]
                 ax = axs[k + 1, ncols_per_layer * lay]  # type: ignore
                 plot_matrix(
-                    ax, W_in_k, f"Layer {lay} W_in_k, k={k}", "Neuron index", "Embedding index"
+                    ax,
+                    W_in_k,
+                    f"Layer {lay} W_in_k, k={k}",
+                    "Neuron index",
+                    "Embedding index",
+                    norm=norm_w_in,
                 )
                 if decompose_bias and show_bias:
                     bias_k = mlp.linear1.bias[None, k]
                     ax = axs[k + 1, ncols_per_layer * lay + 1]  # type: ignore
-                    plot_matrix(ax, bias_k, f"Layer {lay} Bias_k, k={k}", "Neuron index", "")
+                    plot_matrix(
+                        ax,
+                        bias_k,
+                        f"Layer {lay} Bias_k, k={k}",
+                        "Neuron index",
+                        "",
+                        norm=norm_bias,
+                    )
                 elif show_bias:
                     # Remove the frame
                     axs[k + 1, ncols_per_layer * lay + 1].axis("off")
                 W_out_k = mlp.linear2.subnetwork_params[k].T
                 ax = axs[k + 1, ncols_per_layer * lay + 1 + show_bias]  # type: ignore
-                plot_matrix(ax, W_out_k, f"Layer {lay} W_out_k.T, k={k}", "Neuron index", "")
+                plot_matrix(
+                    ax,
+                    W_out_k,
+                    f"Layer {lay} W_out_k.T, k={k}",
+                    "Neuron index",
+                    "",
+                    norm=norm_w_out,
+                )
     return {"matrices_layer0": fig}
 
 
