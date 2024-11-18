@@ -96,24 +96,24 @@ def piecewise_plot_results_fn(
         fig_dict.update(fig_dict_attributions)
 
     # Plot components
-    if config.task_config.n_layers == 1:
-        if isinstance(
-            model,
-            PiecewiseFunctionSPDFullRankTransformer | PiecewiseFunctionSPDRankPenaltyTransformer,
-        ):
-            fig_dict_components = plot_components_fullrank(
-                model=model, step=step, out_dir=out_dir, slow_images=slow_images
-            )
-            fig_dict.update(fig_dict_components)
-        elif isinstance(model, PiecewiseFunctionSPDTransformer):
+    if isinstance(
+        model,
+        PiecewiseFunctionSPDFullRankTransformer | PiecewiseFunctionSPDRankPenaltyTransformer,
+    ):
+        fig_dict_components = plot_components_fullrank(
+            model=model, step=step, out_dir=out_dir, slow_images=slow_images
+        )
+        fig_dict.update(fig_dict_components)
+    elif isinstance(model, PiecewiseFunctionSPDTransformer):
+        if config.task_config.n_layers == 1:
             fig_dict_components = plot_components(
                 model=model, step=step, out_dir=out_dir, device=device, slow_images=slow_images
             )
             fig_dict.update(fig_dict_components)
         else:
-            tqdm.write(f"Skipping component plots for {type(model)}")
+            tqdm.write("Skipping component plots for >1 layer models")
     else:
-        tqdm.write("Skipping component plots for >1 layer models")
+        tqdm.write(f"Skipping component plots for {type(model)}")
     # Save plots to files
     if out_dir:
         for k, v in fig_dict.items():

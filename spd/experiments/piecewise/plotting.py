@@ -91,11 +91,11 @@ def plot_components_fullrank(
     slow_images: bool,
     show_bias: bool | None = None,
 ) -> dict[str, plt.Figure]:
-    # Not implemented attribution score plots, or multi-layer plots, yet.
-    assert model.n_layers == 1
     decompose_bias = len(model.mlps[0].linear1.bias.shape) > 1
     show_bias = show_bias if show_bias is not None else decompose_bias
-    ncols = 2 + show_bias
+    n_layers = model.n_layers
+    ncols_per_layer = 2 + show_bias
+    ncols = ncols_per_layer * n_layers
     if slow_images:
         nrows = model.k + 1
         fig, axs = plt.subplots(
@@ -109,50 +109,55 @@ def plot_components_fullrank(
         axs = np.array([axs_row])
 
     assert isinstance(axs, np.ndarray)
-    plot_matrix(
-        axs[0, 0],
-        einops.einsum(model.mlps[0].linear1.subnetwork_params, "k ... -> ..."),
-        "W_in, sum over k",
-        "Neuron index",
-        "Embedding index",
-    )
-    if show_bias:
+    for lay in range(n_layers):
         plot_matrix(
-            axs[0, 1],
-            torch.einsum("kd->d", model.mlps[0].linear1.bias).unsqueeze(0)
-            if decompose_bias
-            else model.mlps[0].linear1.bias.unsqueeze(0),
-            "Bias, sum over k" if decompose_bias else "Bias (not decomposed)",
+            axs[0, ncols_per_layer * lay],
+            einops.einsum(model.mlps[lay].linear1.subnetwork_params, "k ... -> ..."),
+            f"Layer {lay} W_in, sum over k",
+            "Neuron index",
+            "Embedding index",
+        )
+        if show_bias:
+            plot_matrix(
+                axs[0, ncols_per_layer * lay + 1],
+                torch.einsum("kd->d", model.mlps[lay].linear1.bias).unsqueeze(0)
+                if decompose_bias
+                else model.mlps[lay].linear1.bias.unsqueeze(0),
+                f"Layer {lay} Bias, sum over k"
+                if decompose_bias
+                else f"Layer {lay} Bias (not decomposed)",
+                "Neuron index",
+                "",
+            )
+        else:
+            # Remove the frame
+            axs[0, ncols_per_layer * lay + 1].axis("off")
+        plot_matrix(
+            axs[0, ncols_per_layer * lay + 1 + show_bias],
+            einops.einsum(model.mlps[lay].linear2.subnetwork_params, "k ... -> ...").T,
+            f"Layer {lay} W_out.T, sum over k",
             "Neuron index",
             "",
         )
-    else:
-        # Remove the frame
-        axs[0, 1].axis("off")
-    plot_matrix(
-        axs[0, 1 + show_bias],
-        einops.einsum(model.mlps[0].linear2.subnetwork_params, "k ... -> ...").T,
-        "W_out.T, sum over k",
-        "Neuron index",
-        "",
-    )
-
     if slow_images:
         for k in range(model.k):
-            mlp = model.mlps[0]
-            W_in_k = mlp.linear1.subnetwork_params[k]
-            ax = axs[k + 1, 0]  # type: ignore
-            plot_matrix(ax, W_in_k, f"W_in_k, k={k}", "Neuron index", "Embedding index")
-            if decompose_bias and show_bias:
-                bias_k = mlp.linear1.bias[None, k]
-                ax = axs[k + 1, 1]  # type: ignore
-                plot_matrix(ax, bias_k, f"Bias_k, k={k}", "Neuron index", "")
-            elif show_bias:
-                # Remove the frame
-                axs[k + 1, 1].axis("off")
-            W_out_k = mlp.linear2.subnetwork_params[k].T
-            ax = axs[k + 1, 1 + show_bias]  # type: ignore
-            plot_matrix(ax, W_out_k, f"W_out_k.T, k={k}", "Neuron index", "")
+            for lay in range(n_layers):
+                mlp = model.mlps[lay]
+                W_in_k = mlp.linear1.subnetwork_params[k]
+                ax = axs[k + 1, ncols_per_layer * lay]  # type: ignore
+                plot_matrix(
+                    ax, W_in_k, f"Layer {lay} W_in_k, k={k}", "Neuron index", "Embedding index"
+                )
+                if decompose_bias and show_bias:
+                    bias_k = mlp.linear1.bias[None, k]
+                    ax = axs[k + 1, ncols_per_layer * lay + 1]  # type: ignore
+                    plot_matrix(ax, bias_k, f"Layer {lay} Bias_k, k={k}", "Neuron index", "")
+                elif show_bias:
+                    # Remove the frame
+                    axs[k + 1, ncols_per_layer * lay + 1].axis("off")
+                W_out_k = mlp.linear2.subnetwork_params[k].T
+                ax = axs[k + 1, ncols_per_layer * lay + 1 + show_bias]  # type: ignore
+                plot_matrix(ax, W_out_k, f"Layer {lay} W_out_k.T, k={k}", "Neuron index", "")
     return {"matrices_layer0": fig}
 
 
@@ -379,42 +384,46 @@ def plot_model_functions(
             )
         ax.plot(input_xs[s], model_output_spd[s], ls="-.", color=color3)
         k_cb = attribution_scores[s].mean(dim=0).argmax()
-        for k in range(n_functions):
-            # Find permutation
-            if k == k_cb:
-                ax_attrib.plot(
-                    input_xs[s],
-                    attribution_scores[s][:, k],
-                    color=color0,
-                    label=f"cb={cb}, k_cb={k}",
-                )
-                assert len(inner_acts) <= 2, "Didn't implement more than 2 SPD 'layers' yet"
-                for j, layer_name in enumerate(inner_acts.keys()):
-                    ls = ["-", "--"][j]
-                    if not isinstance(spd_model, PiecewiseFunctionSPDFullRankTransformer):
-                        ax_inner.plot(
-                            input_xs[s],
-                            inner_acts[layer_name].cpu().detach()[s][:, k],
-                            color=color0,
-                            ls=ls,
-                            label=f"cb={cb}, k_cb={k}" if j == 0 else None,
-                        )
-            else:
-                ax_attrib.plot(input_xs[s], attribution_scores[s][:, k], color=color0, alpha=0.2)
-                for j, layer_name in enumerate(inner_acts.keys()):
-                    ls = ["-", "--"][j]
-                    if not isinstance(spd_model, PiecewiseFunctionSPDFullRankTransformer):
-                        ax_inner.plot(
-                            input_xs[s],
-                            inner_acts[layer_name].cpu().detach()[s][:, k],
-                            color="k",
-                            ls=ls,
-                            lw=0.2,
-                        )
-    ax_inner.plot([], [], color=colors[0], label="W_in", ls="-")
-    ax_inner.plot([], [], color=colors[0], label="W_out", ls="--")
-    ax_inner.plot([], [], color="k", label="k!=k_cb", ls="-", lw=0.2)
-
+        if len(inner_acts) <= 2:
+            for k in range(n_functions):
+                # Find permutation
+                if k == k_cb:
+                    ax_attrib.plot(
+                        input_xs[s],
+                        attribution_scores[s][:, k],
+                        color=color0,
+                        label=f"cb={cb}, k_cb={k}",
+                    )
+                    assert len(inner_acts) <= 2, "Didn't implement more than 2 SPD 'layers' yet"
+                    for j, layer_name in enumerate(inner_acts.keys()):
+                        ls = ["-", "--"][j]
+                        if not isinstance(spd_model, PiecewiseFunctionSPDFullRankTransformer):
+                            ax_inner.plot(
+                                input_xs[s],
+                                inner_acts[layer_name].cpu().detach()[s][:, k],
+                                color=color0,
+                                ls=ls,
+                                label=f"cb={cb}, k_cb={k}" if j == 0 else None,
+                            )
+                else:
+                    ax_attrib.plot(
+                        input_xs[s], attribution_scores[s][:, k], color=color0, alpha=0.2
+                    )
+                    for j, layer_name in enumerate(inner_acts.keys()):
+                        ls = ["-", "--"][j]
+                        if not isinstance(spd_model, PiecewiseFunctionSPDFullRankTransformer):
+                            ax_inner.plot(
+                                input_xs[s],
+                                inner_acts[layer_name].cpu().detach()[s][:, k],
+                                color="k",
+                                ls=ls,
+                                lw=0.2,
+                            )
+        ax_inner.plot([], [], color=colors[0], label="W_in", ls="-")
+        ax_inner.plot([], [], color=colors[0], label="W_out", ls="--")
+        ax_inner.plot([], [], color="k", label="k!=k_cb", ls="-", lw=0.2)
+    else:
+        print("Skipping inner acts plot for more than 2 SPD 'layers'")
     # Add some additional (blue) legend lines explaining the different line styles
     ax.plot([], [], ls="--", color=colors[0], label="spd model topk")
     if model_output_hardcoded is not None:
