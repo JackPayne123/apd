@@ -479,15 +479,16 @@ def plot_model_functions(
         ax.plot([], [], ls="-", color=colors[1], label="target model")
         ax.plot([], [], ls=":", color=colors[2], label="true function")
     ax.plot([], [], ls="-.", color=colors[3], label="spd model")
-    ax.legend(ncol=3)
-    ax_attrib.legend(ncol=3)
-    ax_attrib.set_yscale("log")
-    ax_attrib.set_ylabel("attribution_scores (log)")
+    ax.legend(ncol=3, loc="lower left")
+    ax_attrib.legend(ncol=3, loc="lower left")
+    if attribution_scores.min() > 0:
+        ax_attrib.set_yscale("log")
+        ax_attrib.set_ylabel("attribution_scores (log)")
     ax_attrib.set_xlabel("x (model input dim 0)")
     ax_attrib.set_title(
         "Attributions of each subnetwork for every control bit case (k=k_cb in bold)"
     )
-    ax_inner.legend(ncol=3)
+    ax_inner.legend(ncol=3, loc="lower left")
     ax_inner.set_ylabel("inner acts (symlog)")
     ax_inner.set_title("'inner acts', coloured for the top subnetwork, black for the others")
     ax_inner.set_xlabel("x (model input dim 0)")

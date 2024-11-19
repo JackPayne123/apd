@@ -1081,6 +1081,7 @@ def optimize(
                     {k: wandb.Image(v) for k, v in fig_dict.items()},
                     step=step,
                 )
+            [plt.close(fig) for fig in fig_dict.values()]
 
         if (
             config.save_freq is not None

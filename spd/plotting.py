@@ -25,9 +25,12 @@ def plot_subnetwork_attributions_statistics(
     bars = ax.bar(bins[:-1], counts, align="center", width=0.8)
     ax.set_xticks(bins[:-1])
     ax.set_xticklabels([str(b) for b in bins[:-1]])
-    ax.set_title(f"Active subnetworks on current batch (batch_size={topk_mask.shape[0]})")
-    ax.set_xlabel("Number of active subnetworks")
-    ax.set_ylabel("Count")
+    ax.set_title(
+        f"Active subnetworks on current batch (batch_size={topk_mask.shape[0]})",
+        fontsize=8,
+    )
+    ax.set_xlabel("Number of active subnetworks", fontsize=14)
+    ax.set_ylabel("Count", fontsize=14)
 
     for bar in bars:
         height = bar.get_height()
