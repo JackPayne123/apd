@@ -12,6 +12,7 @@ from jaxtyping import Float
 from matplotlib.colors import CenteredNorm
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 from torch import Tensor
+from tqdm import tqdm
 
 from spd.experiments.piecewise.models import (
     PiecewiseFunctionSPDFullRankTransformer,
@@ -471,7 +472,7 @@ def plot_model_functions(
         ax_inner.plot([], [], color=colors[0], label="W_out", ls="--")
         ax_inner.plot([], [], color="k", label="k!=k_cb", ls="-", lw=0.2)
     else:
-        print("Skipping inner acts plot for more than 2 SPD 'layers'")
+        tqdm.write("Skipping inner acts plot for more than 2 SPD 'layers'")
     # Add some additional (blue) legend lines explaining the different line styles
     ax.plot([], [], ls="--", color=colors[0], label="spd model topk")
     if model_output_hardcoded is not None:
