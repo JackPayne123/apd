@@ -1,6 +1,6 @@
 wandb_project: spd-piecewise
 wandb_run_name: null
-wandb_run_name_prefix: "rp_"
+wandb_run_name_prefix: "4f_1l_rp_"
 spd_type: rank_penalty
 unit_norm_matrices: false
 seed: 0
@@ -23,7 +23,7 @@ lr_schedule: cosine
 task_config:
   task_name: piecewise
   n_functions: 4
-  neurons_per_function: 3
+  neurons_per_function: 10
   n_layers: 1
   feature_probability: 0.05
   range_min: 0
