@@ -12,12 +12,15 @@ def calc_labels(
     coeffs: Float[Tensor, " n_functions"],
     embed_matrix: Float[Tensor, "n_features d_embed"],
     inputs: Float[Tensor, "batch n_functions"],
+    act_fn_name: Literal["gelu", "relu"] = "gelu",
 ) -> Float[Tensor, "batch d_embed"]:
     """Calculate the corresponding labels for the inputs using W_E(gelu(coeffs*x) + x)."""
     weighted_inputs = einops.einsum(
         inputs, coeffs, "batch n_functions, n_functions -> batch n_functions"
     )
-    raw_labels = F.gelu(weighted_inputs) + inputs
+    assert act_fn_name in ["gelu", "relu"]
+    act_fn = F.gelu if act_fn_name == "gelu" else F.relu
+    raw_labels = act_fn(weighted_inputs) + inputs
     embedded_labels = einops.einsum(
         raw_labels, embed_matrix, "batch n_functions, n_functions d_embed -> batch d_embed"
     )
@@ -38,6 +41,7 @@ class ResidualLinearDataset(
         data_generation_type: Literal[
             "exactly_one_active", "at_least_zero_active"
         ] = "at_least_zero_active",
+        act_fn_name: Literal["gelu", "relu"] = "gelu",
     ):
         assert label_coeffs is not None or label_fn_seed is not None
         self.embed_matrix = embed_matrix.to(device)
@@ -49,7 +53,7 @@ class ResidualLinearDataset(
 
         if label_coeffs is None:
             # Create random coeffs between [1, 2]
-            gen = torch.Generator()
+            gen = torch.Generator(device=self.device)
             if self.label_fn_seed is not None:
                 gen.manual_seed(self.label_fn_seed)
             self.coeffs = (
@@ -58,7 +62,9 @@ class ResidualLinearDataset(
         else:
             self.coeffs = torch.tensor(label_coeffs, device=self.device)
 
-        self.label_fn = lambda inputs: calc_labels(self.coeffs, self.embed_matrix, inputs)
+        self.label_fn = lambda inputs: calc_labels(
+            self.coeffs, self.embed_matrix, inputs, act_fn_name=act_fn_name
+        )
 
     def __len__(self) -> int:
         return 2**31

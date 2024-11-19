@@ -1,6 +1,6 @@
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import einops
 import torch
@@ -24,12 +24,21 @@ from spd.utils import (
 
 
 class ResidualLinearModel(Model):
-    def __init__(self, n_features: int, d_embed: int, d_mlp: int, n_layers: int):
+    def __init__(
+        self,
+        n_features: int,
+        d_embed: int,
+        d_mlp: int,
+        n_layers: int,
+        act_fn_name: Literal["gelu", "relu"],
+    ):
         super().__init__()
         self.n_features = n_features
         self.d_embed = d_embed
         self.d_mlp = d_mlp
         self.n_layers = n_layers
+        assert act_fn_name in ["gelu", "relu"]
+        self.act_fn = F.gelu if act_fn_name == "gelu" else F.relu
 
         self.W_E = nn.Parameter(torch.empty(n_features, d_embed))
         init_param_(self.W_E)
@@ -37,7 +46,7 @@ class ResidualLinearModel(Model):
         self.W_E.data /= self.W_E.data.norm(dim=1, keepdim=True)
 
         self.layers = nn.ModuleList(
-            [MLP(d_model=d_embed, d_mlp=d_mlp, act_fn=F.gelu) for _ in range(n_layers)]
+            [MLP(d_model=d_embed, d_mlp=d_mlp, act_fn=self.act_fn) for _ in range(n_layers)]
         )
 
     def forward(
@@ -78,6 +87,7 @@ class ResidualLinearModel(Model):
             d_embed=config_dict["d_embed"],
             d_mlp=config_dict["d_mlp"],
             n_layers=config_dict["n_layers"],
+            act_fn_name=config_dict["act_fn"],
         )
         model.load_state_dict(params)
         return model, config_dict, label_coeffs

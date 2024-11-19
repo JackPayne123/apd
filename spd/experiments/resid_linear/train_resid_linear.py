@@ -2,13 +2,15 @@
 
 import json
 from pathlib import Path
-from typing import Literal
+from typing import Literal, Self
 
+import einops
+import matplotlib.pyplot as plt
 import torch
 import wandb
 import yaml
 from jaxtyping import Float
-from pydantic import BaseModel, ConfigDict, PositiveFloat, PositiveInt
+from pydantic import BaseModel, ConfigDict, PositiveFloat, PositiveInt, model_validator
 from torch import Tensor, nn
 from torch.nn import functional as F
 
@@ -36,6 +38,17 @@ class Config(BaseModel):
     print_freq: PositiveInt
     lr: PositiveFloat
     lr_schedule: Literal["linear", "constant", "cosine", "exponential"] = "constant"
+    random_embedding_matrix: bool = False
+    act_fn_name: Literal["gelu", "relu"] = "gelu"
+
+    @model_validator(mode="after")
+    def validate_model(self) -> Self:
+        if not self.random_embedding_matrix:
+            assert self.n_features == self.d_embed, (
+                "n_features must equal d_embed if we are not using a random "
+                "embedding matrix, since this will use an identity matrix"
+            )
+        return self
 
 
 def train(
@@ -48,9 +61,6 @@ def train(
     device: str,
     out_dir: Path | None = None,
 ) -> float | None:
-    if out_dir is not None:
-        out_dir.mkdir(parents=True, exist_ok=True)
-
     optimizer = torch.optim.AdamW(trainable_params, lr=config.lr, weight_decay=0.01)
 
     # Add this line to get the lr_schedule_fn
@@ -100,20 +110,22 @@ def train(
 
 
 if __name__ == "__main__":
-    device = "cpu"
+    device = "cuda" if torch.cuda.is_available() else "cpu"
     config = Config(
         seed=0,
         label_fn_seed=0,
-        n_features=5,
-        d_embed=5,
-        d_mlp=5,
+        n_features=40,
+        d_embed=20,
+        d_mlp=40,
         n_layers=1,
-        feature_probability=0.2,
-        batch_size=256,
-        steps=20_000,
+        feature_probability=0.05,
+        batch_size=1024,
+        steps=40_000,
         print_freq=100,
-        lr=1e-2,
+        lr=3e-3,
         lr_schedule="cosine",
+        random_embedding_matrix=True,
+        act_fn_name="gelu",
     )
 
     set_seed(config.seed)
@@ -128,19 +140,38 @@ if __name__ == "__main__":
         d_embed=config.d_embed,
         d_mlp=config.d_mlp,
         n_layers=config.n_layers,
+        act_fn_name=config.act_fn_name,
     ).to(device)
 
-    # Initialize with all positive values
-    for p in model.parameters():
-        p.data = p.data.abs()
-
-    # Make W_E the identity matrix
+    # Init embedding
     assert model.W_E.shape == (config.n_features, config.d_embed)
-    model.W_E.data[:, :] = torch.eye(config.d_embed, device=device)
+    if config.random_embedding_matrix:
+        model.W_E.data[:, :] = torch.randn(config.n_features, config.d_embed, device=device)
+        # Ensure they are norm 1
+        model.W_E.data /= model.W_E.data.norm(dim=1, keepdim=True)
+    else:
+        # Make W_E the identity matrix
+        model.W_E.data[:, :] = torch.eye(config.d_embed, device=device)
 
     # Don't train the Embedding matrix
     model.W_E.requires_grad = False
     trainable_params = [p for n, p in model.named_parameters() if "W_E" not in n]
+
+    out_dir.mkdir(parents=True, exist_ok=True)
+    # Plot the cosine similarities of each n_features rows of the embedding matrix.
+    # Plot a histogram of the angles between each pair of rows.
+    if config.random_embedding_matrix:
+        cosine_similarities = einops.einsum(
+            model.W_E,
+            model.W_E,
+            "n_features_0 d_embed, n_features_1 d_embed -> n_features_0 n_features_1",
+        )
+        # Zero out the diagonal
+        cosine_similarities[torch.arange(config.n_features), torch.arange(config.n_features)] = 0
+        plt.hist(cosine_similarities.flatten().tolist())
+        plt.savefig(out_dir / "cosine_similarities.png")
+        print(f"Saved cosine similarities to {out_dir / 'cosine_similarities.png'}")
+        plt.close()
 
     dataset = ResidualLinearDataset(
         embed_matrix=model.W_E,
@@ -148,6 +179,7 @@ if __name__ == "__main__":
         feature_probability=config.feature_probability,
         device=device,
         label_fn_seed=config.label_fn_seed,
+        act_fn_name=config.act_fn_name,
     )
     dataloader = DatasetGeneratedDataLoader(dataset, batch_size=config.batch_size, shuffle=False)
     train(
