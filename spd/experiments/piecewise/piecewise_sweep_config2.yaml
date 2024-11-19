@@ -19,4 +19,4 @@ command:
 - ${env}
 - ${interpreter}
 - ${program}
-- spd/experiments/piecewise/sweep.yaml
+- spd/experiments/piecewise/sweep2.yaml
