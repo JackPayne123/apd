@@ -87,7 +87,7 @@ class ResidualLinearModel(Model):
             d_embed=config_dict["d_embed"],
             d_mlp=config_dict["d_mlp"],
             n_layers=config_dict["n_layers"],
-            act_fn_name=config_dict["act_fn"],
+            act_fn_name=config_dict["act_fn_name"],
         )
         model.load_state_dict(params)
         return model, config_dict, label_coeffs
