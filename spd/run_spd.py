@@ -539,7 +539,7 @@ def calc_lp_sparsity_loss_rank_one(
     inner_acts: dict[str, Float[Tensor, "batch n_instances k"] | Float[Tensor, "batch k"]],
     B_params: dict[str, Float[Tensor, "n_instances k d_out"] | Float[Tensor, "k d_out"]],
     step_pnorm: float,
-) -> Float[Tensor, " batch"] | Float[Tensor, "batch n_instances"]:
+) -> Float[Tensor, "batch k"] | Float[Tensor, "batch n_instances k"]:
     """Calculate the Lp sparsity loss on the attributions (inner_acts * d(out)/d(inner_acts).
 
     Note that this always uses the gradient form of the attributions. We do not support other
@@ -566,7 +566,7 @@ def calc_lp_sparsity_loss_rank_one(
 
     Returns:
         The Lp sparsity loss. Will have an n_instances dimension if the model has an n_instances
-            dimension. Note that we keep the batch dimension as we need it if calculating
+            dimension. Note that we keep the batch and k dimensions as we need them if calculating
             the schatten loss.
     """
     assert layer_acts.keys() == inner_acts.keys() == B_params.keys()
@@ -592,15 +592,15 @@ def calc_lp_sparsity_loss_rank_one(
     attributions = attributions / out.shape[-1]
 
     # step_pnorm * 0.5 is because we have the squares of sparsity_inner terms above
-    lp_sparsity_loss = ((attributions.abs() + 1e-16) ** (step_pnorm * 0.5)).sum(dim=-1)
+    lp_sparsity_loss = (attributions.abs() + 1e-16) ** (step_pnorm * 0.5)
     return lp_sparsity_loss
 
 
 def calc_lp_sparsity_loss_full_rank(
     out: Float[Tensor, "batch n_instances d_model_out"] | Float[Tensor, "batch d_model_out"],
-    attributions: Float[Tensor, "batch n_instances k d_out"] | Float[Tensor, "batch k d_out"],
+    attributions: Float[Tensor, "batch n_instances k"] | Float[Tensor, "batch k"],
     step_pnorm: float,
-) -> Float[Tensor, " batch"] | Float[Tensor, "batch n_instances"]:
+) -> Float[Tensor, "batch k"] | Float[Tensor, "batch n_instances k"]:
     """Calculate the Lp sparsity loss on the attributions (inner_acts * d(out)/d(inner_acts).
 
     Args:
@@ -609,7 +609,7 @@ def calc_lp_sparsity_loss_full_rank(
         step_pnorm: The pnorm to use for the sparsity loss.
     Returns:
         The Lp sparsity loss. Will have an n_instances dimension if the model has an n_instances
-            dimension. Note that we keep the batch dimension as we need it if calculating
+            dimension. Note that we keep the batch and k dimensions as we need them if calculating
             the schatten loss.
     """
     # Average the attributions over the output dimensions
@@ -617,7 +617,7 @@ def calc_lp_sparsity_loss_full_rank(
     attributions = attributions / d_model_out
 
     # step_pnorm * 0.5 is because we have the squares of sparsity_inner terms above
-    lp_sparsity_loss = ((attributions.abs() + 1e-16) ** (step_pnorm * 0.5)).sum(dim=-1)
+    lp_sparsity_loss = (attributions.abs() + 1e-16) ** (step_pnorm * 0.5)
     return lp_sparsity_loss
 
 
@@ -960,16 +960,19 @@ def optimize(
         if config.schatten_coeff is not None:
             assert isinstance(
                 model, SPDRankPenaltyModel
-            ), "Schatten loss only supported for SPDRankPenaltyModel"
+            ), "Schatten only supported for SPDRankPenaltyModel"
             mask = topk_mask if topk_mask is not None else lp_sparsity_loss
             assert mask is not None
+            schatten_pnorm = config.schatten_pnorm if config.schatten_pnorm is not None else 1.0
             # Use the attributions as the mask in the lp case, and topk_mask otherwise
-            schatten_loss = calc_schatten_loss(
+            schatten_loss_per_k = calc_schatten_loss(
                 As_and_Bs_vals=list(model.all_As_and_Bs().values()),
                 mask=mask,
-                p=config.schatten_pnorm if config.schatten_pnorm is not None else 1.0,
+                p=schatten_pnorm,
                 n_params=n_params,
             )
+            # Sum over the k dimension (-1) and mean over the batch dimension (0)
+            schatten_loss = schatten_loss_per_k.sum(dim=-1).mean(dim=0)
 
         # Add up the loss terms
         loss = torch.tensor(0.0, device=device)
