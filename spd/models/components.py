@@ -94,12 +94,14 @@ class ParamComponentsFullRank(nn.Module):
 
 
 class MLP(nn.Module):
-    def __init__(self, d_model: int, d_mlp: int, act_fn: Callable[[Tensor], Tensor] = F.relu):
+    def __init__(
+        self, d_model: int, d_mlp: int, act_fn: Callable[[Tensor], Tensor] = F.relu, bias=True
+    ):
         super().__init__()
         self.d_model = d_model
         self.d_mlp = d_mlp
-        self.input_layer = nn.Linear(d_model, d_mlp)
-        self.output_layer = nn.Linear(d_mlp, d_model)
+        self.input_layer = nn.Linear(d_model, d_mlp, bias=bias)
+        self.output_layer = nn.Linear(d_mlp, d_model, bias=bias)
         self.act_fn = act_fn
 
     def forward(
