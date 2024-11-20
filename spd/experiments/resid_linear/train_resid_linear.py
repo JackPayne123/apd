@@ -114,9 +114,9 @@ if __name__ == "__main__":
     config = Config(
         seed=0,
         label_fn_seed=0,
-        n_features=40,
-        d_embed=20,
-        d_mlp=40,
+        n_features=100,
+        d_embed=200,
+        d_mlp=50,
         n_layers=1,
         feature_probability=0.01,
         batch_size=2048,
@@ -125,7 +125,7 @@ if __name__ == "__main__":
         lr=3e-3,
         lr_schedule="cosine",
         random_embedding_matrix=True,
-        act_fn_name="gelu",
+        act_fn_name="relu",
     )
 
     set_seed(config.seed)
@@ -173,6 +173,7 @@ if __name__ == "__main__":
         print(f"Saved cosine similarities to {out_dir / 'cosine_similarities.png'}")
         plt.close()
 
+    fixed_coeffs = [1.0] * config.n_features
     dataset = ResidualLinearDataset(
         embed_matrix=model.W_E,
         n_features=config.n_features,
@@ -180,6 +181,7 @@ if __name__ == "__main__":
         device=device,
         label_fn_seed=config.label_fn_seed,
         act_fn_name=config.act_fn_name,
+        label_coeffs=fixed_coeffs,
     )
     dataloader = DatasetGeneratedDataLoader(dataset, batch_size=config.batch_size, shuffle=False)
     train(
