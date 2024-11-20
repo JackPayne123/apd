@@ -592,8 +592,8 @@ def calc_lp_sparsity_loss_rank_one(
     attributions = attributions / out.shape[-1]
 
     # step_pnorm * 0.5 is because we have the squares of sparsity_inner terms above
-    lp_sparsity_loss = (attributions.abs() + 1e-16) ** (step_pnorm * 0.5)
-    return lp_sparsity_loss
+    lp_sparsity_loss_per_k = (attributions.abs() + 1e-16) ** (step_pnorm * 0.5)
+    return lp_sparsity_loss_per_k
 
 
 def calc_lp_sparsity_loss_full_rank(
@@ -617,8 +617,8 @@ def calc_lp_sparsity_loss_full_rank(
     attributions = attributions / d_model_out
 
     # step_pnorm * 0.5 is because we have the squares of sparsity_inner terms above
-    lp_sparsity_loss = (attributions.abs() + 1e-16) ** (step_pnorm * 0.5)
-    return lp_sparsity_loss
+    lp_sparsity_loss_per_k = (attributions.abs() + 1e-16) ** (step_pnorm * 0.5)
+    return lp_sparsity_loss_per_k
 
 
 def calc_topk_param_attrib_loss(
@@ -875,11 +875,12 @@ def optimize(
             attribution_type=config.attribution_type,
             spd_type=config.spd_type,
         )
-        lp_sparsity_loss = None
+
+        lp_sparsity_loss_per_k = None
         if config.lp_sparsity_coeff is not None:
             step_pnorm = config.pnorm or get_step_pnorm(step, config.steps, config.pnorm_end)
             if config.spd_type == "rank_one":
-                lp_sparsity_loss = calc_lp_sparsity_loss_rank_one(
+                lp_sparsity_loss_per_k = calc_lp_sparsity_loss_rank_one(
                     out=out,
                     layer_acts=layer_acts,
                     inner_acts=inner_acts,
@@ -887,7 +888,7 @@ def optimize(
                     step_pnorm=step_pnorm,
                 )
             else:
-                lp_sparsity_loss = calc_lp_sparsity_loss_full_rank(
+                lp_sparsity_loss_per_k = calc_lp_sparsity_loss_full_rank(
                     out=out, attributions=attributions, step_pnorm=step_pnorm
                 )
 
@@ -961,18 +962,23 @@ def optimize(
             assert isinstance(
                 model, SPDRankPenaltyModel
             ), "Schatten only supported for SPDRankPenaltyModel"
-            mask = topk_mask if topk_mask is not None else lp_sparsity_loss
+            mask = topk_mask if topk_mask is not None else lp_sparsity_loss_per_k
             assert mask is not None
             schatten_pnorm = config.schatten_pnorm if config.schatten_pnorm is not None else 1.0
             # Use the attributions as the mask in the lp case, and topk_mask otherwise
-            schatten_loss_per_k = calc_schatten_loss(
+            schatten_loss = calc_schatten_loss(
                 As_and_Bs_vals=list(model.all_As_and_Bs().values()),
                 mask=mask,
                 p=schatten_pnorm,
                 n_params=n_params,
             )
-            # Sum over the k dimension (-1) and mean over the batch dimension (0)
-            schatten_loss = schatten_loss_per_k.sum(dim=-1).mean(dim=0)
+
+        # Sum over the k dimension (-1) and mean over the batch dimension (0)
+        lp_sparsity_loss = (
+            lp_sparsity_loss_per_k.sum(dim=-1).mean(dim=0)
+            if lp_sparsity_loss_per_k is not None
+            else None
+        )
 
         # Add up the loss terms
         loss = torch.tensor(0.0, device=device)
@@ -1012,7 +1018,7 @@ def optimize(
             if step_pnorm is not None:
                 tqdm.write(f"Current pnorm:{nl}{step_pnorm}")
             if lp_sparsity_loss is not None:
-                tqdm.write(f"LP sparsity loss:{nl}{lp_sparsity_loss.mean(dim=0)}")
+                tqdm.write(f"LP sparsity loss:{nl}{lp_sparsity_loss}")
             if topk_recon_loss is not None:
                 tqdm.write(f"Topk recon loss:{nl}{topk_recon_loss}")
             tqdm.write(f"Out recon loss:{nl}{out_recon_loss}")
