@@ -108,6 +108,7 @@ class Config(BaseModel):
     topk_recon_coeff: NonNegativeFloat | None = None
     topk_l2_coeff: NonNegativeFloat | None = None
     schatten_coeff: NonNegativeFloat | None = None
+    schatten_pnorm: NonNegativeFloat | None = None
     lp_sparsity_coeff: NonNegativeFloat | None = None
     topk_param_attrib_coeff: NonNegativeFloat | None = None
     distil_from_target: bool = False
@@ -194,6 +195,9 @@ class Config(BaseModel):
             assert (
                 self.spd_type == "rank_penalty"
             ), "schatten_coeff is not None but spd_type is not rank_penalty"
+            assert (
+                self.schatten_pnorm is not None
+            ), "schatten_pnorm must be set if schatten_coeff is set"
 
         if self.topk_param_attrib_coeff is not None and not isinstance(
             self.task_config, PiecewiseConfig
@@ -959,12 +963,11 @@ def optimize(
             ), "Schatten loss only supported for SPDRankPenaltyModel"
             mask = topk_mask if topk_mask is not None else lp_sparsity_loss
             assert mask is not None
-            pnorm = config.pnorm if config.pnorm is not None else 1.0
             # Use the attributions as the mask in the lp case, and topk_mask otherwise
             schatten_loss = calc_schatten_loss(
                 As_and_Bs_vals=list(model.all_As_and_Bs().values()),
                 mask=mask,
-                p=pnorm,
+                p=config.schatten_pnorm if config.schatten_pnorm is not None else 1.0,
                 n_params=n_params,
             )
 
