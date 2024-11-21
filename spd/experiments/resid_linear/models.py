@@ -127,8 +127,8 @@ class ResidualLinearSPDFullRankModel(SPDFullRankModel):
                     d_mlp=d_mlp,
                     k=k,
                     init_scale=init_scale,
-                    in_bias=True,
-                    out_bias=True,
+                    in_bias=False,
+                    out_bias=False,
                     act_fn=F.gelu,
                 )
                 for _ in range(n_layers)
@@ -318,8 +318,8 @@ class ResidualLinearSPDRankPenaltyModel(SPDRankPenaltyModel):
                     d_mlp=d_mlp,
                     k=k,
                     init_scale=init_scale,
-                    in_bias=True,
-                    out_bias=True,
+                    in_bias=False,
+                    out_bias=False,
                     act_fn=F.gelu,
                 )
                 for _ in range(n_layers)
