@@ -39,6 +39,7 @@ dataset = ResidualLinearDataset(
     data_generation_type="exactly_one_active",
 )
 batch, labels = dataset.generate_batch(task_config["batch_size"])
+# %%
 # batch2, labels2 = dataset.generate_batch(task_config["batch_size"])
 # batch = batch + batch2
 # labels = labels + labels2
@@ -562,7 +563,12 @@ for f in range(model.n_features):
         mlp_out, model.W_E, "batch d_embed, n_features d_embed  -> batch n_features"
     )
     print(feature_out.shape)
-    plt.plot(feature_out[0, :].detach().cpu().numpy() / batch[0, f].detach().cpu().numpy())
+    cmap_viridis = plt.get_cmap("viridis")
+    color = cmap_viridis(f / model.n_features)
+    plt.plot(
+        feature_out[0, :].detach().cpu().numpy() / batch[0, f].detach().cpu().numpy(),
+        color=color,
+    )
 plt.show()
 
 # %% Now for 2 features:
@@ -583,10 +589,38 @@ for f1 in tqdm(range(model.n_features)):
         signal = min(feature_out[0, f1].abs(), feature_out[0, f2].abs())
         noise = feature_out[0, :].std()
         SNR[f1, f2] = signal / noise
+        plt.plot(feature_out[0, :].detach().cpu().numpy(), color=color)
+        plt.show()
 
 plt.imshow(SNR.cpu().detach())
 plt.colorbar()
 plt.title("SNR for each pair of features")
 plt.show()
-# %%
+# %% Now for 1 on 1 off
+
+batch, labels = dataset.generate_batch(task_config["batch_size"])
+SNR = torch.zeros(model.n_features, model.n_features)
+for f1 in tqdm(range(model.n_features)):
+    for f2 in range(model.n_features):
+        if f1 == f2:
+            continue
+        batch = torch.zeros_like(batch)
+        batch[:, f1] = -1 + 2 * 0.75  # torch.rand_like(batch[:, f1])
+        batch[:, f2] = -1 + 2 * 0.25  # torch.rand_like(batch[:, f2])
+        out, pre_acts, _ = model(batch)
+        embed = pre_acts["layers.0.input_layer.weight"]
+        mlp_out = out - embed
+        feature_out = einops.einsum(
+            mlp_out, model.W_E, "batch d_embed, n_features d_embed  -> batch n_features"
+        )
+        signal = feature_out[0, f1]
+        noise = feature_out[0, :].std()
+        SNR[f1, f2] = signal / noise
+        plt.plot(feature_out[0, :].detach().cpu().numpy(), color=color)
+        plt.show()
+
+plt.imshow(SNR.cpu().detach())
+plt.colorbar()
+plt.title("SNR for each pair of features")
+plt.show()
 # %%
