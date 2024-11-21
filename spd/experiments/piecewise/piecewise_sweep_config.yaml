@@ -5,18 +5,17 @@ metric:
   goal: minimize
 parameters:
   # lr:
-  #   values: [0.01, 1e-3, 3e-3]
-  # topk_recon_coeff:
-  #   values: [1, 0.5, 5.0]
-  topk_schatten_coeff:
-    values: [1e2, 1e1, 5, 3, 1]
-  # param_match_coeff:
-  #   values: [0.5, 0.1, 2.0]
-  # pnorm:
-  #   values: [1.0, 0.5, 0.7]
-
+  #   values: [1e-3]
+  pnorm:
+    values: [0.3]
+  schatten_coeff:
+    values: [1e2, 1e1, 1]
+  lp_sparsity_coeff:
+    values: [1e2, 1e1, 1]
+  out_recon_coeff:
+    values: [1e3, 1e1]
 command:
 - ${env}
 - ${interpreter}
 - ${program}
-- spd/experiments/piecewise/piecewise_4f_2l_rank_penalty_config.yaml
+- spd/experiments/piecewise/piecewise_rank_penalty_config.yaml
