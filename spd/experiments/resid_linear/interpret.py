@@ -24,7 +24,7 @@ set_seed(0)  # You can change this seed if needed
 # Load model and config
 path = (
     "/data/stefan_heimersheim/projects/SPD/spd/spd/experiments/resid_linear/out/"
-    "resid_linear_identity_n-features100_d-resid200_d-mlp50_n-layers1_seed0/target_model.pth"
+    "resid_linear_identity_n-features100_d-resid1000_d-mlp50_n-layers1_seed0/target_model.pth"
 )
 model, task_config, label_coeffs = ResidualLinearModel.from_pretrained(path)
 print(task_config)
@@ -285,6 +285,7 @@ plt.show()
 # %%
 # Inverted version of the plot above: For each feature, plot the connection strength of the topk
 # ReLUs
+# Stefan's fav plot
 plt.figure(figsize=(40, 5))
 plt.axvline(-0.5, color="k", linestyle="--", alpha=0.3, lw=0.5)
 for i in range(model.n_features):
@@ -589,8 +590,6 @@ for f1 in tqdm(range(model.n_features)):
         signal = min(feature_out[0, f1].abs(), feature_out[0, f2].abs())
         noise = feature_out[0, :].std()
         SNR[f1, f2] = signal / noise
-        plt.plot(feature_out[0, :].detach().cpu().numpy(), color=color)
-        plt.show()
 
 plt.imshow(SNR.cpu().detach())
 plt.colorbar()
@@ -616,8 +615,6 @@ for f1 in tqdm(range(model.n_features)):
         signal = feature_out[0, f1]
         noise = feature_out[0, :].std()
         SNR[f1, f2] = signal / noise
-        plt.plot(feature_out[0, :].detach().cpu().numpy(), color=color)
-        plt.show()
 
 plt.imshow(SNR.cpu().detach())
 plt.colorbar()
