@@ -80,7 +80,10 @@ def train(
         batch = batch.to(device)
         labels = labels.to(device)
         out, _, _ = model(batch)
-        loss = F.mse_loss(out, labels)
+        # Variant that attempts read-off before MSE:
+        # labels = batch + torch.relu(batch)
+        # out = einops.einsum(out, model.W_E, "batch d_embed, n_features d_embed -> batch n_features")
+        loss = F.mse_loss(out, labels) * out.shape[-1]  # correct for mean in mse_loss
         loss.backward()
         optimizer.step()
         final_loss = loss.item()
