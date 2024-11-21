@@ -17,7 +17,6 @@ from matplotlib.colors import CenteredNorm
 from torch import Tensor
 from tqdm import tqdm
 
-from spd.experiments.piecewise.plotting import plot_matrix
 from spd.experiments.resid_linear.models import (
     ResidualLinearModel,
     ResidualLinearSPDFullRankModel,
@@ -171,6 +170,7 @@ def resid_linear_plot_results_fn(
         tuple[Float[Tensor, "batch n_features"], Float[Tensor, "batch d_embed"]]
     ]
     | None = None,
+    plot_max_k: int = 100,
     **_,
 ) -> dict[str, plt.Figure]:
     assert isinstance(config.task_config, ResidualLinearConfig)
@@ -209,8 +209,9 @@ def resid_linear_plot_results_fn(
     # )
 
     # Connection figures
-    fig1, axes = plt.subplots(nrows=k, figsize=(40, 5 * k))
-    for ki in range(k):
+    k_plot = min(k, plot_max_k)
+    fig1, axes = plt.subplots(nrows=k_plot, figsize=(20, 2 * k_plot))
+    for ki in range(k_plot):
         ax1 = axes[ki]
         ax1.axvline(-0.5, color="k", linestyle="--", alpha=0.3, lw=0.5)
         for i in range(model.n_features):
@@ -227,8 +228,8 @@ def resid_linear_plot_results_fn(
         ax1.set_ylabel("Connection strength for all ReLUs")
     fig_dict["connections_features"] = fig1
 
-    fig2, axes = plt.subplots(nrows=k, figsize=(20, 5 * k))
-    for ki in range(k):
+    fig2, axes = plt.subplots(nrows=k_plot, figsize=(20, 2 * k_plot))
+    for ki in range(k_plot):
         ax2 = axes[ki]
         ax2.axvline(-0.5, color="k", linestyle="--", alpha=0.3, lw=0.5)
         for i in range(model.d_mlp):
