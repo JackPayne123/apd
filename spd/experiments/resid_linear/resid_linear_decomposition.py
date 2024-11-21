@@ -5,6 +5,7 @@ from functools import partial
 from pathlib import Path
 from typing import Any
 
+import einops
 import fire
 import matplotlib.pyplot as plt
 import numpy as np
@@ -16,6 +17,7 @@ from matplotlib.colors import CenteredNorm
 from torch import Tensor
 from tqdm import tqdm
 
+from spd.experiments.piecewise.plotting import plot_matrix
 from spd.experiments.resid_linear.models import (
     ResidualLinearModel,
     ResidualLinearSPDFullRankModel,
@@ -159,6 +161,7 @@ def plot_multiple_subnetwork_params(
 
 def resid_linear_plot_results_fn(
     model: ResidualLinearSPDFullRankModel | ResidualLinearSPDRankPenaltyModel,
+    target_model: ResidualLinearModel,
     step: int | None,
     out_dir: Path | None,
     device: str,
@@ -178,6 +181,71 @@ def resid_linear_plot_results_fn(
     fig_dict["subnetwork_attributions"] = plot_subnetwork_attributions(
         attribution_scores, out_dir, step
     )
+
+    W_E: Float[Tensor, "n_features d_embed"] = target_model.W_E
+    assert W_E.ndim == 2
+    n_features, d_embed = W_E.shape
+    W_in: Float[Tensor, "k d_embed d_mlp"] = model.layers[0].linear1.subnetwork_params
+    k = W_in.shape[0]
+    assert W_in.shape == (k, d_embed, model.d_mlp)
+    W_out: Float[Tensor, "k d_mlp d_embed"] = model.layers[0].linear2.subnetwork_params
+    assert W_out.shape == (k, model.d_mlp, d_embed)
+    in_conns: Float[Tensor, "k n_features d_mlp"] = einops.einsum(
+        W_E, W_in, "n_features d_embed, k d_embed d_mlp -> k n_features d_mlp"
+    )
+    out_conns: Float[Tensor, "k d_mlp n_features"] = einops.einsum(
+        W_out, W_E, "k d_mlp d_embed, n_features d_embed -> k d_mlp n_features"
+    )
+    relu_conns_diag: Float[Tensor, "k n_features d_mlp"] = einops.einsum(
+        in_conns,
+        out_conns,
+        "k n_features d_mlp, k d_mlp n_features -> k n_features d_mlp",
+    )
+    relu_conns_diag = relu_conns_diag.detach().cpu().numpy()
+    # relu_conns: Float[Tensor, "n_features n_features"] = einops.einsum(
+    #     in_conns,
+    #     out_conns,
+    #     "n_features_in d_mlp, d_mlp n_features_out -> n_features_in n_features_out d_mlp",
+    # )
+
+    # Connection figures
+    fig1, axes = plt.subplots(nrows=k, figsize=(40, 5 * k))
+    for ki in range(k):
+        ax1 = axes[ki]
+        ax1.axvline(-0.5, color="k", linestyle="--", alpha=0.3, lw=0.5)
+        for i in range(model.n_features):
+            ax1.scatter([i] * model.d_mlp, relu_conns_diag[ki, i, :], alpha=0.3, marker=".", c="k")
+            ax1.axvline(i + 0.5, color="k", linestyle="--", alpha=0.3, lw=0.5)
+            for j in range(model.d_mlp):
+                if relu_conns_diag[ki, i, j] > 0.1:
+                    cmap_label = plt.get_cmap("hsv")
+                    ax1.text(
+                        i, relu_conns_diag[ki, i, j], str(j), color=cmap_label(j / model.d_mlp)
+                    )
+        ax1.axhline(0, color="k", linestyle="--", alpha=0.3)
+        ax1.set_xlabel("Features")
+        ax1.set_ylabel("Connection strength for all ReLUs")
+    fig_dict["connections_features"] = fig1
+
+    fig2, axes = plt.subplots(nrows=k, figsize=(20, 5 * k))
+    for ki in range(k):
+        ax2 = axes[ki]
+        ax2.axvline(-0.5, color="k", linestyle="--", alpha=0.3, lw=0.5)
+        for i in range(model.d_mlp):
+            ax2.scatter(
+                [i] * model.n_features, relu_conns_diag[ki, :, i], alpha=0.3, marker=".", c="k"
+            )
+            ax2.axvline(i + 0.5, color="k", linestyle="--", alpha=0.3, lw=0.5)
+            for j in range(model.n_features):
+                if relu_conns_diag[ki, j, i] > 0.2:
+                    cmap_label = plt.get_cmap("hsv")
+                    ax2.text(
+                        i, relu_conns_diag[ki, j, i], str(j), color=cmap_label(j / model.n_features)
+                    )
+        ax2.axhline(0, color="k", linestyle="--", alpha=0.3)
+        ax2.set_xlabel("ReLUs")
+        ax2.set_ylabel("Connection strength for all features")
+    fig_dict["connections_relus"] = fig2
 
     if config.topk is not None:
         if dataloader is not None and config.task_config.k > 1:
