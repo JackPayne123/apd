@@ -1,6 +1,7 @@
 from typing import Literal
 
 import einops
+import numpy as np
 import torch
 import torch.nn.functional as F
 from jaxtyping import Float
@@ -39,7 +40,10 @@ class ResidualLinearDataset(
         label_fn_seed: int | None = None,
         label_coeffs: list[float] | None = None,
         data_generation_type: Literal[
-            "exactly_one_active", "at_least_zero_active"
+            "exactly_one_active",
+            "exactly_two_active",
+            "exactly_three_active",
+            "at_least_zero_active",
         ] = "at_least_zero_active",
         act_fn_name: Literal["gelu", "relu"] = "gelu",
     ):
@@ -73,7 +77,11 @@ class ResidualLinearDataset(
         self, batch_size: int
     ) -> tuple[Float[Tensor, "batch n_features"], Float[Tensor, "batch d_embed"]]:
         if self.data_generation_type == "exactly_one_active":
-            batch = self._generate_one_feature_active_batch(batch_size)
+            batch = self._generate_n_feature_active_batch(batch_size, 1)
+        elif self.data_generation_type == "exactly_two_active":
+            batch = self._generate_n_feature_active_batch(batch_size, 2)
+        elif self.data_generation_type == "exactly_three_active":
+            batch = self._generate_n_feature_active_batch(batch_size, 3)
         elif self.data_generation_type == "at_least_zero_active":
             batch = self._generate_multi_feature_batch(batch_size)
         else:
@@ -82,15 +90,15 @@ class ResidualLinearDataset(
         labels = self.label_fn(batch)
         return batch, labels
 
-    def _generate_one_feature_active_batch(
-        self, batch_size: int
+    def _generate_n_feature_active_batch(
+        self, batch_size: int, n_active_features: int
     ) -> Float[Tensor, "batch n_features"]:
         batch = torch.zeros(batch_size, self.n_features, device=self.device)
-        active_features = torch.randint(0, self.n_features, (batch_size,), device=self.device)
-        # Generate random values in [-1, 1] for active features
-        batch[torch.arange(batch_size), active_features] = (
-            torch.rand(batch_size, device=self.device) * 2 - 1
-        )
+        for i in range(batch_size):
+            # Choose feature indices
+            active_features = np.random.choice(self.n_features, n_active_features, replace=False)
+            # Generate random values in [-1, 1] for active features
+            batch[i, active_features] = torch.rand(n_active_features, device=self.device) * 2 - 1
         return batch
 
     def _generate_multi_feature_batch(self, batch_size: int) -> Float[Tensor, "batch n_features"]:

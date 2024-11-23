@@ -56,7 +56,7 @@ def test_resid_linear_rank_penalty_decomposition_happy_path() -> None:
     assert isinstance(config.task_config, ResidualLinearConfig)
     # Create a pretrained model
     pretrained_model = ResidualLinearModel(
-        n_features=n_features, d_embed=d_embed, d_mlp=d_mlp, n_layers=n_layers
+        n_features=n_features, d_embed=d_embed, d_mlp=d_mlp, n_layers=n_layers, act_fn_name="relu"
     ).to(device)
 
     # Create the SPD model
@@ -138,7 +138,7 @@ def test_resid_linear_spd_equivalence() -> None:
     device = "cpu"
 
     target_model = ResidualLinearModel(
-        n_features=n_features, d_embed=d_embed, d_mlp=d_mlp, n_layers=n_layers
+        n_features=n_features, d_embed=d_embed, d_mlp=d_mlp, n_layers=n_layers, act_fn_name="relu"
     ).to(device)
 
     # Init all params to random values
@@ -296,3 +296,46 @@ def test_resid_linear_spd_rank_penalty_full_rank_equivalence() -> None:
         assert torch.allclose(
             full_rank_act, rank_penalty_act, atol=1e-6
         ), f"Activations do not match for layer {layer_name}"
+
+
+def test_resid_linear_dataset_n_feature_active_batch() -> None:
+    set_seed(0)
+    n_features = 17
+    W_E = torch.eye(n_features)
+    dataset = ResidualLinearDataset(
+        embed_matrix=W_E,
+        n_features=n_features,
+        feature_probability=0.1,
+        device="cpu",
+        label_coeffs=[1.0] * n_features,
+        data_generation_type="exactly_one_active",
+    )
+    batch, labels = dataset.generate_batch(4)
+    assert batch.shape == (4, n_features)
+    assert labels.shape == (4, n_features)
+    print(batch)
+    assert (batch != 0).sum(dim=-1).unique() == torch.tensor([1])
+
+    dataset = ResidualLinearDataset(
+        embed_matrix=W_E,
+        n_features=n_features,
+        feature_probability=0.1,
+        device="cpu",
+        label_coeffs=[1.0] * n_features,
+        data_generation_type="exactly_two_active",
+    )
+    batch, labels = dataset.generate_batch(4)
+    print(batch)
+    assert (batch != 0).sum(dim=-1).unique() == torch.tensor([2])
+
+    dataset = ResidualLinearDataset(
+        embed_matrix=W_E,
+        n_features=n_features,
+        feature_probability=0.1,
+        device="cpu",
+        label_coeffs=[1.0] * n_features,
+        data_generation_type="exactly_three_active",
+    )
+    batch, labels = dataset.generate_batch(4)
+    print(batch)
+    assert (batch != 0).sum(dim=-1).unique() == torch.tensor([3])
