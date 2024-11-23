@@ -112,25 +112,7 @@ def train(
     return final_loss
 
 
-if __name__ == "__main__":
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    config = Config(
-        seed=0,
-        label_fn_seed=0,
-        n_features=100,
-        d_embed=200,
-        d_mlp=50,
-        n_layers=1,
-        feature_probability=0.01,
-        batch_size=2048,
-        steps=20_000,
-        print_freq=100,
-        lr=3e-3,
-        lr_schedule="cosine",
-        random_embedding_matrix=True,
-        act_fn_name="relu",
-    )
-
+def training_run(config: Config, device: str) -> float | None:
     set_seed(config.seed)
     run_name = (
         f"resid_linear_identity_n-features{config.n_features}_d-resid{config.d_embed}_"
@@ -187,7 +169,7 @@ if __name__ == "__main__":
         label_coeffs=fixed_coeffs,
     )
     dataloader = DatasetGeneratedDataLoader(dataset, batch_size=config.batch_size, shuffle=False)
-    train(
+    return train(
         config=config,
         model=model,
         trainable_params=trainable_params,
@@ -195,3 +177,24 @@ if __name__ == "__main__":
         device=device,
         out_dir=out_dir,
     )
+
+
+if __name__ == "__main__":
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    config = Config(
+        seed=0,
+        label_fn_seed=0,
+        n_features=100,
+        d_embed=200,
+        d_mlp=50,
+        n_layers=1,
+        feature_probability=0.01,
+        batch_size=2048,
+        steps=1_000,
+        print_freq=100,
+        lr=3e-3,
+        lr_schedule="cosine",
+        random_embedding_matrix=False,
+        act_fn_name="relu",
+    )
+    training_run(config, device)
