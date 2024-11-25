@@ -229,6 +229,9 @@ class Config(BaseModel):
             assert (
                 self.task_config.n_layers == 1
             ), "Handcoded AB not supported for >1 layer models due to a bug in the W_out matrices"
+
+        if isinstance(self.task_config, ResidualMLPConfig):
+            assert self.spd_type == "rank_penalty", "Only rank penalty supported for residual mlp"
         return self
 
 
