@@ -91,9 +91,9 @@ class ResidualMLPConfig(BaseModel):
     k: PositiveInt
     feature_probability: Probability
     init_scale: float = 1.0
-    data_generation_type: Literal["exactly_one_active", "at_least_zero_active"] = (
-        "at_least_zero_active"
-    )
+    data_generation_type: Literal[
+        "exactly_one_active", "exactly_two_active", "at_least_zero_active"
+    ] = "at_least_zero_active"
     act_fn_name: Literal["gelu", "relu"]
     in_bias: bool = False
     out_bias: bool = False
