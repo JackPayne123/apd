@@ -26,7 +26,7 @@ T = TypeVar("T", bound=BaseModel)
 Q = TypeVar("Q")
 
 
-def to_root_path(path: str | Path):
+def to_root_path(path: str | Path) -> Path:
     """Converts relative paths to absolute ones, assuming they are relative to the rib root."""
     return Path(path) if Path(path).is_absolute() else Path(REPO_ROOT / path)
 
