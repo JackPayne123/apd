@@ -818,9 +818,8 @@ def optimize(
         pre_acts = None
         post_acts = None
 
-        labels, pre_acts, post_acts = pretrained_model(batch)
         batch = batch.to(device=device)
-        labels = labels.to(device=device)
+        labels, pre_acts, post_acts = pretrained_model(batch)
 
         total_samples += batch.shape[0]
 
