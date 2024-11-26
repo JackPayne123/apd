@@ -170,7 +170,9 @@ def resid_mlp_plot_results_fn(
     fig_dict = {}
 
     assert config.spd_type in ("full_rank", "rank_penalty")
-    attribution_scores = collect_subnetwork_attributions(model, device, spd_type=config.spd_type)
+    attribution_scores = collect_subnetwork_attributions(
+        model, device, spd_type=config.spd_type, n_instances=model.n_instances
+    )
     fig_dict["subnetwork_attributions"] = plot_subnetwork_attributions(
         attribution_scores, out_dir, step
     )
@@ -314,6 +316,7 @@ def main(
         n_features=model.n_features,
         feature_probability=config.task_config.feature_probability,
         device=device,
+        calc_labels=False,  # Our labels will be the output of the target model
         data_generation_type=config.task_config.data_generation_type,
     )
 
@@ -328,7 +331,8 @@ def main(
         pretrained_model=target_model,
         param_map=param_map,
         out_dir=out_dir,
-        plot_results_fn=plot_results_fn,
+        # plot_results_fn=plot_results_fn,
+        plot_results_fn=None,  # TODO: Support n_instances in all the plotting code
     )
 
     if config.wandb_project:

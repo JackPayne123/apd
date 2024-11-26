@@ -1,5 +1,6 @@
 """Trains a residual linear model on one-hot input vectors."""
 
+import json
 from pathlib import Path
 from typing import Literal
 
@@ -26,6 +27,8 @@ class Config(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
     seed: int = 0
     label_fn_seed: int = 0
+    label_type: Literal["act_plus_resid", "abs"] = "act_plus_resid"
+    use_trivial_label_coeffs: bool = False
     n_instances: PositiveInt
     n_features: PositiveInt
     d_embed: PositiveInt
@@ -91,15 +94,14 @@ def train(
             yaml.dump(config.model_dump(mode="json"), f, indent=2)
         print(f"Saved config to {config_path}")
 
-        # TODO: The label coeffs will no longer be saved in the dataset class. Wherever we end up
-        # storing them, we should save them to file here.
-        # Save the coefficients used to generate the labels
-        # assert isinstance(dataloader.dataset, ResidualMLPDataset)
-        # label_coeffs = dataloader.dataset.coeffs.tolist()
-        # label_coeffs_path = out_dir / "label_coeffs.json"
-        # with open(label_coeffs_path, "w") as f:
-        #     json.dump(label_coeffs, f)
-        # print(f"Saved label coefficients to {label_coeffs_path}")
+        # Save the coefficients used to generate the labels if label_type is act_plus_resid
+        assert isinstance(dataloader.dataset, ResidualMLPDataset)
+        assert dataloader.dataset.label_coeffs is not None
+        label_coeffs = dataloader.dataset.label_coeffs.tolist()
+        label_coeffs_path = out_dir / "label_coeffs.json"
+        with open(label_coeffs_path, "w") as f:
+            json.dump(label_coeffs, f)
+        print(f"Saved label coefficients to {label_coeffs_path}")
 
     print(f"Final loss: {final_loss}")
     return final_loss
@@ -116,6 +118,8 @@ if __name__ == "__main__":
         d_mlp=5,
         n_layers=1,
         act_fn_name="relu",
+        label_type="abs",
+        use_trivial_label_coeffs=True,
         in_bias=False,
         out_bias=False,
         feature_probability=0.2,
@@ -128,7 +132,8 @@ if __name__ == "__main__":
 
     set_seed(config.seed)
     run_name = (
-        f"resid_mlp_identity_n-instsances{config.n_instances}_n-features{config.n_features}_d-resid{config.d_embed}_"
+        f"resid_mlp_identity_{config.label_type}_n-instances{config.n_instances}_"
+        f"n-features{config.n_features}_d-resid{config.d_embed}_"
         f"d-mlp{config.d_mlp}_n-layers{config.n_layers}_seed{config.seed}"
     )
     out_dir = Path(__file__).parent / "out" / run_name
@@ -157,11 +162,20 @@ if __name__ == "__main__":
     model.W_E.requires_grad = False
     trainable_params = [p for n, p in model.named_parameters() if "W_E" not in n]
 
+    label_coeffs = None
+    if config.use_trivial_label_coeffs:
+        label_coeffs = torch.ones(config.n_instances, config.n_features, device=device)
+
     dataset = ResidualMLPDataset(
         n_instances=config.n_instances,
         n_features=config.n_features,
         feature_probability=config.feature_probability,
         device=device,
+        calc_labels=True,
+        label_type=config.label_type,
+        act_fn_name=config.act_fn_name,
+        label_fn_seed=config.label_fn_seed,
+        label_coeffs=label_coeffs,
         data_generation_type="at_least_zero_active",
     )
     dataloader = DatasetGeneratedDataLoader(dataset, batch_size=config.batch_size, shuffle=False)
