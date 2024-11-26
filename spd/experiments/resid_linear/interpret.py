@@ -24,7 +24,7 @@ set_seed(0)  # You can change this seed if needed
 # Load model and config
 path = (
     "/data/stefan_heimersheim/projects/SPD/spd/spd/experiments/resid_linear/out/"
-    "resid_linear_identity_n-features100_d-resid1000_d-mlp50_n-layers1_seed0/target_model.pth"
+    "resid_linear_identity_n-features4000_d-resid4000_d-mlp3000_n-layers1_seed0/target_model.pth"
 )
 model, task_config, label_coeffs = ResidualLinearModel.from_pretrained(path)
 print(task_config)
@@ -104,23 +104,24 @@ plt.xlabel("batch val")
 plt.ylabel("mlp_out W_E dot prod")
 plt.show()
 
-plt.figure(figsize=(30, 30))
-for f in range(model.n_features):
-    plt.subplot(10, 10, f + 1)
-    plt.title(f"MLP_out vs Batch, feature {f}")
-    cs = torch.zeros_like(batch[:, :])
-    cs[torch.where(batch[:, f] > 0)[0], :] = 1
-    print(f"How often was feature {f} > 0: {(batch[:, f] > 0).sum().item()}")
-    plt.scatter(
-        batch[:].flatten().cpu().detach(),
-        dot_products[:].flatten().cpu().detach(),
-        c=cs,
-        marker=".",
-        s=2,
-        alpha=0.2,
-    )
-    plt.xlabel("batch val")
-    plt.ylabel("mlp_out W_E dot prod")
+if False:
+    plt.figure(figsize=(30, 30))
+    for f in range(model.n_features):
+        plt.subplot(10, 10, f + 1)
+        plt.title(f"MLP_out vs Batch, feature {f}")
+        cs = torch.zeros_like(batch[:, :])
+        cs[torch.where(batch[:, f] > 0)[0], :] = 1
+        print(f"How often was feature {f} > 0: {(batch[:, f] > 0).sum().item()}")
+        plt.scatter(
+            batch[:].flatten().cpu().detach(),
+            dot_products[:].flatten().cpu().detach(),
+            c=cs,
+            marker=".",
+            s=2,
+            alpha=0.2,
+        )
+        plt.xlabel("batch val")
+        plt.ylabel("mlp_out W_E dot prod")
 
 
 # %%
@@ -570,6 +571,7 @@ for f in range(model.n_features):
         feature_out[0, :].detach().cpu().numpy() / batch[0, f].detach().cpu().numpy(),
         color=color,
     )
+plt.ylim(-0.21, 0.81)
 plt.show()
 
 # %% Now for 2 features:

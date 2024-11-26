@@ -6,23 +6,25 @@ unit_norm_matrices: false
 seed: 0
 topk: 1.15
 schatten_pnorm: 1.0
-pnorm: 0.8
+pnorm: null
 batch_topk: true
 param_match_coeff: 1.0
 topk_recon_coeff: 1
-schatten_coeff: 1e-1
-lr: 1e-2
+schatten_coeff: 0.1
+# m=1?
+# topk_l2_coeff: 0.1?
+lr: 1e-3
 batch_size: 1024
 steps: 30_000
 print_freq: 500
-image_freq: 10_000
-save_freq: 30_000
+image_freq: 5_000
+save_freq: 10_000
 lr_warmup_pct: 0.01
 lr_schedule: cosine
 task_config:
   task_name: residual_linear
   init_scale: 1.0
   k: 100
-  feature_probability: 0.2
+  feature_probability: 0.01
   data_generation_type: "at_least_zero_active"
   pretrained_model_path: /data/apollo/spd/resid_linear_identity_n-features100_d-resid100_d-mlp50_n-layers1_seed0/target_model.pth
