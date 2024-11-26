@@ -7,6 +7,7 @@ from torch import Tensor, nn
 
 from spd.models.base import SPDFullRankModel
 from spd.utils import (
+    BaseSPDDataset,
     calc_ablation_attributions,
     calc_activation_attributions,
     calc_grad_attributions_rank_one,
@@ -269,3 +270,104 @@ def test_calc_activation_attributions_with_n_instances():
 
     result = calc_activation_attributions(inner_acts)
     torch.testing.assert_close(result, expected)
+
+
+def test_dataset_at_least_zero_active():
+    n_instances = 3
+    n_features = 5
+    feature_probability = 0.5
+    device = "cpu"
+    batch_size = 100
+
+    dataset = BaseSPDDataset(
+        n_instances=n_instances,
+        n_features=n_features,
+        feature_probability=feature_probability,
+        device=device,
+        data_generation_type="at_least_zero_active",
+        value_range=(0.0, 1.0),
+    )
+
+    batch, _ = dataset.generate_batch(batch_size)
+
+    # Check shape
+    assert batch.shape == (batch_size, n_instances, n_features), "Incorrect batch shape"
+
+    # Check that the values are between 0 and 1
+    assert torch.all((batch >= 0) & (batch <= 1)), "Values should be between 0 and 1"
+
+    # Check that the proportion of non-zero elements is close to feature_probability
+    non_zero_proportion = torch.count_nonzero(batch) / batch.numel()
+    assert (
+        abs(non_zero_proportion - feature_probability) < 0.05
+    ), f"Expected proportion {feature_probability}, but got {non_zero_proportion}"
+
+
+def test_dataset_exactly_one_active():
+    n_instances = 3
+    n_features = 5
+    feature_probability = 0.5  # This won't be used when data_generation_type="exactly_one_active"
+    device = "cpu"
+    batch_size = 10
+    value_range = (-1.0, 3.0)
+
+    dataset = BaseSPDDataset(
+        n_instances=n_instances,
+        n_features=n_features,
+        feature_probability=feature_probability,
+        device=device,
+        data_generation_type="exactly_one_active",
+        value_range=value_range,
+    )
+
+    batch, _ = dataset.generate_batch(batch_size)
+
+    # Check shape
+    assert batch.shape == (batch_size, n_instances, n_features), "Incorrect batch shape"
+
+    # Check that there's exactly one non-zero value per sample and instance
+    for sample in batch:
+        for instance in sample:
+            non_zero_count = torch.count_nonzero(instance)
+            assert non_zero_count == 1, f"Expected 1 non-zero value, but found {non_zero_count}"
+
+    # Check that the non-zero values are in the value_range
+    non_zero_values = batch[batch != 0]
+    assert torch.all(
+        (non_zero_values >= value_range[0]) & (non_zero_values <= value_range[1])
+    ), f"Non-zero values should be between {value_range[0]} and {value_range[1]}"
+
+
+def test_dataset_exactly_two_active():
+    n_instances = 3
+    n_features = 5
+    feature_probability = 0.5  # This won't be used when data_generation_type="exactly_one_active"
+    device = "cpu"
+    batch_size = 10
+    value_range = (0.0, 1.0)
+
+    dataset = BaseSPDDataset(
+        n_instances=n_instances,
+        n_features=n_features,
+        feature_probability=feature_probability,
+        device=device,
+        data_generation_type="exactly_two_active",
+        value_range=value_range,
+    )
+
+    batch, _ = dataset.generate_batch(batch_size)
+
+    # Check shape
+    assert batch.shape == (batch_size, n_instances, n_features), "Incorrect batch shape"
+
+    # Check that there's exactly one non-zero value per sample and instance
+    for sample in batch:
+        for instance in sample:
+            non_zero_count = torch.count_nonzero(instance)
+            assert non_zero_count == 2, f"Expected 2 non-zero values, but found {non_zero_count}"
+
+    # Check that the non-zero values are in the value_range
+    non_zero_values = batch[batch != 0]
+    assert torch.all(
+        (non_zero_values >= value_range[0]) & (non_zero_values <= value_range[1])
+    ), f"Non-zero values should be between {value_range[0]} and {value_range[1]}"
