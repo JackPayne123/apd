@@ -716,7 +716,7 @@ def load_yaml(file_path: Path) -> dict[str, Any]:
         return yaml.safe_load(f)
 
 
-class BaseSPDDataset(
+class SparseFeatureDataset(
     Dataset[
         tuple[
             Float[Tensor, "batch n_instances n_features"],

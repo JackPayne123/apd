@@ -7,7 +7,7 @@ from torch import Tensor, nn
 
 from spd.models.base import SPDFullRankModel
 from spd.utils import (
-    BaseSPDDataset,
+    SparseFeatureDataset,
     calc_ablation_attributions,
     calc_activation_attributions,
     calc_grad_attributions_rank_one,
@@ -279,7 +279,7 @@ def test_dataset_at_least_zero_active():
     device = "cpu"
     batch_size = 100
 
-    dataset = BaseSPDDataset(
+    dataset = SparseFeatureDataset(
         n_instances=n_instances,
         n_features=n_features,
         feature_probability=feature_probability,
@@ -311,7 +311,7 @@ def test_dataset_exactly_one_active():
     batch_size = 10
     value_range = (-1.0, 3.0)
 
-    dataset = BaseSPDDataset(
+    dataset = SparseFeatureDataset(
         n_instances=n_instances,
         n_features=n_features,
         feature_probability=feature_probability,
@@ -346,7 +346,7 @@ def test_dataset_exactly_two_active():
     batch_size = 10
     value_range = (0.0, 1.0)
 
-    dataset = BaseSPDDataset(
+    dataset = SparseFeatureDataset(
         n_instances=n_instances,
         n_features=n_features,
         feature_probability=feature_probability,

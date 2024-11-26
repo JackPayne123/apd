@@ -12,7 +12,7 @@ from spd.experiments.tms.models import (
 )
 from spd.experiments.tms.train_tms import TMSTrainConfig, train
 from spd.run_spd import Config, TMSConfig, optimize
-from spd.utils import BaseSPDDataset, DatasetGeneratedDataLoader, set_seed
+from spd.utils import DatasetGeneratedDataLoader, SparseFeatureDataset, set_seed
 
 # Create a simple TMS config that we can use in multiple tests
 TMS_TASK_CONFIG = TMSConfig(
@@ -48,7 +48,7 @@ def tms_decomposition_optimize_test(config: Config):
         device=device,
     )
 
-    dataset = BaseSPDDataset(
+    dataset = SparseFeatureDataset(
         n_instances=config.task_config.n_instances,
         n_features=config.task_config.n_features,
         feature_probability=config.task_config.feature_probability,
@@ -183,7 +183,7 @@ def test_train_tms_happy_path():
         n_hidden=config.n_hidden,
         device=device,
     )
-    dataset = BaseSPDDataset(
+    dataset = SparseFeatureDataset(
         n_instances=config.n_instances,
         n_features=config.n_features,
         feature_probability=config.feature_probability,

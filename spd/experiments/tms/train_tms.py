@@ -15,7 +15,7 @@ from torch import Tensor
 from tqdm import tqdm, trange
 
 from spd.experiments.tms.models import TMSModel
-from spd.utils import BaseSPDDataset, DatasetGeneratedDataLoader, set_seed
+from spd.utils import DatasetGeneratedDataLoader, SparseFeatureDataset, set_seed
 
 
 class TMSTrainConfig(BaseModel):
@@ -173,7 +173,7 @@ if __name__ == "__main__":
         device=device,
     )
 
-    dataset = BaseSPDDataset(
+    dataset = SparseFeatureDataset(
         n_instances=config.n_instances,
         n_features=config.n_features,
         feature_probability=config.feature_probability,

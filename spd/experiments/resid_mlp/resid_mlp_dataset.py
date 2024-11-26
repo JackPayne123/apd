@@ -7,10 +7,10 @@ import torch.nn.functional as F
 from jaxtyping import Float
 from torch import Tensor
 
-from spd.utils import BaseSPDDataset
+from spd.utils import SparseFeatureDataset
 
 
-class ResidualMLPDataset(BaseSPDDataset):
+class ResidualMLPDataset(SparseFeatureDataset):
     def __init__(
         self,
         n_instances: int,

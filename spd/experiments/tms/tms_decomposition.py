@@ -26,8 +26,8 @@ from spd.experiments.tms.models import (
 from spd.log import logger
 from spd.run_spd import Config, TMSConfig, get_common_run_name_suffix, optimize
 from spd.utils import (
-    BaseSPDDataset,
     DatasetGeneratedDataLoader,
+    SparseFeatureDataset,
     collect_subnetwork_attributions,
     init_wandb,
     load_config,
@@ -356,7 +356,7 @@ def main(
         # `all_subnetwork_params_summed`.
         param_map = {"W": "W", "W_T": "W_T"}
 
-    dataset = BaseSPDDataset(
+    dataset = SparseFeatureDataset(
         n_instances=task_config.n_instances,
         n_features=task_config.n_features,
         feature_probability=task_config.feature_probability,
