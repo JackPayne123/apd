@@ -438,7 +438,7 @@ def collect_subnetwork_attributions(
     device: str,
     spd_type: Literal["full_rank", "rank_one", "rank_penalty"],
     n_instances: int | None = None,
-) -> Float[Tensor, "batch k"]:
+) -> Float[Tensor, "batch k"] | Float[Tensor, "batch n_instances k"]:
     """
     Collect subnetwork attributions.
 
@@ -446,10 +446,10 @@ def collect_subnetwork_attributions(
     and collects the attributions.
 
     Args:
-        model (ResidualLinearSPDFullRankModel): The model to collect attributions on.
-        device (str): The device to run computations on.
-        spd_type (str): The type of SPD model.
-        n_instances (int | None): The number of instances in the batch.
+        model: The model to collect attributions on.
+        device: The device to run computations on.
+        spd_type: The type of SPD model.
+        n_instances: The number of instances in the batch.
 
     Returns:
         The attribution scores.
@@ -467,6 +467,7 @@ def collect_subnetwork_attributions(
             out=out, inner_acts_vals=list(test_inner_acts.values())
         )
     else:
+        # We use the same function for rank_penalty and full_rank
         attribution_scores = calc_grad_attributions_full_rank(
             out=out, inner_acts=test_inner_acts, layer_acts=test_layer_acts
         )

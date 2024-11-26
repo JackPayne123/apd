@@ -50,29 +50,39 @@ def get_run_name(config: Config, n_features: int, n_layers: int, d_resid: int, d
 
 
 def plot_subnetwork_attributions(
-    attribution_scores: Float[Tensor, "batch k"],
+    attribution_scores: Float[Tensor, "batch n_instances k"],
     out_dir: Path | None,
     step: int | None,
 ) -> plt.Figure:
     """Plot subnetwork attributions."""
-    fig, ax = plt.subplots(figsize=(5, 5), constrained_layout=True)
-    im = ax.matshow(attribution_scores.detach().cpu().numpy(), aspect="auto", cmap="Reds")
-    ax.set_xlabel("Subnetwork Index")
-    ax.set_ylabel("Batch Index")
-    ax.set_title("Subnetwork Attributions")
+    # Plot a row with n_instances
+    # Each column is a different instance
+    n_instances = attribution_scores.shape[1]
+    fig, ax = plt.subplots(
+        nrows=1, ncols=n_instances, figsize=(5 * n_instances, 5), constrained_layout=True
+    )
+    axs = np.array(ax)
+    im = None
+    for i in range(n_instances):
+        im = axs[i].matshow(
+            attribution_scores[:, i].detach().cpu().numpy(), aspect="auto", cmap="Reds"
+        )
+        axs[i].set_xlabel("Subnetwork Index")
+        axs[i].set_ylabel("Batch Index")
+        axs[i].set_title("Subnetwork Attributions")
 
-    # Annotate each cell with the numeric value
-    for i in range(attribution_scores.shape[0]):
-        for j in range(attribution_scores.shape[1]):
-            ax.text(
-                j,
-                i,
-                f"{attribution_scores[i, j]:.2f}",
-                ha="center",
-                va="center",
-                color="black",
-                fontsize=10,
-            )
+        # Annotate each cell with the numeric value
+        for b in range(attribution_scores.shape[0]):
+            for j in range(attribution_scores.shape[-1]):
+                axs[i].text(
+                    j,
+                    b,
+                    f"{attribution_scores[b, i, j]:.2f}",
+                    ha="center",
+                    va="center",
+                    color="black",
+                    fontsize=10,
+                )
     plt.colorbar(im)
     if out_dir:
         filename = (
@@ -95,8 +105,8 @@ def plot_multiple_subnetwork_params(
     n_params = len(all_params)
     param_names = list(all_params.keys())
 
-    weight_param = [param for param_name, param in all_params.items() if "weight" in param_name][0]
-    k, dim1, dim2 = weight_param.shape
+    weight_param = [param for param_name, param in all_params.items() if "linear" in param_name][0]
+    n_instances, k, dim1, dim2 = weight_param.shape
 
     # Find global min and max for normalization
     all_values = []
@@ -108,38 +118,44 @@ def plot_multiple_subnetwork_params(
     norm = CenteredNorm(vcenter=0, halfrange=vmax)
 
     fig, axs = plt.subplots(
-        n_params,
+        n_instances * n_params,
         k,
-        figsize=(2 * k, 1 * n_params),
-        constrained_layout=True,
+        figsize=(2 * k, n_instances * n_params),
+        constrained_layout=False,
     )
     axs = np.array(axs)
 
-    for param_idx in range(n_params):
-        param_name = param_names[param_idx]
-        for subnet_idx in range(k):
-            col_idx = subnet_idx
-            row_idx = param_idx
+    for instance_idx in range(n_instances):
+        for param_idx in range(n_params):
+            param_name = param_names[param_idx]
+            for subnet_idx in range(k):
+                col_idx = subnet_idx
+                row_idx = instance_idx * n_params + param_idx
 
-            ax = axs[row_idx, col_idx]  # type: ignore
-            param = all_params[param_name][subnet_idx].detach().cpu().numpy()
-            # If it's a bias with a single dimension, unsqueeze it
-            if param.ndim == 1:
-                param = param[:, None]
+                ax = axs[row_idx, col_idx]  # type: ignore
+                param = all_params[param_name][instance_idx, subnet_idx].detach().cpu().numpy()
+                # If it's a bias with a single dimension, unsqueeze it
+                if param.ndim == 1:
+                    param = param[:, None]
 
-            # Set aspect ratio based on parameter dimensions
-            height, width = param.shape
-            aspect = width / height
+                # Set aspect ratio based on parameter dimensions
+                height, width = param.shape
+                aspect = width / height
 
-            im = ax.matshow(param, cmap="RdBu", norm=norm, aspect=aspect)
-            ax.set_xticks([])
-            ax.set_yticks([])
+                im = ax.matshow(param, cmap="RdBu", norm=norm, aspect=aspect)
+                ax.set_xticks([])
+                ax.set_yticks([])
 
-            if col_idx == 0:
-                ax.set_ylabel(param_name, rotation=0, ha="right", va="center")
+                if col_idx == 0:
+                    ax.set_ylabel(
+                        f"Inst.{instance_idx}.{param_name}",
+                        rotation=0,
+                        ha="right",
+                        va="center",
+                    )
 
-            if row_idx == n_params - 1:
-                ax.set_xlabel(f"Subnet {subnet_idx}", rotation=0, ha="center", va="top")
+                if row_idx == ((n_instances * n_params) - 1):
+                    ax.set_xlabel(f"Subnet {subnet_idx}", rotation=0, ha="center", va="top")
 
     # Add colorbar
     fig.colorbar(im, ax=axs.ravel().tolist(), location="right")  # type: ignore
@@ -331,8 +347,7 @@ def main(
         pretrained_model=target_model,
         param_map=param_map,
         out_dir=out_dir,
-        # plot_results_fn=plot_results_fn,
-        plot_results_fn=None,  # TODO: Support n_instances in all the plotting code
+        plot_results_fn=plot_results_fn,
     )
 
     if config.wandb_project:
