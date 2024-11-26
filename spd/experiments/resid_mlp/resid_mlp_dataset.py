@@ -55,6 +55,7 @@ class ResidualMLPDataset(BaseSPDDataset):
     ) -> tuple[
         Float[Tensor, "batch n_instances n_features"], Float[Tensor, "batch n_instances n_features"]
     ]:
+        # Note that the parent_labels are just the batch itself
         batch, parent_labels = super().generate_batch(batch_size)
         labels = self.label_fn(batch) if self.label_fn is not None else parent_labels
         return batch, labels
