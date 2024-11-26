@@ -4,7 +4,6 @@ import json
 from pathlib import Path
 from typing import Literal
 
-import einops
 import torch
 import wandb
 import yaml
@@ -149,18 +148,8 @@ if __name__ == "__main__":
         out_bias=config.out_bias,
     ).to(device)
 
-    # TODO: We likely want to remove this identity embedding. Leaving for now to test whether
-    # resid_mlp gets the same results as resid_linear.
-    # Make W_E the identity matrix
-    assert model.W_E.shape == (config.n_instances, config.n_features, config.d_embed)
-    eye = torch.eye(config.d_embed, device=device)
-    model.W_E.data[:, :, :] = einops.repeat(
-        eye, "d_emb1 d_emb2 -> n_instances d_emb1 d_emb2", n_instances=config.n_instances
-    )
-
     # Don't train the Embedding matrix
     model.W_E.requires_grad = False
-    trainable_params = [p for n, p in model.named_parameters() if "W_E" not in n]
 
     label_coeffs = None
     if config.use_trivial_label_coeffs:
@@ -182,7 +171,7 @@ if __name__ == "__main__":
     train(
         config=config,
         model=model,
-        trainable_params=trainable_params,
+        trainable_params=list(model.parameters()),
         dataloader=dataloader,
         device=device,
         out_dir=out_dir,

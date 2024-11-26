@@ -293,7 +293,10 @@ class ResidualMLPModel(Model):
         self.act_fn = F.gelu if act_fn_name == "gelu" else F.relu
 
         self.W_E = nn.Parameter(torch.empty(n_instances, n_features, d_embed))
-        init_param_(self.W_E)
+        # Init with randn values and make unit norm
+        self.W_E.data.normal_(0, 1)
+        # Ensure each feature has unit norm
+        self.W_E.data /= self.W_E.data.norm(dim=-1, keepdim=True)
 
         self.layers = nn.ModuleList(
             [
