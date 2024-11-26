@@ -1,7 +1,7 @@
 # %%
 
 
-from spd.experiments.resid_mlp.models import ResidualMLPModel, ResidualMLPSPDFullRankModel
+from spd.experiments.resid_mlp.models import ResidualMLPModel, ResidualMLPSPDRankPenaltyModel
 from spd.experiments.resid_mlp.resid_mlp_dataset import ResidualMLPDataset
 from spd.run_spd import ResidualMLPConfig, calc_recon_mse
 from spd.utils import run_spd_forward_pass, set_seed
@@ -20,8 +20,7 @@ if __name__ == "__main__":
     # local_path = "spd/experiments/resid_mlp/out/fr_seed0_topk1.10e+00_topkrecon1.00e+00_topkl2_1.00e-02_lr1.00e-02_bs1024_ft5_lay1_resid5_mlp5/model_10000.pth"
 
     # Load the pretrained SPD model
-    model, config, label_coeffs = ResidualMLPSPDFullRankModel.from_wandb(wandb_path)
-    # model, config, label_coeffs = ResidualMLPSPDFullRankModel.from_local_path(local_path)
+    model, config, label_coeffs = ResidualMLPSPDRankPenaltyModel.from_wandb(wandb_path)
 
     assert isinstance(config.task_config, ResidualMLPConfig)
     # Path must be local
@@ -31,11 +30,11 @@ if __name__ == "__main__":
     assert target_label_coeffs == label_coeffs
 
     dataset = ResidualMLPDataset(
-        embed_matrix=model.W_E,
+        n_instances=model.n_instances,
         n_features=model.n_features,
         feature_probability=config.task_config.feature_probability,
         device=device,
-        label_coeffs=label_coeffs,
+        calc_labels=False,  # Our labels will be the output of the target model
         data_generation_type=config.task_config.data_generation_type,
     )
     batch, labels = dataset.generate_batch(config.batch_size)
