@@ -1,9 +1,9 @@
 """Trains a residual linear model on one-hot input vectors."""
 
-import json
 from pathlib import Path
 from typing import Literal
 
+import einops
 import torch
 import wandb
 import yaml
@@ -26,6 +26,7 @@ class Config(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
     seed: int = 0
     label_fn_seed: int = 0
+    n_instances: PositiveInt
     n_features: PositiveInt
     d_embed: PositiveInt
     d_mlp: PositiveInt
@@ -90,13 +91,15 @@ def train(
             yaml.dump(config.model_dump(mode="json"), f, indent=2)
         print(f"Saved config to {config_path}")
 
+        # TODO: The label coeffs will no longer be saved in the dataset class. Wherever we end up
+        # storing them, we should save them to file here.
         # Save the coefficients used to generate the labels
-        assert isinstance(dataloader.dataset, ResidualMLPDataset)
-        label_coeffs = dataloader.dataset.coeffs.tolist()
-        label_coeffs_path = out_dir / "label_coeffs.json"
-        with open(label_coeffs_path, "w") as f:
-            json.dump(label_coeffs, f)
-        print(f"Saved label coefficients to {label_coeffs_path}")
+        # assert isinstance(dataloader.dataset, ResidualMLPDataset)
+        # label_coeffs = dataloader.dataset.coeffs.tolist()
+        # label_coeffs_path = out_dir / "label_coeffs.json"
+        # with open(label_coeffs_path, "w") as f:
+        #     json.dump(label_coeffs, f)
+        # print(f"Saved label coefficients to {label_coeffs_path}")
 
     print(f"Final loss: {final_loss}")
     return final_loss
@@ -107,6 +110,7 @@ if __name__ == "__main__":
     config = Config(
         seed=0,
         label_fn_seed=0,
+        n_instances=10,
         n_features=5,
         d_embed=5,
         d_mlp=5,
@@ -116,7 +120,7 @@ if __name__ == "__main__":
         out_bias=False,
         feature_probability=0.2,
         batch_size=256,
-        steps=20_000,
+        steps=10_000,
         print_freq=100,
         lr=1e-2,
         lr_schedule="cosine",
@@ -124,12 +128,13 @@ if __name__ == "__main__":
 
     set_seed(config.seed)
     run_name = (
-        f"resid_mlp_identity_n-features{config.n_features}_d-resid{config.d_embed}_"
+        f"resid_mlp_identity_n-instsances{config.n_instances}_n-features{config.n_features}_d-resid{config.d_embed}_"
         f"d-mlp{config.d_mlp}_n-layers{config.n_layers}_seed{config.seed}"
     )
     out_dir = Path(__file__).parent / "out" / run_name
 
     model = ResidualMLPModel(
+        n_instances=config.n_instances,
         n_features=config.n_features,
         d_embed=config.d_embed,
         d_mlp=config.d_mlp,
@@ -139,24 +144,25 @@ if __name__ == "__main__":
         out_bias=config.out_bias,
     ).to(device)
 
-    # Initialize with all positive values
-    for p in model.parameters():
-        p.data = p.data.abs()
-
+    # TODO: We likely want to remove this identity embedding. Leaving for now to test whether
+    # resid_mlp gets the same results as resid_linear.
     # Make W_E the identity matrix
-    assert model.W_E.shape == (config.n_features, config.d_embed)
-    model.W_E.data[:, :] = torch.eye(config.d_embed, device=device)
+    assert model.W_E.shape == (config.n_instances, config.n_features, config.d_embed)
+    eye = torch.eye(config.d_embed, device=device)
+    model.W_E.data[:, :, :] = einops.repeat(
+        eye, "d_emb1 d_emb2 -> n_instances d_emb1 d_emb2", n_instances=config.n_instances
+    )
 
     # Don't train the Embedding matrix
     model.W_E.requires_grad = False
     trainable_params = [p for n, p in model.named_parameters() if "W_E" not in n]
 
     dataset = ResidualMLPDataset(
-        embed_matrix=model.W_E,
+        n_instances=config.n_instances,
         n_features=config.n_features,
         feature_probability=config.feature_probability,
         device=device,
-        label_fn_seed=config.label_fn_seed,
+        data_generation_type="at_least_zero_active",
     )
     dataloader = DatasetGeneratedDataLoader(dataset, batch_size=config.batch_size, shuffle=False)
     train(

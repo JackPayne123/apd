@@ -52,20 +52,27 @@ class InstancesMLP(nn.Module):
             init_param_(self.bias2)
 
     def forward(
-        self, x: Float[Tensor, "... d_model"]
+        self, x: Float[Tensor, "batch n_instances d_model"]
     ) -> tuple[
-        Float[Tensor, "... d_model"],
-        dict[str, Float[Tensor, "... d_model"] | Float[Tensor, "... d_mlp"] | None],
-        dict[str, Float[Tensor, "... d_model"] | Float[Tensor, "... d_mlp"]],
+        Float[Tensor, "batch n_instances d_model"],
+        dict[
+            str,
+            Float[Tensor, "batch n_instances d_model"] | Float[Tensor, "batch n_instances d_mlp"],
+        ],
+        dict[
+            str,
+            Float[Tensor, "batch n_instances d_model"] | Float[Tensor, "batch n_instances d_mlp"],
+        ],
     ]:
         """Run a forward pass and cache pre and post activations for each parameter.
 
         Note that we don't need to cache pre activations for the biases. We also don't care about
         the output bias which is always zero.
         """
-        # out1_pre_act_fn = self.input_layer(x)
         out1_pre_act_fn = einops.einsum(
-            x, self.linear1, "batch d_model, n_instances d_model d_mlp -> batch n_instances d_mlp"
+            x,
+            self.linear1,
+            "batch n_instances d_model, n_instances d_model d_mlp -> batch n_instances d_mlp",
         )
         if self.bias1 is not None:
             out1_pre_act_fn = out1_pre_act_fn + self.bias1
@@ -101,6 +108,7 @@ class InstancesParamComponentsRankPenalty(nn.Module):
 
     def __init__(
         self,
+        n_instances: int,
         in_dim: int,
         out_dim: int,
         k: int,
@@ -109,27 +117,36 @@ class InstancesParamComponentsRankPenalty(nn.Module):
         m: int | None = None,
     ):
         super().__init__()
+        self.n_instances = n_instances
         self.in_dim = in_dim
         self.out_dim = out_dim
         self.k = k
         self.m = min(in_dim, out_dim) if m is None else m
 
         # Initialize A and B matrices
-        self.A = nn.Parameter(torch.empty(k, in_dim, self.m))
-        self.B = nn.Parameter(torch.empty(k, self.m, out_dim))
-        self.bias = nn.Parameter(torch.zeros(out_dim)) if bias else None
+        self.A = nn.Parameter(torch.empty(n_instances, k, in_dim, self.m))
+        self.B = nn.Parameter(torch.empty(n_instances, k, self.m, out_dim))
+        self.bias = nn.Parameter(torch.zeros(n_instances, out_dim)) if bias else None
 
         init_param_(self.A, scale=init_scale)
         init_param_(self.B, scale=init_scale)
 
     @property
-    def subnetwork_params(self) -> Float[Tensor, "k i j"]:
+    def subnetwork_params(self) -> Float[Tensor, "n_instances k d_in d_out"]:
         """For compatibility with plotting code."""
-        return einops.einsum(self.A, self.B, "k i m, k m j -> k i j")
+        return einops.einsum(
+            self.A,
+            self.B,
+            "n_instances k d_in m, n_instances k m d_out -> n_instances k d_in d_out",
+        )
 
     def forward(
-        self, x: Float[Tensor, "batch d_in"], topk_mask: Bool[Tensor, "batch k"] | None = None
-    ) -> tuple[Float[Tensor, "batch d_out"], Float[Tensor, "batch k d_out"]]:
+        self,
+        x: Float[Tensor, "batch n_instances d_in"],
+        topk_mask: Bool[Tensor, "batch n_instances k"] | None = None,
+    ) -> tuple[
+        Float[Tensor, "batch n_instances d_out"], Float[Tensor, "batch n_instances k d_out"]
+    ]:
         """Forward pass through the layer.
 
         Args:
@@ -140,16 +157,23 @@ class InstancesParamComponentsRankPenalty(nn.Module):
             inner_acts: The output of each subnetwork before summing
         """
         # First multiply by A to get to intermediate dimension m
-        # pre_inner_acts = torch.einsum("...d,kfm->...km", x, self.A)
-        pre_inner_acts = einops.einsum(x, self.A, "batch d_in, k d_in m -> batch k m")
+        pre_inner_acts = einops.einsum(
+            x, self.A, "batch n_instances d_in, n_instances k d_in m -> batch n_instances k m"
+        )
         if topk_mask is not None:
             assert topk_mask.shape == pre_inner_acts.shape[:-1]
             pre_inner_acts = einops.einsum(
-                pre_inner_acts, topk_mask, "batch k m, batch k -> batch k m"
+                pre_inner_acts,
+                topk_mask,
+                "batch n_instances k m, batch n_instances k -> batch n_instances k m",
             )
 
         # Then multiply by B to get to output dimension
-        inner_acts = einops.einsum(pre_inner_acts, self.B, "batch k m, k m h -> batch k h")
+        inner_acts = einops.einsum(
+            pre_inner_acts,
+            self.B,
+            "batch n_instances k m, n_instances k m d_out -> batch n_instances k d_out",
+        )
 
         if topk_mask is not None:
             inner_acts = einops.einsum(inner_acts, topk_mask, "batch k h, batch k -> batch k h")
@@ -172,6 +196,7 @@ class InstancesMLPComponentsRankPenalty(nn.Module):
 
     def __init__(
         self,
+        n_instances: int,
         d_embed: int,
         d_mlp: int,
         k: int,
@@ -184,18 +209,35 @@ class InstancesMLPComponentsRankPenalty(nn.Module):
         super().__init__()
         self.act_fn = act_fn
         self.linear1 = InstancesParamComponentsRankPenalty(
-            in_dim=d_embed, out_dim=d_mlp, k=k, bias=in_bias, init_scale=init_scale, m=m
+            n_instances=n_instances,
+            in_dim=d_embed,
+            out_dim=d_mlp,
+            k=k,
+            bias=in_bias,
+            init_scale=init_scale,
+            m=m,
         )
         self.linear2 = InstancesParamComponentsRankPenalty(
-            in_dim=d_mlp, out_dim=d_embed, k=k, bias=out_bias, init_scale=init_scale, m=m
+            n_instances=n_instances,
+            in_dim=d_mlp,
+            out_dim=d_embed,
+            k=k,
+            bias=out_bias,
+            init_scale=init_scale,
+            m=m,
         )
 
     def forward(
-        self, x: Float[Tensor, "... d_embed"], topk_mask: Bool[Tensor, "... k"] | None = None
+        self,
+        x: Float[Tensor, "batch n_instances d_embed"],
+        topk_mask: Bool[Tensor, "batch n_instances k"] | None = None,
     ) -> tuple[
-        Float[Tensor, "... d_embed"],
-        list[Float[Tensor, "... d_embed"] | Float[Tensor, "... d_mlp"]],
-        list[Float[Tensor, "... k d_embed"] | Float[Tensor, "... k d_mlp"]],
+        Float[Tensor, "batch n_instances d_embed"],
+        list[Float[Tensor, "batch n_instances d_embed"] | Float[Tensor, "batch n_instances d_mlp"]],
+        list[
+            Float[Tensor, "batch n_instances k d_embed"]
+            | Float[Tensor, "batch n_instances k d_mlp"]
+        ],
     ]:
         """Forward pass through the MLP.
 
@@ -333,11 +375,11 @@ class ResidualMLPModel(Model):
 class ResidualMLPSPDRankPenaltyModel(SPDRankPenaltyModel):
     def __init__(
         self,
-        n_instances: int,
         n_features: int,
         d_embed: int,
         d_mlp: int,
         n_layers: int,
+        n_instances: int,
         k: int,
         init_scale: float,
         act_fn_name: Literal["gelu", "relu"],
@@ -346,11 +388,11 @@ class ResidualMLPSPDRankPenaltyModel(SPDRankPenaltyModel):
         m: int | None = None,
     ):
         super().__init__()
-        self.n_instances = n_instances
         self.n_features = n_features
         self.d_embed = d_embed
         self.d_mlp = d_mlp
         self.n_layers = n_layers
+        self.n_instances = n_instances
         self.k = k
         assert act_fn_name in ["gelu", "relu"]
         self.act_fn = F.gelu if act_fn_name == "gelu" else F.relu
@@ -377,28 +419,34 @@ class ResidualMLPSPDRankPenaltyModel(SPDRankPenaltyModel):
 
     def all_subnetwork_params(
         self,
-    ) -> dict[str, Float[Tensor, "k d_out"] | Float[Tensor, "k d_in d_out"]]:
+    ) -> dict[str, Float[Tensor, "n_instances k d_in d_out"]]:
+        AB_ein_str = "n_instances k d_in m, n_instances k m d_out -> n_instances k d_in d_out"
         params = {}
         for i, mlp in enumerate(self.layers):
-            params[f"layers.{i}.input_layer.weight"] = torch.einsum(
-                "kfm,kmh->kfh", mlp.linear1.A, mlp.linear1.B
-            )
-            params[f"layers.{i}.output_layer.weight"] = torch.einsum(
-                "kfm,kmh->kfh", mlp.linear2.A, mlp.linear2.B
-            )
+            params[f"layers.{i}.linear1"] = einops.einsum(mlp.linear1.A, mlp.linear1.B, AB_ein_str)
+            params[f"layers.{i}.linear2"] = einops.einsum(mlp.linear2.A, mlp.linear2.B, AB_ein_str)
         return params
 
     def all_subnetwork_params_summed(
         self,
-    ) -> dict[str, Float[Tensor, "k d_out"] | Float[Tensor, "k d_in d_out"]]:
-        return {p_name: p.sum(dim=0) for p_name, p in self.all_subnetwork_params().items()}
+    ) -> dict[str, Float[Tensor, "n_instances k d_in d_out"]]:
+        return {p_name: p.sum(dim=1) for p_name, p in self.all_subnetwork_params().items()}
 
     def forward(
-        self, x: Float[Tensor, "batch n_features"], topk_mask: Bool[Tensor, "batch k"] | None = None
+        self,
+        x: Float[Tensor, "batch n_instances n_features"],
+        topk_mask: Bool[Tensor, "batch n_instances k"] | None = None,
     ) -> tuple[
-        Float[Tensor, "batch d_embed"],
-        dict[str, Float[Tensor, "batch d_embed"] | Float[Tensor, "batch d_mlp"]],
-        dict[str, Float[Tensor, "batch k d_embed"]],
+        Float[Tensor, "batch n_instances d_embed"],
+        dict[
+            str,
+            Float[Tensor, "batch n_instances d_embed"] | Float[Tensor, "batch n_instances d_mlp"],
+        ],
+        dict[
+            str,
+            Float[Tensor, "batch n_instances k d_embed"]
+            | Float[Tensor, "batch n_instances k d_mlp"],
+        ],
     ]:
         """
         Returns:
@@ -410,27 +458,29 @@ class ResidualMLPSPDRankPenaltyModel(SPDRankPenaltyModel):
         layer_acts = {}
         inner_acts = {}
         residual = einops.einsum(
-            x, self.W_E, "batch n_features, n_features d_embed -> batch d_embed"
+            x,
+            self.W_E,
+            "batch n_instances n_features, n_instances n_features d_embed -> batch n_instances d_embed",
         )
         for i, layer in enumerate(self.layers):
             layer_out, layer_acts_i, inner_acts_i = layer(residual, topk_mask)
             assert len(layer_acts_i) == len(inner_acts_i) == 2
             residual = residual + layer_out
-            layer_acts[f"layers.{i}.input_layer.weight"] = layer_acts_i[0]
-            layer_acts[f"layers.{i}.output_layer.weight"] = layer_acts_i[1]
-            inner_acts[f"layers.{i}.input_layer.weight"] = inner_acts_i[0]
-            inner_acts[f"layers.{i}.output_layer.weight"] = inner_acts_i[1]
+            layer_acts[f"layers.{i}.linear1"] = layer_acts_i[0]
+            layer_acts[f"layers.{i}.linear2"] = layer_acts_i[1]
+            inner_acts[f"layers.{i}.linear1"] = inner_acts_i[0]
+            inner_acts[f"layers.{i}.linear2"] = inner_acts_i[1]
         return residual, layer_acts, inner_acts
 
     def set_subnet_to_zero(
         self, subnet_idx: int
-    ) -> dict[str, Float[Tensor, " d_out"] | Float[Tensor, "d_in d_out"]]:
+    ) -> dict[str, Float[Tensor, "n_instances k d_in m"] | Float[Tensor, "n_instances k m d_out"]]:
         stored_vals = {}
         for i, mlp in enumerate(self.layers):
-            stored_vals[f"layers.{i}.input_layer.A"] = mlp.linear1.A[subnet_idx].detach().clone()
-            stored_vals[f"layers.{i}.input_layer.B"] = mlp.linear1.B[subnet_idx].detach().clone()
-            stored_vals[f"layers.{i}.output_layer.A"] = mlp.linear2.A[subnet_idx].detach().clone()
-            stored_vals[f"layers.{i}.output_layer.B"] = mlp.linear2.B[subnet_idx].detach().clone()
+            stored_vals[f"layers.{i}.linear1.A"] = mlp.linear1.A[subnet_idx].detach().clone()
+            stored_vals[f"layers.{i}.linear1.B"] = mlp.linear1.B[subnet_idx].detach().clone()
+            stored_vals[f"layers.{i}.linear2.A"] = mlp.linear2.A[subnet_idx].detach().clone()
+            stored_vals[f"layers.{i}.linear2.B"] = mlp.linear2.B[subnet_idx].detach().clone()
 
             mlp.linear1.A.data[subnet_idx] = 0.0
             mlp.linear1.B.data[subnet_idx] = 0.0
@@ -441,22 +491,26 @@ class ResidualMLPSPDRankPenaltyModel(SPDRankPenaltyModel):
     def restore_subnet(
         self,
         subnet_idx: int,
-        stored_vals: dict[str, Float[Tensor, " d_out"] | Float[Tensor, "d_in d_out"]],
+        stored_vals: dict[
+            str, Float[Tensor, "n_instances k d_in m"] | Float[Tensor, "n_instances k m d_out"]
+        ],
     ) -> None:
         for i, mlp in enumerate(self.layers):
-            mlp.linear1.A[subnet_idx].data = stored_vals[f"layers.{i}.input_layer.A"]
-            mlp.linear1.B[subnet_idx].data = stored_vals[f"layers.{i}.input_layer.B"]
-            mlp.linear2.A[subnet_idx].data = stored_vals[f"layers.{i}.output_layer.A"]
-            mlp.linear2.B[subnet_idx].data = stored_vals[f"layers.{i}.output_layer.B"]
+            mlp.linear1.A[subnet_idx].data = stored_vals[f"layers.{i}.linear1.A"]
+            mlp.linear1.B[subnet_idx].data = stored_vals[f"layers.{i}.linear1.B"]
+            mlp.linear2.A[subnet_idx].data = stored_vals[f"layers.{i}.linear2.A"]
+            mlp.linear2.B[subnet_idx].data = stored_vals[f"layers.{i}.linear2.B"]
 
     def all_As_and_Bs(
         self,
-    ) -> dict[str, tuple[Float[Tensor, "k d_in m"], Float[Tensor, "k m d_out"]]]:
+    ) -> dict[
+        str, tuple[Float[Tensor, "n_instances k d_in m"], Float[Tensor, "n_instances k m d_out"]]
+    ]:
         """Get all A and B matrices for each layer."""
         params = {}
         for i, mlp in enumerate(self.layers):
-            params[f"layers.{i}.input_layer.weight"] = (mlp.linear1.A, mlp.linear1.B)
-            params[f"layers.{i}.output_layer.weight"] = (mlp.linear2.A, mlp.linear2.B)
+            params[f"layers.{i}.linear1"] = (mlp.linear1.A, mlp.linear1.B)
+            params[f"layers.{i}.linear2"] = (mlp.linear2.A, mlp.linear2.B)
         return params
 
     def set_matrices_to_unit_norm(self):
@@ -496,6 +550,7 @@ class ResidualMLPSPDRankPenaltyModel(SPDRankPenaltyModel):
             d_embed=target_model_config["d_embed"],
             d_mlp=target_model_config["d_mlp"],
             n_layers=target_model_config["n_layers"],
+            n_instances=target_model_config["n_instances"],
             k=config.task_config.k,
             init_scale=config.task_config.init_scale,
             act_fn_name=config.task_config.act_fn_name,

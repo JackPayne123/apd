@@ -16,11 +16,7 @@ from matplotlib.colors import CenteredNorm
 from torch import Tensor
 from tqdm import tqdm
 
-from spd.experiments.resid_mlp.models import (
-    ResidualMLPModel,
-    ResidualMLPSPDFullRankModel,
-    ResidualMLPSPDRankPenaltyModel,
-)
+from spd.experiments.resid_mlp.models import ResidualMLPModel, ResidualMLPSPDRankPenaltyModel
 from spd.experiments.resid_mlp.resid_mlp_dataset import (
     ResidualMLPDataset,
 )
@@ -89,7 +85,7 @@ def plot_subnetwork_attributions(
 
 
 def plot_multiple_subnetwork_params(
-    model: ResidualMLPSPDFullRankModel | ResidualMLPSPDRankPenaltyModel,
+    model: ResidualMLPSPDRankPenaltyModel,
     out_dir: Path | None,
     step: int | None = None,
 ) -> plt.Figure:
@@ -158,7 +154,7 @@ def plot_multiple_subnetwork_params(
 
 
 def resid_mlp_plot_results_fn(
-    model: ResidualMLPSPDFullRankModel | ResidualMLPSPDRankPenaltyModel,
+    model: ResidualMLPSPDRankPenaltyModel,
     step: int | None,
     out_dir: Path | None,
     device: str,
@@ -274,29 +270,20 @@ def main(
     )
 
     # Create the SPD model
-    if config.spd_type == "full_rank":
-        model = ResidualMLPSPDFullRankModel(
-            n_features=target_model.n_features,
-            d_embed=target_model.d_embed,
-            d_mlp=target_model.d_mlp,
-            n_layers=target_model.n_layers,
-            k=config.task_config.k,
-            init_scale=config.task_config.init_scale,
-            act_fn_name=config.task_config.act_fn_name,
-        ).to(device)
-    elif config.spd_type == "rank_penalty":
+    if config.spd_type == "rank_penalty":
         model = ResidualMLPSPDRankPenaltyModel(
             n_features=target_model.n_features,
             d_embed=target_model.d_embed,
             d_mlp=target_model.d_mlp,
             n_layers=target_model.n_layers,
+            n_instances=target_model.n_instances,
             k=config.task_config.k,
             init_scale=config.task_config.init_scale,
             act_fn_name=config.task_config.act_fn_name,
             m=config.m,
         ).to(device)
     else:
-        raise ValueError(f"Unknown spd_type: {config.spd_type}")
+        raise ValueError(f"Unknown/unsupported spd_type: {config.spd_type}")
 
     # Use the target_model's embedding matrix and don't train it further
     model.W_E.data[:, :] = target_model.W_E.data.detach().clone()
@@ -319,15 +306,14 @@ def main(
     for i in range(target_model.n_layers):
         # Map from pretrained model's `all_decomposable_params` to the SPD models'
         # `all_subnetwork_params_summed`.
-        param_map[f"layers.{i}.input_layer.weight"] = f"layers.{i}.input_layer.weight"
-        param_map[f"layers.{i}.output_layer.weight"] = f"layers.{i}.output_layer.weight"
+        param_map[f"layers.{i}.linear1"] = f"layers.{i}.linear1"
+        param_map[f"layers.{i}.linear2"] = f"layers.{i}.linear2"
 
     dataset = ResidualMLPDataset(
-        embed_matrix=model.W_E,
+        n_instances=model.n_instances,
         n_features=model.n_features,
         feature_probability=config.task_config.feature_probability,
         device=device,
-        label_coeffs=label_coeffs,
         data_generation_type=config.task_config.data_generation_type,
     )
 
