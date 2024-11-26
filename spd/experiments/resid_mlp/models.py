@@ -176,10 +176,14 @@ class InstancesParamComponentsRankPenalty(nn.Module):
         )
 
         if topk_mask is not None:
-            inner_acts = einops.einsum(inner_acts, topk_mask, "batch k h, batch k -> batch k h")
+            inner_acts = einops.einsum(
+                inner_acts,
+                topk_mask,
+                "batch n_instances k d_out, batch n_instances k -> batch n_instances k d_out",
+            )
 
         # Sum over subnetwork dimension
-        out = einops.einsum(inner_acts, "batch k h -> batch h")
+        out = einops.einsum(inner_acts, "batch n_instances k d_out -> batch n_instances d_out")
 
         # Add the bias if it exists
         if self.bias is not None:
