@@ -409,6 +409,7 @@ class ResidualMLPSPDRankPenaltyModel(SPDRankPenaltyModel):
         self.act_fn = F.gelu if act_fn_name == "gelu" else F.relu
 
         self.W_E = nn.Parameter(torch.empty(n_instances, n_features, d_embed))
+        self.W_U = nn.Parameter(torch.empty(n_instances, d_embed, n_features))
 
         self.m = min(d_embed, d_mlp) if m is None else m
 
@@ -481,7 +482,12 @@ class ResidualMLPSPDRankPenaltyModel(SPDRankPenaltyModel):
             layer_acts[f"layers.{i}.linear2"] = layer_acts_i[1]
             inner_acts[f"layers.{i}.linear1"] = inner_acts_i[0]
             inner_acts[f"layers.{i}.linear2"] = inner_acts_i[1]
-        return residual, layer_acts, inner_acts
+        out = einops.einsum(
+            residual,
+            self.W_U,
+            "batch n_instances d_embed, n_instances d_embed n_features -> batch n_instances n_features",
+        )
+        return out, layer_acts, inner_acts
 
     def set_subnet_to_zero(
         self, subnet_idx: int
