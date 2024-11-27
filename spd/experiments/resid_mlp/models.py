@@ -379,7 +379,12 @@ class ResidualMLPModel(Model):
     ) -> dict[
         str, Float[Tensor, "n_instances d_out d_in"] | Float[Tensor, "n_instances d_in d_out"]
     ]:
-        """Dictionary of all parameters which will be decomposed with SPD."""
+        """Dictionary of all parameters which will be decomposed with SPD.
+
+        Note that we exclude biases which we never decompose.
+
+        TODO: Decompose embedding matrices if desired.
+        """
         params = {}
         for i, mlp in enumerate(self.layers):
             params[f"layers.{i}.linear1"] = mlp.linear1

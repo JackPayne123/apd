@@ -42,6 +42,9 @@ class ResidualMLPDataset(SparseFeatureDataset):
         self.label_coeffs = label_coeffs
         self.label_fn = None
 
+        assert not (
+            label_type == "abs" and act_fn_name is not None
+        ), "act_fn_name not supported for abs labels"
         if calc_labels:
             self.label_coeffs = (
                 self.calc_label_coeffs() if label_coeffs is None else label_coeffs
@@ -76,17 +79,6 @@ class ResidualMLPDataset(SparseFeatureDataset):
         elif label_type == "abs":
             return lambda batch: self.calc_abs_labels(batch)
 
-    def _calc_weighted_inputs(
-        self,
-        batch: Float[Tensor, "batch n_instances n_functions"],
-        coeffs: Float[Tensor, "n_instances n_functions"],
-    ) -> Float[Tensor, "batch n_instances n_functions"]:
-        return einops.einsum(
-            batch,
-            coeffs,
-            "batch n_instances n_functions, n_instances n_functions -> batch n_instances n_functions",
-        )
-
     def calc_act_plus_resid_labels(
         self,
         batch: Float[Tensor, "batch n_instances n_functions"],
@@ -94,7 +86,11 @@ class ResidualMLPDataset(SparseFeatureDataset):
     ) -> Float[Tensor, "batch n_instances n_functions"]:
         """Calculate the corresponding labels for the batch using `act_fn(coeffs*x) + x`."""
         assert self.label_coeffs is not None
-        weighted_inputs = self._calc_weighted_inputs(batch, self.label_coeffs)
+        weighted_inputs = einops.einsum(
+            batch,
+            self.label_coeffs,
+            "batch n_instances n_functions, n_instances n_functions -> batch n_instances n_functions",
+        )
         assert act_fn_name in ["relu", "gelu"], "act_fn_name must be 'relu' or 'gelu'"
         act_fn = F.relu if act_fn_name == "relu" else F.gelu
         labels = act_fn(weighted_inputs) + batch
@@ -104,7 +100,11 @@ class ResidualMLPDataset(SparseFeatureDataset):
         self, batch: Float[Tensor, "batch n_instances n_features"]
     ) -> Float[Tensor, "batch n_instances n_features"]:
         assert self.label_coeffs is not None
-        weighted_inputs = self._calc_weighted_inputs(batch, self.label_coeffs)
+        weighted_inputs = einops.einsum(
+            batch,
+            self.label_coeffs,
+            "batch n_instances n_functions, n_instances n_functions -> batch n_instances n_functions",
+        )
         return torch.abs(weighted_inputs)
 
     def calc_label_coeffs(self) -> Float[Tensor, "n_instances n_features"]:
