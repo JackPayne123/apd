@@ -300,14 +300,14 @@ class ResidualMLPModel(Model):
         init_param_(self.W_U)
 
         assert act_fn_name in ["gelu", "relu"]
-        act_fn = F.gelu if act_fn_name == "gelu" else F.relu
+        self.act_fn = F.gelu if act_fn_name == "gelu" else F.relu
         self.layers = nn.ModuleList(
             [
                 InstancesMLP(
                     n_instances=n_instances,
                     d_model=d_embed,
                     d_mlp=d_mlp,
-                    act_fn=act_fn,
+                    act_fn=self.act_fn,
                     in_bias=in_bias,
                     out_bias=out_bias,
                 )

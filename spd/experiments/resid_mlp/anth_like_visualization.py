@@ -72,8 +72,12 @@ def plot_activations_single_features(
             ]
             axs[2 * l, i].imshow(pos_activations, aspect="auto")
             axs[2 * l + 1, i].imshow(neg_activations, aspect="auto")
-            axs[2 * l, i].set_title(f"Layer {l} (positive)")
-            axs[2 * l + 1, i].set_title(f"Layer {l} (negative)")
+            axs[2 * l, i].set_title(f"Instance {i}, Layer {l} (positive)")
+            axs[2 * l + 1, i].set_title(f"Instance {i}, Layer {l} (negative)")
+            axs[2 * l, i].set_xlabel("Neuron")
+            axs[2 * l, i].set_ylabel("Input feature (positive)")
+            axs[2 * l + 1, i].set_xlabel("Neuron")
+            axs[2 * l + 1, i].set_ylabel("Input feature (negative)")
     fig.suptitle(
         "Hidden activations of MLP layers when activating single input features (positively and negatively)"
     )
@@ -94,7 +98,8 @@ if __name__ == "__main__":
     out_dir = Path(__file__).parent / "out"
     model_path = (
         out_dir
-        / "resid_mlp_identity_abs_n-instances10_n-features100_d-resid100_d-mlp100_n-layers1_seed0"
+        # / "resid_mlp_identity_abs_n-instances10_n-features100_d-resid100_d-mlp100_n-layers1_seed0"
+        / "resid_mlp_identity_abs_n-instances10_n-features100_d-resid100_d-mlp40_n-layers1_seed0"
     )
 
     plot_save_dir = model_path / "anth_like_visualization"
@@ -135,7 +140,6 @@ if __name__ == "__main__":
         label_type=config.label_type,
         act_fn_name=config.act_fn_name,
         label_fn_seed=config.label_fn_seed,
-        label_coeffs=label_coeffs,
         data_generation_type=config.data_generation_type,
     )
     dataloader = DatasetGeneratedDataLoader(dataset, batch_size=config.batch_size, shuffle=False)
