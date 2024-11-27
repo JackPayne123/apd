@@ -2,13 +2,13 @@
 
 import json
 from pathlib import Path
-from typing import Literal
+from typing import Literal, Self
 
 import torch
 import wandb
 import yaml
 from jaxtyping import Float
-from pydantic import BaseModel, ConfigDict, PositiveFloat, PositiveInt
+from pydantic import BaseModel, ConfigDict, PositiveFloat, PositiveInt, model_validator
 from torch import Tensor, nn
 from torch.nn import functional as F
 
@@ -42,6 +42,19 @@ class Config(BaseModel):
     print_freq: PositiveInt
     lr: PositiveFloat
     lr_schedule: Literal["linear", "constant", "cosine", "exponential"] = "constant"
+    fixed_random_embedding: bool = False
+    fixed_identity_embedding: bool = False
+
+    @model_validator(mode="after")
+    def validate_model(self) -> Self:
+        assert not (
+            self.fixed_random_embedding and self.fixed_identity_embedding
+        ), "Can't have both fixed_random_embedding and fixed_identity_embedding"
+        if self.fixed_identity_embedding:
+            assert (
+                self.n_features == self.d_embed
+            ), "n_features must equal d_embed if we are using an identity embedding matrix"
+        return self
 
 
 def train(
@@ -148,8 +161,18 @@ if __name__ == "__main__":
         out_bias=config.out_bias,
     ).to(device)
 
-    # Don't train the Embedding matrix
-    model.W_E.requires_grad = False
+    if config.fixed_random_embedding:
+        model.W_E.data[:, :] = torch.randn(config.n_features, config.d_embed, device=device)
+        # Ensure they are norm 1
+        model.W_E.data /= model.W_E.data.norm(dim=-1, keepdim=True)
+    elif config.fixed_identity_embedding:
+        assert config.n_features == config.d_embed
+        # Make W_E the identity matrix
+        model.W_E.data[:, :] = torch.eye(config.d_embed, device=device)
+
+    if config.fixed_random_embedding or config.fixed_identity_embedding:
+        # Don't train the Embedding matrix
+        model.W_E.requires_grad = False
 
     label_coeffs = None
     if config.use_trivial_label_coeffs:
