@@ -35,6 +35,7 @@ class Config(BaseModel):
     d_mlp: PositiveInt
     n_layers: PositiveInt
     act_fn_name: Literal["gelu", "relu"]
+    apply_output_act_fn: bool = False
     in_bias: bool = False
     out_bias: bool = False
     train_embeds: bool = True
@@ -138,6 +139,7 @@ if __name__ == "__main__":
         d_mlp=5,
         n_layers=1,
         act_fn_name="relu",
+        apply_output_act_fn=False,
         label_type="abs",
         data_generation_type="at_least_zero_active",
         use_trivial_label_coeffs=True,

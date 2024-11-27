@@ -280,6 +280,7 @@ class ResidualMLPModel(Model):
         n_layers: int,
         n_instances: int,
         act_fn_name: Literal["gelu", "relu"],
+        apply_output_act_fn: bool = False,
         in_bias: bool = False,
         out_bias: bool = False,
     ):
@@ -291,7 +292,7 @@ class ResidualMLPModel(Model):
         self.n_instances = n_instances
         assert act_fn_name in ["gelu", "relu"]
         self.act_fn = F.gelu if act_fn_name == "gelu" else F.relu
-
+        self.apply_output_act_fn = apply_output_act_fn
         self.W_E = nn.Parameter(torch.empty(n_instances, n_features, d_embed))
         init_param_(self.W_E)
         self.W_U = nn.Parameter(torch.empty(n_instances, d_embed, n_features))
@@ -343,7 +344,8 @@ class ResidualMLPModel(Model):
             self.W_U,
             "batch n_instances d_embed, n_instances d_embed n_features -> batch n_instances n_features",
         )
-
+        if self.apply_output_act_fn:
+            out = self.act_fn(out)
         return out, layer_pre_acts, layer_post_acts
 
     @classmethod
@@ -394,6 +396,7 @@ class ResidualMLPSPDRankPenaltyModel(SPDRankPenaltyModel):
         k: int,
         init_scale: float,
         act_fn_name: Literal["gelu", "relu"],
+        apply_output_act_fn: bool = False,
         in_bias: bool = False,
         out_bias: bool = False,
         m: int | None = None,
@@ -487,6 +490,8 @@ class ResidualMLPSPDRankPenaltyModel(SPDRankPenaltyModel):
             self.W_U,
             "batch n_instances d_embed, n_instances d_embed n_features -> batch n_instances n_features",
         )
+        if self.apply_output_act_fn:
+            out = self.act_fn(out)
         return out, layer_acts, inner_acts
 
     def set_subnet_to_zero(

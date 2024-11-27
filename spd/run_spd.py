@@ -95,6 +95,7 @@ class ResidualMLPConfig(BaseModel):
         "exactly_one_active", "exactly_two_active", "at_least_zero_active"
     ] = "at_least_zero_active"
     act_fn_name: Literal["gelu", "relu"]
+    apply_output_act_fn: bool = False
     in_bias: bool = False
     out_bias: bool = False
     pretrained_model_path: RootPath
