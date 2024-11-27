@@ -9,7 +9,7 @@ import torch
 import wandb
 import yaml
 from jaxtyping import Float
-from pydantic import BaseModel, ConfigDict, PositiveFloat, PositiveInt, model_validator
+from pydantic import BaseModel, ConfigDict, Field, PositiveFloat, PositiveInt, model_validator
 from torch import Tensor, nn
 from torch.nn import functional as F
 
@@ -34,7 +34,10 @@ class Config(BaseModel):
     d_embed: PositiveInt
     d_mlp: PositiveInt
     n_layers: PositiveInt
-    act_fn_name: Literal["gelu", "relu"]
+    act_fn_name: Literal["gelu", "relu"] = Field(
+        description="Defines the activation function in the model. Also used in the labeling "
+        "function if label_type is act_plus_resid."
+    )
     apply_output_act_fn: bool
     in_bias: bool
     out_bias: bool
@@ -167,10 +170,6 @@ def run_train(config: Config, device: str) -> None:
                 n_instances=config.n_instances,
             )
 
-    label_coeffs = None
-    if config.use_trivial_label_coeffs:
-        label_coeffs = torch.ones(config.n_instances, config.n_features, device=device)
-
     dataset = ResidualMLPDataset(
         n_instances=config.n_instances,
         n_features=config.n_features,
@@ -180,7 +179,7 @@ def run_train(config: Config, device: str) -> None:
         label_type=config.label_type,
         act_fn_name=config.act_fn_name,
         label_fn_seed=config.label_fn_seed,
-        label_coeffs=label_coeffs,
+        use_trivial_label_coeffs=config.use_trivial_label_coeffs,
         data_generation_type=config.data_generation_type,
     )
     dataloader = DatasetGeneratedDataLoader(dataset, batch_size=config.batch_size, shuffle=False)
@@ -196,7 +195,7 @@ def run_train(config: Config, device: str) -> None:
 
 
 if __name__ == "__main__":
-    device = "cpu"
+    device = "cuda" if torch.cuda.is_available() else "cpu"
     config = Config(
         seed=0,
         label_fn_seed=0,
