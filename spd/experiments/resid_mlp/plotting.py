@@ -50,7 +50,8 @@ def plot_individual_feature_response(
     # Plot labels
     inputs = batch[torch.arange(n_features), instance_idx, torch.arange(n_features)]
     label_fn = F.relu if task_config["act_fn_name"] == "relu" else F.gelu
-    ax.plot(torch.arange(n_features), inputs + label_fn(inputs), color="red", label="Target")
+    targets = inputs + label_fn(inputs)
+    ax.plot(torch.arange(n_features), targets.cpu().detach(), color="red", label="Target")
     ax.legend()
 
     # Colorbar

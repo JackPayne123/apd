@@ -19,7 +19,7 @@ path = (
 )
 
 set_seed(0)
-device = "cpu" if torch.cuda.is_available() else "cpu"
+device = "cuda" if torch.cuda.is_available() else "cpu"
 model, task_config, label_coeffs = ResidualMLPModel.from_pretrained(path)
 model = model.to(device)
 dataset = ResidualMLPDataset(
