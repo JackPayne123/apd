@@ -9,7 +9,7 @@ import torch
 import wandb
 import yaml
 from jaxtyping import Float
-from pydantic import BaseModel, ConfigDict, PositiveFloat, PositiveInt, model_validator
+from pydantic import BaseModel, ConfigDict, Field, PositiveFloat, PositiveInt, model_validator
 from torch import Tensor, nn
 from torch.nn import functional as F
 
@@ -34,11 +34,13 @@ class Config(BaseModel):
     d_embed: PositiveInt
     d_mlp: PositiveInt
     n_layers: PositiveInt
-    act_fn_name: Literal["gelu", "relu"]
-    apply_output_act_fn: bool = False
-    in_bias: bool = False
-    out_bias: bool = False
-    train_embeds: bool = True
+    act_fn_name: Literal["gelu", "relu"] = Field(
+        description="Defines the activation function in the model. Also used in the labeling "
+        "function if label_type is act_plus_resid."
+    )
+    apply_output_act_fn: bool
+    in_bias: bool
+    out_bias: bool
     feature_probability: PositiveFloat
     data_generation_type: Literal[
         "exactly_one_active", "exactly_two_active", "at_least_zero_active"
@@ -128,32 +130,7 @@ def train(
     return final_loss
 
 
-if __name__ == "__main__":
-    device = "cpu"
-    config = Config(
-        seed=0,
-        label_fn_seed=0,
-        n_instances=10,
-        n_features=100,
-        d_embed=100,
-        d_mlp=100,
-        n_layers=1,
-        act_fn_name="relu",
-        apply_output_act_fn=True,
-        label_type="abs",
-        data_generation_type="at_least_zero_active",
-        use_trivial_label_coeffs=True,
-        in_bias=False,
-        out_bias=False,
-        feature_probability=1.0,
-        batch_size=256,
-        steps=50_000,
-        print_freq=100,
-        lr=5e-3,
-        lr_schedule="cosine",
-    )
-
-    set_seed(config.seed)
+def run_train(config: Config, device: str) -> None:
     run_name = (
         f"resid_mlp_identity_{config.label_type}_n-instances{config.n_instances}_"
         f"n-features{config.n_features}_d-resid{config.d_embed}_"
@@ -194,10 +171,6 @@ if __name__ == "__main__":
                 n_instances=config.n_instances,
             )
 
-    label_coeffs = None
-    if config.use_trivial_label_coeffs:
-        label_coeffs = torch.ones(config.n_instances, config.n_features, device=device)
-
     dataset = ResidualMLPDataset(
         n_instances=config.n_instances,
         n_features=config.n_features,
@@ -207,7 +180,7 @@ if __name__ == "__main__":
         label_type=config.label_type,
         act_fn_name=config.act_fn_name,
         label_fn_seed=config.label_fn_seed,
-        label_coeffs=label_coeffs,
+        use_trivial_label_coeffs=config.use_trivial_label_coeffs,
         data_generation_type=config.data_generation_type,
     )
     dataloader = DatasetGeneratedDataLoader(dataset, batch_size=config.batch_size, shuffle=False)
@@ -220,3 +193,33 @@ if __name__ == "__main__":
         device=device,
         out_dir=out_dir,
     )
+
+
+if __name__ == "__main__":
+    device = "cpu"
+    config = Config(
+        seed=0,
+        label_fn_seed=0,
+        n_instances=10,
+        n_features=5,
+        d_embed=5,
+        d_mlp=5,
+        n_layers=1,
+        act_fn_name="relu",
+        apply_output_act_fn=False,
+        label_type="abs",
+        data_generation_type="at_least_zero_active",
+        use_trivial_label_coeffs=True,
+        in_bias=False,
+        out_bias=False,
+        feature_probability=0.2,
+        batch_size=256,
+        steps=10_000,
+        print_freq=100,
+        lr=1e-2,
+        lr_schedule="cosine",
+    )
+
+    set_seed(config.seed)
+
+    run_train(config, device)

@@ -1,4 +1,3 @@
-from collections.abc import Callable
 from typing import Literal
 
 import einops
@@ -21,11 +20,33 @@ class ResidualMLPDataset(SparseFeatureDataset):
         label_type: Literal["act_plus_resid", "abs"] | None = None,
         act_fn_name: Literal["relu", "gelu"] | None = None,
         label_fn_seed: int | None = None,
-        label_coeffs: Float[Tensor, "n_instances n_features"] | None = None,
+        use_trivial_label_coeffs: bool = False,
         data_generation_type: Literal[
             "exactly_one_active", "exactly_two_active", "at_least_zero_active"
         ] = "at_least_zero_active",
     ):
+        """Sparse feature dataset for use in training a resid_mlp model or running SPD on it.
+
+        If calc_labels is True, labels are of the form `act_fn(coeffs*x) + x` or `abs(coeffs*x)`,
+        depending on label_type, act_fn_name, and label_fn_seed.
+
+        Otherwise, the labels are the same as the inputs.
+
+        Args:
+            n_instances: The number of instances in the model and dataset.
+            n_features: The number of features in the model and dataset.
+            feature_probability: The probability that a feature is active in a given instance.
+            device: The device to calculate and store the data on.
+            calc_labels: Whether to calculate labels. If False, labels are the same as the inputs.
+            label_type: The type of labels to calculate. Ignored if calc_labels is False.
+            act_fn_name: Used for labels if calc_labels is True and label_type is act_plus_resid.
+                Ignored if calc_labels is False.
+            label_fn_seed: The seed to use for generating the label coefficients. Ignored if
+                calc_labels is False or use_trivial_label_coeffs is True.
+            use_trivial_label_coeffs: Whether to use trivial label coefficients (ones).
+                Ignored if calc_labels is False.
+            data_generation_type: The number of active features in each sample.
+        """
         super().__init__(
             n_instances=n_instances,
             n_features=n_features,
@@ -35,20 +56,24 @@ class ResidualMLPDataset(SparseFeatureDataset):
             value_range=(-1.0, 1.0),
         )
 
-        self.calc_labels = calc_labels
-        self.label_type = label_type
-        self.act_fn_name = act_fn_name
-        self.label_fn_seed = label_fn_seed
-        self.label_coeffs = label_coeffs
         self.label_fn = None
+        self.label_coeffs = None
 
         if calc_labels:
             self.label_coeffs = (
-                self.calc_label_coeffs() if label_coeffs is None else label_coeffs
+                self.calc_label_coeffs(label_fn_seed)
+                if not use_trivial_label_coeffs
+                else torch.ones(n_instances, n_features, device=device)
             ).to(self.device)
 
             assert label_type is not None, "Must provide label_type if calc_labels is True"
-            self.label_fn = self.create_label_fn(label_type, act_fn_name)
+            if label_type == "act_plus_resid":
+                assert act_fn_name in ["relu", "gelu"], "act_fn_name must be 'relu' or 'gelu'"
+                self.label_fn = lambda batch: self.calc_act_plus_resid_labels(
+                    batch=batch, act_fn_name=act_fn_name
+                )
+            elif label_type == "abs":
+                self.label_fn = lambda batch: self.calc_abs_labels(batch)
 
     def generate_batch(
         self, batch_size: int
@@ -60,33 +85,6 @@ class ResidualMLPDataset(SparseFeatureDataset):
         labels = self.label_fn(batch) if self.label_fn is not None else parent_labels
         return batch, labels
 
-    def create_label_fn(
-        self,
-        label_type: Literal["act_plus_resid", "abs"],
-        act_fn_name: Literal["relu", "gelu"] | None = None,
-    ) -> Callable[
-        [Float[Tensor, "batch n_instances n_features"]],
-        Float[Tensor, "batch n_instances n_features"],
-    ]:
-        if label_type == "act_plus_resid":
-            assert act_fn_name in ["relu", "gelu"], "act_fn_name must be 'relu' or 'gelu'"
-            return lambda batch: self.calc_act_plus_resid_labels(
-                batch=batch, act_fn_name=act_fn_name
-            )
-        elif label_type == "abs":
-            return lambda batch: self.calc_abs_labels(batch)
-
-    def _calc_weighted_inputs(
-        self,
-        batch: Float[Tensor, "batch n_instances n_functions"],
-        coeffs: Float[Tensor, "n_instances n_functions"],
-    ) -> Float[Tensor, "batch n_instances n_functions"]:
-        return einops.einsum(
-            batch,
-            coeffs,
-            "batch n_instances n_functions, n_instances n_functions -> batch n_instances n_functions",
-        )
-
     def calc_act_plus_resid_labels(
         self,
         batch: Float[Tensor, "batch n_instances n_functions"],
@@ -94,7 +92,11 @@ class ResidualMLPDataset(SparseFeatureDataset):
     ) -> Float[Tensor, "batch n_instances n_functions"]:
         """Calculate the corresponding labels for the batch using `act_fn(coeffs*x) + x`."""
         assert self.label_coeffs is not None
-        weighted_inputs = self._calc_weighted_inputs(batch, self.label_coeffs)
+        weighted_inputs = einops.einsum(
+            batch,
+            self.label_coeffs,
+            "batch n_instances n_functions, n_instances n_functions -> batch n_instances n_functions",
+        )
         assert act_fn_name in ["relu", "gelu"], "act_fn_name must be 'relu' or 'gelu'"
         act_fn = F.relu if act_fn_name == "relu" else F.gelu
         labels = act_fn(weighted_inputs) + batch
@@ -104,12 +106,18 @@ class ResidualMLPDataset(SparseFeatureDataset):
         self, batch: Float[Tensor, "batch n_instances n_features"]
     ) -> Float[Tensor, "batch n_instances n_features"]:
         assert self.label_coeffs is not None
-        weighted_inputs = self._calc_weighted_inputs(batch, self.label_coeffs)
+        weighted_inputs = einops.einsum(
+            batch,
+            self.label_coeffs,
+            "batch n_instances n_functions, n_instances n_functions -> batch n_instances n_functions",
+        )
         return torch.abs(weighted_inputs)
 
-    def calc_label_coeffs(self) -> Float[Tensor, "n_instances n_features"]:
+    def calc_label_coeffs(
+        self, label_fn_seed: int | None = None
+    ) -> Float[Tensor, "n_instances n_features"]:
         """Create random coeffs between [1, 2] using label_fn_seed if provided."""
         gen = torch.Generator(device=self.device)
-        if self.label_fn_seed is not None:
-            gen.manual_seed(self.label_fn_seed)
+        if label_fn_seed is not None:
+            gen.manual_seed(label_fn_seed)
         return torch.rand(self.n_instances, self.n_features, generator=gen, device=self.device) + 1

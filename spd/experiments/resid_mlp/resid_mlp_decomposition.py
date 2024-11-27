@@ -225,7 +225,7 @@ def save_target_model_info(
     out_dir: Path,
     target_model: ResidualMLPModel,
     target_model_config_dict: dict[str, Any],
-    label_coeffs: Float[Tensor, "n_instances"],
+    label_coeffs: Float[Tensor, " n_instances"],
 ) -> None:
     torch.save(target_model.state_dict(), out_dir / "target_model.pth")
 
@@ -297,8 +297,10 @@ def main(
             n_instances=target_model.n_instances,
             k=config.task_config.k,
             init_scale=config.task_config.init_scale,
-            act_fn_name=config.task_config.act_fn_name,
-            apply_output_act_fn=config.task_config.apply_output_act_fn,
+            act_fn_name=target_model.act_fn_name,  # type: ignore (pyright false positive)
+            apply_output_act_fn=target_model.apply_output_act_fn,
+            in_bias=target_model.in_bias,
+            out_bias=target_model.out_bias,
             m=config.m,
         ).to(device)
     else:
@@ -310,12 +312,12 @@ def main(
 
     # Copy the biases from the target model to the SPD model and set requires_grad to False
     for i in range(target_model.n_layers):
-        if config.task_config.in_bias:
+        if target_model.in_bias:
             model.layers[i].linear1.bias.data[:] = (
                 target_model.layers[i].input_layer.bias.data.detach().clone()
             )
             model.layers[i].linear1.bias.requires_grad = False
-        if config.task_config.out_bias:
+        if target_model.out_bias:
             model.layers[i].linear2.bias.data[:] = (
                 target_model.layers[i].output_layer.bias.data.detach().clone()
             )

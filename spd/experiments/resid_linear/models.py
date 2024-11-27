@@ -37,7 +37,10 @@ class ResidualLinearModel(Model):
         self.W_E.data /= self.W_E.data.norm(dim=1, keepdim=True)
 
         self.layers = nn.ModuleList(
-            [MLP(d_model=d_embed, d_mlp=d_mlp, act_fn=F.gelu) for _ in range(n_layers)]
+            [
+                MLP(d_model=d_embed, d_mlp=d_mlp, act_fn=F.gelu, in_bias=True, out_bias=True)
+                for _ in range(n_layers)
+            ]
         )
 
     def forward(
