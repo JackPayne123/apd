@@ -17,14 +17,16 @@ from spd.experiments.resid_mlp.models import ResidualMLPModel
 from spd.experiments.resid_mlp.resid_mlp_dataset import (
     ResidualMLPDataset,
 )
+from spd.log import logger
 from spd.run_spd import get_lr_schedule_fn
-from spd.utils import DatasetGeneratedDataLoader, set_seed
+from spd.utils import DatasetGeneratedDataLoader, init_wandb, set_seed
 
 wandb.require("core")
 
 
 class Config(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
+    wandb_project: str | None = None  # The name of the wandb project (if None, don't log to wandb)
     seed: int = 0
     label_fn_seed: int = 0
     label_type: Literal["act_plus_resid", "abs"] = "act_plus_resid"
@@ -76,10 +78,14 @@ def train(
         ]
     ],
     device: str,
-    out_dir: Path | None = None,
+    out_dir: Path,
+    run_name: str,
 ) -> float | None:
-    if out_dir is not None:
-        out_dir.mkdir(parents=True, exist_ok=True)
+    if config.wandb_project:
+        config = init_wandb(config, config.wandb_project, name=run_name)
+        # save_config_to_wandb(config, filename="train_config.yaml")
+
+    out_dir.mkdir(parents=True, exist_ok=True)
 
     optimizer = torch.optim.AdamW(trainable_params, lr=config.lr, weight_decay=0.01)
 
@@ -105,37 +111,53 @@ def train(
         optimizer.step()
         final_loss = loss.item()
         if step % config.print_freq == 0:
-            print(f"Step {step}: loss={final_loss}, lr={current_lr}")
+            logger.info(f"Step {step}: loss={final_loss}, lr={current_lr}")
+            if config.wandb_project:
+                wandb.log({"loss": final_loss, "lr": current_lr}, step=step)
 
-    if out_dir is not None:
-        model_path = out_dir / "target_model.pth"
-        torch.save(model.state_dict(), model_path)
-        print(f"Saved model to {model_path}")
+    # Save model
+    model_path = out_dir / "target_model.pth"
+    torch.save(model.state_dict(), model_path)
+    logger.info(f"Saved model to {model_path}")
+    if config.wandb_project:
+        wandb.save(str(model_path), base_path=out_dir)
 
-        config_path = out_dir / "target_model_config.yaml"
-        with open(config_path, "w") as f:
-            yaml.dump(config.model_dump(mode="json"), f, indent=2)
-        print(f"Saved config to {config_path}")
+    # Save config
+    config_path = out_dir / "target_model_train_config.yaml"
+    with open(config_path, "w") as f:
+        yaml.dump(config.model_dump(mode="json"), f, indent=2)
+    logger.info(f"Saved config to {config_path}")
+    if config.wandb_project:
+        wandb.save(str(config_path), base_path=out_dir)
 
-        # Save the coefficients used to generate the labels if label_type is act_plus_resid
-        assert isinstance(dataloader.dataset, ResidualMLPDataset)
-        assert dataloader.dataset.label_coeffs is not None
-        label_coeffs = dataloader.dataset.label_coeffs.tolist()
-        label_coeffs_path = out_dir / "label_coeffs.json"
-        with open(label_coeffs_path, "w") as f:
-            json.dump(label_coeffs, f)
-        print(f"Saved label coefficients to {label_coeffs_path}")
+    # Save the coefficients used to generate the labels
+    assert isinstance(dataloader.dataset, ResidualMLPDataset)
+    assert dataloader.dataset.label_coeffs is not None
+    label_coeffs = dataloader.dataset.label_coeffs.tolist()
+    label_coeffs_path = out_dir / "label_coeffs.json"
+    with open(label_coeffs_path, "w") as f:
+        json.dump(label_coeffs, f)
+    logger.info(f"Saved label coefficients to {label_coeffs_path}")
+    if config.wandb_project:
+        wandb.save(str(label_coeffs_path), base_path=out_dir)
 
-    print(f"Final loss: {final_loss}")
+    logger.info(f"Final loss: {final_loss}")
+
+    if config.wandb_project:
+        wandb.finish()
+
     return final_loss
 
 
 def run_train(config: Config, device: str) -> None:
+    set_seed(config.seed)
+
     run_name = (
         f"resid_mlp_identity_{config.label_type}_n-instances{config.n_instances}_"
         f"n-features{config.n_features}_d-resid{config.d_embed}_"
         f"d-mlp{config.d_mlp}_n-layers{config.n_layers}_seed{config.seed}"
     )
+
     out_dir = Path(__file__).parent / "out" / run_name
 
     model = ResidualMLPModel(
@@ -191,12 +213,14 @@ def run_train(config: Config, device: str) -> None:
         dataloader=dataloader,
         device=device,
         out_dir=out_dir,
+        run_name=run_name,
     )
 
 
 if __name__ == "__main__":
     device = "cpu"
     config = Config(
+        wandb_project="spd-train-resid-linear",
         seed=0,
         label_fn_seed=0,
         n_instances=10,
@@ -219,6 +243,4 @@ if __name__ == "__main__":
         lr_schedule="cosine",
     )
 
-    set_seed(config.seed)
-
-    run_train(config, device)
+    run_train(config, device=device)

@@ -158,7 +158,9 @@ def replace_pydantic_model(model: BaseModelType, *updates: dict[str, Any]) -> Ba
     return model.__class__(**deep_update(model.model_dump(), *updates))
 
 
-def init_wandb(config: T, project: str, sweep_config_path: Path | str | None) -> T:
+def init_wandb(
+    config: T, project: str, sweep_config_path: Path | str | None = None, name: str | None = None
+) -> T:
     """Initialize Weights & Biases and return a config updated with sweep hyperparameters.
 
     If no sweep config is provided, the config is returned as is.
@@ -172,6 +174,7 @@ def init_wandb(config: T, project: str, sweep_config_path: Path | str | None) ->
         project: The name of the wandb project.
         sweep_config_path: The path to the sweep config file. If provided, updates the config with
             the hyperparameters from this instance of the sweep.
+        name: The name of the wandb run.
 
     Returns:
         Config updated with sweep hyperparameters (if any).
@@ -179,10 +182,10 @@ def init_wandb(config: T, project: str, sweep_config_path: Path | str | None) ->
     if sweep_config_path is not None:
         with open(sweep_config_path) as f:
             sweep_data = yaml.safe_load(f)
-        wandb.init(config=sweep_data, save_code=True)
+        wandb.init(config=sweep_data, save_code=True, name=name)
     else:
         load_dotenv(override=True)
-        wandb.init(project=project, entity=os.getenv("WANDB_ENTITY"), save_code=True)
+        wandb.init(project=project, entity=os.getenv("WANDB_ENTITY"), save_code=True, name=name)
 
     # Update the config with the hyperparameters for this sweep (if any)
     config = replace_pydantic_model(config, wandb.config)

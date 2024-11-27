@@ -607,7 +607,7 @@ class ResidualMLPSPDRankPenaltyModel(SPDRankPenaltyModel):
         model_dir = path.parent
         return cls._load_model(
             config_path=model_dir / "final_config.yaml",
-            target_model_config_path=model_dir / "target_model_config.yaml",
+            target_model_config_path=model_dir / "target_model_train_config.yaml",
             checkpoint_path=path,
             label_coeffs_path=model_dir / "label_coeffs.json",
         )
@@ -633,7 +633,7 @@ class ResidualMLPSPDRankPenaltyModel(SPDRankPenaltyModel):
         )[-1]
 
         config_path = download_wandb_file(run, "final_config.yaml")
-        target_model_config_path = download_wandb_file(run, "target_model_config.yaml")
+        target_model_config_path = download_wandb_file(run, "target_model_train_config.yaml")
         label_coeffs_path = download_wandb_file(run, "label_coeffs.json")
         checkpoint_path = download_wandb_file(run, latest_checkpoint_remote.name)
 
