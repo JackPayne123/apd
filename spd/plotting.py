@@ -29,7 +29,7 @@ def plot_subnetwork_attributions_statistics(
         ncols=n_instances, nrows=1, figsize=(5 * n_instances, 5), constrained_layout=True
     )
 
-    axs = np.array(axs)
+    axs = np.array([axs]) if n_instances == 1 else np.array(axs)
     for i, ax in enumerate(axs):
         values = topk_mask[:, i].sum(dim=1).cpu().detach().numpy()
         bins = list(range(int(values.min().item()), int(values.max().item()) + 2))
@@ -108,7 +108,7 @@ def plot_subnetwork_correlations(
         ncols=n_instances, nrows=1, figsize=(5 * n_instances, 5), constrained_layout=True
     )
 
-    axs = np.array(axs)
+    axs = np.array([axs]) if n_instances == 1 else np.array(axs)
     im, ax = None, None
     for i, ax in enumerate(axs):
         # Calculate correlation matrix
