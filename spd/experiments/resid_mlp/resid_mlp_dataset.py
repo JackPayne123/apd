@@ -1,4 +1,3 @@
-from collections.abc import Callable
 from typing import Literal
 
 import einops
@@ -51,7 +50,13 @@ class ResidualMLPDataset(SparseFeatureDataset):
             ).to(self.device)
 
             assert label_type is not None, "Must provide label_type if calc_labels is True"
-            self.label_fn = self.create_label_fn(label_type, act_fn_name)
+            if label_type == "act_plus_resid":
+                assert act_fn_name in ["relu", "gelu"], "act_fn_name must be 'relu' or 'gelu'"
+                self.label_fn = lambda batch: self.calc_act_plus_resid_labels(
+                    batch=batch, act_fn_name=act_fn_name
+                )
+            elif label_type == "abs":
+                self.label_fn = lambda batch: self.calc_abs_labels(batch)
 
     def generate_batch(
         self, batch_size: int
@@ -62,22 +67,6 @@ class ResidualMLPDataset(SparseFeatureDataset):
         batch, parent_labels = super().generate_batch(batch_size)
         labels = self.label_fn(batch) if self.label_fn is not None else parent_labels
         return batch, labels
-
-    def create_label_fn(
-        self,
-        label_type: Literal["act_plus_resid", "abs"],
-        act_fn_name: Literal["relu", "gelu"] | None = None,
-    ) -> Callable[
-        [Float[Tensor, "batch n_instances n_features"]],
-        Float[Tensor, "batch n_instances n_features"],
-    ]:
-        if label_type == "act_plus_resid":
-            assert act_fn_name in ["relu", "gelu"], "act_fn_name must be 'relu' or 'gelu'"
-            return lambda batch: self.calc_act_plus_resid_labels(
-                batch=batch, act_fn_name=act_fn_name
-            )
-        elif label_type == "abs":
-            return lambda batch: self.calc_abs_labels(batch)
 
     def calc_act_plus_resid_labels(
         self,
