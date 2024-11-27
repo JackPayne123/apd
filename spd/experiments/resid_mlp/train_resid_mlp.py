@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 from typing import Literal, Self
 
+import einops
 import torch
 import wandb
 import yaml
@@ -62,7 +63,10 @@ def train(
     model: ResidualMLPModel,
     trainable_params: list[nn.Parameter],
     dataloader: DatasetGeneratedDataLoader[
-        tuple[Float[Tensor, "batch n_features"], Float[Tensor, "batch d_resid"]]
+        tuple[
+            Float[Tensor, "batch n_instances n_features"],
+            Float[Tensor, "batch n_instances d_resid"],
+        ]
     ],
     device: str,
     out_dir: Path | None = None,
@@ -162,14 +166,19 @@ if __name__ == "__main__":
     ).to(device)
 
     if config.fixed_random_embedding:
-        model.W_E.data[:, :] = torch.randn(config.n_features, config.d_embed, device=device)
+        model.W_E.data[:, :, :] = torch.randn(
+            config.n_instances, config.n_features, config.d_embed, device=device
+        )
         # Ensure they are norm 1
         model.W_E.data /= model.W_E.data.norm(dim=-1, keepdim=True)
     elif config.fixed_identity_embedding:
         assert config.n_features == config.d_embed
         # Make W_E the identity matrix
-        model.W_E.data[:, :] = torch.eye(config.d_embed, device=device)
-
+        model.W_E.data[:, :, :] = einops.repeat(
+            torch.eye(config.d_embed, device=device),
+            "d_features d_embed -> n_instances d_features d_embed",
+            n_instances=config.n_instances,
+        )
     if config.fixed_random_embedding or config.fixed_identity_embedding:
         # Don't train the Embedding matrix
         model.W_E.requires_grad = False
@@ -191,10 +200,11 @@ if __name__ == "__main__":
         data_generation_type="at_least_zero_active",
     )
     dataloader = DatasetGeneratedDataLoader(dataset, batch_size=config.batch_size, shuffle=False)
+
     train(
         config=config,
         model=model,
-        trainable_params=list(model.parameters()),
+        trainable_params=[p for p in model.parameters() if p.requires_grad],
         dataloader=dataloader,
         device=device,
         out_dir=out_dir,
