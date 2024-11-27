@@ -218,7 +218,7 @@ def run_train(config: Config, device: str) -> None:
 
 
 if __name__ == "__main__":
-    device = "cpu"
+    device = "cuda" if torch.cuda.is_available() else "cpu"
     config = Config(
         wandb_project="spd-train-resid-linear",
         seed=0,
