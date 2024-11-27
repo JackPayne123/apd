@@ -31,6 +31,21 @@ class ResidualMLPDataset(SparseFeatureDataset):
         depending on label_type, act_fn_name, and label_fn_seed.
 
         Otherwise, the labels are the same as the inputs.
+
+        Args:
+            n_instances: The number of instances in the model and dataset.
+            n_features: The number of features in the model and dataset.
+            feature_probability: The probability that a feature is active in a given instance.
+            device: The device to calculate and store the data on.
+            calc_labels: Whether to calculate labels. If False, labels are the same as the inputs.
+            label_type: The type of labels to calculate. Ignored if calc_labels is False.
+            act_fn_name: Used for labels if calc_labels is True and label_type is act_plus_resid.
+                Ignored if calc_labels is False.
+            label_fn_seed: The seed to use for generating the label coefficients. Ignored if
+                calc_labels is False or use_trivial_label_coeffs is True.
+            use_trivial_label_coeffs: Whether to use trivial label coefficients (ones).
+                Ignored if calc_labels is False.
+            data_generation_type: The number of active features in each sample.
         """
         super().__init__(
             n_instances=n_instances,
@@ -44,9 +59,6 @@ class ResidualMLPDataset(SparseFeatureDataset):
         self.label_fn = None
         self.label_coeffs = None
 
-        assert not (
-            label_type == "abs" and act_fn_name is not None
-        ), "act_fn_name not supported for abs labels"
         if calc_labels:
             self.label_coeffs = (
                 self.calc_label_coeffs(label_fn_seed)

@@ -9,7 +9,7 @@ import torch
 import wandb
 import yaml
 from jaxtyping import Float
-from pydantic import BaseModel, ConfigDict, PositiveFloat, PositiveInt, model_validator
+from pydantic import BaseModel, ConfigDict, Field, PositiveFloat, PositiveInt, model_validator
 from torch import Tensor, nn
 from torch.nn import functional as F
 
@@ -34,7 +34,10 @@ class Config(BaseModel):
     d_embed: PositiveInt
     d_mlp: PositiveInt
     n_layers: PositiveInt
-    act_fn_name: Literal["gelu", "relu"]
+    act_fn_name: Literal["gelu", "relu"] = Field(
+        description="Defines the activation function in the model. Also used in the labeling "
+        "function if label_type is act_plus_resid."
+    )
     apply_output_act_fn: bool
     in_bias: bool
     out_bias: bool
