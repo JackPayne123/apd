@@ -20,10 +20,8 @@ print(f"Using device: {device}")
 set_seed(0)  # You can change this seed if needed
 
 # Load model and config
-path = (
-    "/data/stefan_heimersheim/projects/SPD/spd/spd/experiments/resid_linear/out/"
-    "resid_linear_identity_n-features40000_d-resid40000_d-mlp30000_n-layers1_seed0/target_model.pth"
-)
+path = "/data/stefan_heimersheim/projects/SPD/spd/spd/experiments/resid_linear/out/resid_linear_identity_n-features100_d-resid1000_d-mlp50_n-layers1_seed0/target_model.pth"
+
 model, task_config, label_coeffs = ResidualLinearModel.from_pretrained(path)
 model = model.to(device)
 
@@ -39,6 +37,10 @@ dataset = ResidualLinearDataset(
 task_config["batch_size"] = 128
 batch, resid_labels = dataset.generate_batch(task_config["batch_size"])
 labels = batch + F.relu(batch)
+
+plt.title("W_E @ W_E^T")
+plt.imshow((model.W_E @ model.W_E.T).detach(), cmap="RdBu", norm=CenteredNorm())
+plt.colorbar()
 
 # %%
 
@@ -79,6 +81,9 @@ print(labels[2, indices[2]])
 # %%
 plt.plot(out[1, :])
 # %%
+batch, resid_labels = dataset.generate_batch(task_config["batch_size"])
+
+out, pre, post = model(batch)
 idx = out[1, :].argmax(dim=0)
 print(idx)
 print(model.layers[0].input_layer.weight.data.shape)
