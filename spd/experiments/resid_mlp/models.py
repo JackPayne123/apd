@@ -29,7 +29,7 @@ class InstancesMLP(nn.Module):
         n_instances: int,
         d_model: int,
         d_mlp: int,
-        act_fn: Callable[[Tensor], Tensor] = F.relu,
+        act_fn: Callable[[Tensor], Tensor],
         in_bias: bool = True,
         out_bias: bool = True,
     ):
@@ -205,9 +205,9 @@ class InstancesMLPComponentsRankPenalty(nn.Module):
         d_mlp: int,
         k: int,
         init_scale: float,
+        act_fn: Callable[[Tensor], Tensor],
         in_bias: bool = True,
         out_bias: bool = False,
-        act_fn: Callable[[Tensor], Tensor] = F.relu,
         m: int | None = None,
     ):
         super().__init__()

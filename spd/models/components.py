@@ -2,7 +2,6 @@ from collections.abc import Callable
 
 import einops
 import torch
-import torch.nn.functional as F
 from jaxtyping import Bool, Float
 from torch import Tensor, nn
 
@@ -98,7 +97,7 @@ class MLP(nn.Module):
         self,
         d_model: int,
         d_mlp: int,
-        act_fn: Callable[[Tensor], Tensor] = F.relu,
+        act_fn: Callable[[Tensor], Tensor],
         in_bias: bool = True,
         out_bias: bool = True,
     ):
@@ -219,9 +218,9 @@ class MLPComponentsFullRank(nn.Module):
         d_mlp: int,
         k: int,
         init_scale: float,
+        act_fn: Callable[[Tensor], Tensor],
         in_bias: bool = True,
         out_bias: bool = False,
-        act_fn: Callable[[Tensor], Tensor] = F.relu,
     ):
         super().__init__()
         self.act_fn = act_fn
@@ -346,9 +345,9 @@ class MLPComponentsRankPenalty(nn.Module):
         d_mlp: int,
         k: int,
         init_scale: float,
+        act_fn: Callable[[Tensor], Tensor],
         in_bias: bool = True,
         out_bias: bool = False,
-        act_fn: Callable[[Tensor], Tensor] = F.relu,
         m: int | None = None,
     ):
         super().__init__()
