@@ -11,7 +11,6 @@ import yaml
 from jaxtyping import Float
 from pydantic import BaseModel, ConfigDict, Field, PositiveFloat, PositiveInt, model_validator
 from torch import Tensor, nn
-from torch.nn import functional as F
 
 from spd.experiments.resid_mlp.models import ResidualMLPModel
 from spd.experiments.resid_mlp.resid_mlp_dataset import (
@@ -21,6 +20,28 @@ from spd.run_spd import get_lr_schedule_fn
 from spd.utils import DatasetGeneratedDataLoader, set_seed
 
 wandb.require("core")
+
+
+def compute_feature_importances(
+    batch_size: int,
+    n_instances: int,
+    n_features: int,
+    importance_val: float | None,
+    device: str,
+) -> Float[Tensor, "batch_size n_instances n_features"]:
+    # Defines a tensor where the i^th feature has importance importance^i
+    if importance_val is None or importance_val == 1.0:
+        importance_tensor = torch.ones(batch_size, n_instances, n_features, device=device)
+    else:
+        importances = torch.ones(n_features, device=device) * importance_val
+        importances = torch.cumprod(importances, dim=-1)
+        importance_tensor = einops.repeat(
+            importances,
+            "n_features -> batch_size n_instances n_features",
+            batch_size=batch_size,
+            n_instances=n_instances,
+        )
+    return importance_tensor
 
 
 class Config(BaseModel):
@@ -42,6 +63,7 @@ class Config(BaseModel):
     in_bias: bool
     out_bias: bool
     feature_probability: PositiveFloat
+    importance_val: float | None = None
     data_generation_type: Literal[
         "exactly_one_active", "exactly_two_active", "at_least_zero_active"
     ] = "at_least_zero_active"
@@ -75,6 +97,7 @@ def train(
             Float[Tensor, "batch n_instances d_resid"],
         ]
     ],
+    feature_importances: Float[Tensor, "batch_size n_instances n_features"],
     device: str,
     out_dir: Path | None = None,
 ) -> float | None:
@@ -100,7 +123,11 @@ def train(
         batch = batch.to(device)
         labels = labels.to(device)
         out, _, _ = model(batch)
-        loss = F.mse_loss(out, labels) * out.shape[-1]
+        # Scale by feature importance as in Anthropic paper
+
+        # loss = F.mse_loss(out, labels) * out.shape[-1]
+        loss = ((out - labels) ** 2) * feature_importances
+        loss = loss.mean()
         loss.backward()
         optimizer.step()
         final_loss = loss.item()
@@ -189,11 +216,20 @@ def run_train(config: Config, device: str) -> None:
     )
     dataloader = DatasetGeneratedDataLoader(dataset, batch_size=config.batch_size, shuffle=False)
 
+    feature_importances = compute_feature_importances(
+        batch_size=config.batch_size,
+        n_instances=config.n_instances,
+        n_features=config.n_features,
+        importance_val=config.importance_val,
+        device=device,
+    )
+
     train(
         config=config,
         model=model,
         trainable_params=[p for p in model.parameters() if p.requires_grad],
         dataloader=dataloader,
+        feature_importances=feature_importances,
         device=device,
         out_dir=out_dir,
     )
@@ -217,6 +253,7 @@ if __name__ == "__main__":
         in_bias=False,
         out_bias=False,
         feature_probability=1.0,
+        importance_val=0.8,
         batch_size=256,
         steps=50_000,
         print_freq=100,
