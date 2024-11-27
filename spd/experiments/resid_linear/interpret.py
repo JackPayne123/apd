@@ -22,10 +22,7 @@ print(f"Using device: {device}")
 set_seed(0)  # You can change this seed if needed
 
 # Load model and config
-path = (
-    "/data/stefan_heimersheim/projects/SPD/spd/spd/experiments/resid_linear/out/"
-    "resid_linear_identity_n-features4000_d-resid4000_d-mlp3000_n-layers1_seed0/target_model.pth"
-)
+path = "/data/stefan_heimersheim/projects/SPD/spd/spd/experiments/resid_linear/out/resid_linear_identity_n-features100_d-resid1000_d-mlp50_n-layers1_seed0/target_model.pth"
 model, task_config, label_coeffs = ResidualLinearModel.from_pretrained(path)
 print(task_config)
 model = model.to(device)
@@ -39,6 +36,53 @@ dataset = ResidualLinearDataset(
     data_generation_type="exactly_one_active",
 )
 batch, labels = dataset.generate_batch(task_config["batch_size"])
+# %%
+
+batch, labels = dataset.generate_batch(task_config["batch_size"])
+for f in torch.arange(0, 100, 1):
+    batch = torch.zeros_like(batch)
+    batch[:, f] = -1 + 2 * 1  # torch.linspace(0, 1, 100)
+    # batch[:, 1::2] = -1 + 2 * 0.25
+    out, pre_acts, _ = model(batch)
+    embed = pre_acts["layers.0.input_layer.weight"]
+    mlp_out = out - embed
+    feature_out = einops.einsum(
+        mlp_out, model.W_E, "batch d_embed, n_features d_embed  -> batch n_features"
+    )
+    cmap_viridis = plt.get_cmap("viridis")
+    color = cmap_viridis(f / model.n_features)
+    plt.plot(
+        feature_out[0, :].detach().cpu().numpy(),
+        #  / [0, f].detach().cpu().numpy(),
+        color=color,
+    )
+    # labels
+    labels = torch.relu(batch)
+    # plt.scatter(
+    #     torch.arange(model.n_features),
+    #     labels[0, :].detach().cpu().numpy(),
+    #     color=color,
+    # )
+    # plt.ylim(-0.21, 1.21)
+    plt.title(f"p={task_config['feature_probability']}")
+    # plt.show()
+
+# If we ignore the ReLU, how
+
+# %%
+
+batch = torch.zeros_like(batch)
+batch[:, f] = -1 + 2 * 1
+for _ in range(4):
+    batch, labels = dataset.generate_batch(task_config["batch_size"])
+    out, pre, post = model(batch)
+    # print((pre["layers.0.output_layer.weight"] <= 0).sum(dim=-1))
+    feature_out = einops.einsum(
+        out, model.W_E, "batch d_embed, n_features d_embed  -> batch n_features"
+    )
+    # Calculate mse
+    labels = batch + torch.relu(batch)
+    print(F.mse_loss(feature_out, labels).item())
 # %%
 # batch2, labels2 = dataset.generate_batch(task_config["batch_size"])
 # batch = batch + batch2
@@ -74,6 +118,8 @@ plt.show()
 # Set 1st feature to 1
 # batch[:, 2] = 0.5
 # batch[:, 1:] = 0
+batch, labels = dataset.generate_batch(task_config["batch_size"])
+
 out, pre_acts, post_acts = model(batch)
 print(f"MSE: {F.mse_loss(out, labels).item()}")
 embed = pre_acts["layers.0.input_layer.weight"]
@@ -571,7 +617,7 @@ for f in range(model.n_features):
         feature_out[0, :].detach().cpu().numpy() / batch[0, f].detach().cpu().numpy(),
         color=color,
     )
-plt.ylim(-0.21, 0.81)
+# plt.ylim(-0.21, 0.81)
 plt.show()
 
 # %% Now for 2 features:
