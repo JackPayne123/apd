@@ -127,32 +127,7 @@ def train(
     return final_loss
 
 
-if __name__ == "__main__":
-    device = "cpu"
-    config = Config(
-        seed=0,
-        label_fn_seed=0,
-        n_instances=10,
-        n_features=5,
-        d_embed=5,
-        d_mlp=5,
-        n_layers=1,
-        act_fn_name="relu",
-        apply_output_act_fn=False,
-        label_type="abs",
-        data_generation_type="at_least_zero_active",
-        use_trivial_label_coeffs=True,
-        in_bias=False,
-        out_bias=False,
-        feature_probability=0.2,
-        batch_size=256,
-        steps=10_000,
-        print_freq=100,
-        lr=1e-2,
-        lr_schedule="cosine",
-    )
-
-    set_seed(config.seed)
+def run_train(config: Config, device: str) -> None:
     run_name = (
         f"resid_mlp_identity_{config.label_type}_n-instances{config.n_instances}_"
         f"n-features{config.n_features}_d-resid{config.d_embed}_"
@@ -218,3 +193,33 @@ if __name__ == "__main__":
         device=device,
         out_dir=out_dir,
     )
+
+
+if __name__ == "__main__":
+    device = "cpu"
+    config = Config(
+        seed=0,
+        label_fn_seed=0,
+        n_instances=10,
+        n_features=5,
+        d_embed=5,
+        d_mlp=5,
+        n_layers=1,
+        act_fn_name="relu",
+        apply_output_act_fn=False,
+        label_type="abs",
+        data_generation_type="at_least_zero_active",
+        use_trivial_label_coeffs=True,
+        in_bias=False,
+        out_bias=False,
+        feature_probability=0.2,
+        batch_size=256,
+        steps=10_000,
+        print_freq=100,
+        lr=1e-2,
+        lr_schedule="cosine",
+    )
+
+    set_seed(config.seed)
+
+    run_train(config, device)
