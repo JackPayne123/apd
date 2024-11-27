@@ -135,6 +135,9 @@ def test_resid_mlp_rank_penalty_decomposition_happy_path() -> None:
         final_loss < initial_loss
     ), f"Expected final loss to be lower than initial loss, but got {final_loss} >= {initial_loss}"
 
+    # Show that W_E is still the same as the target model's W_E
+    assert torch.allclose(model.W_E, target_model.W_E, atol=1e-6)
+
 
 def test_resid_mlp_spd_equivalence() -> None:
     device = "cpu"
