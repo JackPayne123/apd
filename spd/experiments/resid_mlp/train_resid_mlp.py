@@ -35,10 +35,9 @@ class Config(BaseModel):
     d_mlp: PositiveInt
     n_layers: PositiveInt
     act_fn_name: Literal["gelu", "relu"]
-    apply_output_act_fn: bool = False
-    in_bias: bool = False
-    out_bias: bool = False
-    train_embeds: bool = True
+    apply_output_act_fn: bool
+    in_bias: bool
+    out_bias: bool
     feature_probability: PositiveFloat
     data_generation_type: Literal[
         "exactly_one_active", "exactly_two_active", "at_least_zero_active"

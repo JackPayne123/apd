@@ -98,8 +98,8 @@ class MLP(nn.Module):
         d_model: int,
         d_mlp: int,
         act_fn: Callable[[Tensor], Tensor],
-        in_bias: bool = True,
-        out_bias: bool = True,
+        in_bias: bool,
+        out_bias: bool,
     ):
         super().__init__()
         self.d_model = d_model
@@ -219,8 +219,8 @@ class MLPComponentsFullRank(nn.Module):
         k: int,
         init_scale: float,
         act_fn: Callable[[Tensor], Tensor],
-        in_bias: bool = True,
-        out_bias: bool = False,
+        in_bias: bool,
+        out_bias: bool,
     ):
         super().__init__()
         self.act_fn = act_fn
@@ -346,8 +346,8 @@ class MLPComponentsRankPenalty(nn.Module):
         k: int,
         init_scale: float,
         act_fn: Callable[[Tensor], Tensor],
-        in_bias: bool = True,
-        out_bias: bool = False,
+        in_bias: bool,
+        out_bias: bool,
         m: int | None = None,
     ):
         super().__init__()

@@ -30,8 +30,8 @@ class InstancesMLP(nn.Module):
         d_model: int,
         d_mlp: int,
         act_fn: Callable[[Tensor], Tensor],
-        in_bias: bool = True,
-        out_bias: bool = True,
+        in_bias: bool,
+        out_bias: bool,
     ):
         super().__init__()
         self.n_instances = n_instances
@@ -206,8 +206,8 @@ class InstancesMLPComponentsRankPenalty(nn.Module):
         k: int,
         init_scale: float,
         act_fn: Callable[[Tensor], Tensor],
-        in_bias: bool = True,
-        out_bias: bool = False,
+        in_bias: bool,
+        out_bias: bool,
         m: int | None = None,
     ):
         super().__init__()
@@ -280,9 +280,9 @@ class ResidualMLPModel(Model):
         n_layers: int,
         n_instances: int,
         act_fn_name: Literal["gelu", "relu"],
+        in_bias: bool,
+        out_bias: bool,
         apply_output_act_fn: bool = False,
-        in_bias: bool = False,
-        out_bias: bool = False,
     ):
         super().__init__()
         self.n_features = n_features
@@ -290,6 +290,8 @@ class ResidualMLPModel(Model):
         self.d_mlp = d_mlp
         self.n_layers = n_layers
         self.n_instances = n_instances
+        self.in_bias = in_bias
+        self.out_bias = out_bias
         assert act_fn_name in ["gelu", "relu"]
         self.act_fn = F.gelu if act_fn_name == "gelu" else F.relu
         self.apply_output_act_fn = apply_output_act_fn
@@ -396,9 +398,9 @@ class ResidualMLPSPDRankPenaltyModel(SPDRankPenaltyModel):
         k: int,
         init_scale: float,
         act_fn_name: Literal["gelu", "relu"],
+        in_bias: bool,
+        out_bias: bool,
         apply_output_act_fn: bool = False,
-        in_bias: bool = False,
-        out_bias: bool = False,
         m: int | None = None,
     ):
         super().__init__()
@@ -408,8 +410,11 @@ class ResidualMLPSPDRankPenaltyModel(SPDRankPenaltyModel):
         self.n_layers = n_layers
         self.n_instances = n_instances
         self.k = k
+        self.in_bias = in_bias
+        self.out_bias = out_bias
         assert act_fn_name in ["gelu", "relu"]
         self.act_fn = F.gelu if act_fn_name == "gelu" else F.relu
+        self.apply_output_act_fn = apply_output_act_fn
 
         self.W_E = nn.Parameter(torch.empty(n_instances, n_features, d_embed))
         self.W_U = nn.Parameter(torch.empty(n_instances, d_embed, n_features))

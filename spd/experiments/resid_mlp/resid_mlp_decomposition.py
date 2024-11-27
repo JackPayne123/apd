@@ -225,7 +225,7 @@ def save_target_model_info(
     out_dir: Path,
     target_model: ResidualMLPModel,
     target_model_config_dict: dict[str, Any],
-    label_coeffs: Float[Tensor, "n_instances"],
+    label_coeffs: Float[Tensor, " n_instances"],
 ) -> None:
     torch.save(target_model.state_dict(), out_dir / "target_model.pth")
 
@@ -299,6 +299,8 @@ def main(
             init_scale=config.task_config.init_scale,
             act_fn_name=config.task_config.act_fn_name,
             apply_output_act_fn=config.task_config.apply_output_act_fn,
+            in_bias=target_model.in_bias,
+            out_bias=target_model.out_bias,
             m=config.m,
         ).to(device)
     else:
