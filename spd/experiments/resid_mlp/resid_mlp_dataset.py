@@ -20,7 +20,7 @@ class ResidualMLPDataset(SparseFeatureDataset):
         label_type: Literal["act_plus_resid", "abs"] | None = None,
         act_fn_name: Literal["relu", "gelu"] | None = None,
         label_fn_seed: int | None = None,
-        use_trivial_label_coeffs: bool = False,
+        label_coeffs: Float[Tensor, "n_instances n_features"] | None = None,
         data_generation_type: Literal[
             "exactly_one_active", "exactly_two_active", "at_least_zero_active"
         ] = "at_least_zero_active",
@@ -42,9 +42,9 @@ class ResidualMLPDataset(SparseFeatureDataset):
             act_fn_name: Used for labels if calc_labels is True and label_type is act_plus_resid.
                 Ignored if calc_labels is False.
             label_fn_seed: The seed to use for generating the label coefficients. Ignored if
-                calc_labels is False or use_trivial_label_coeffs is True.
-            use_trivial_label_coeffs: Whether to use trivial label coefficients (ones).
-                Ignored if calc_labels is False.
+                calc_labels is False or label_coeffs is not None.
+            label_coeffs: The label coefficients to use. If None, the coefficients are generated
+                randomly (unless calc_labels is False).
             data_generation_type: The number of active features in each sample.
         """
         super().__init__(
@@ -61,9 +61,7 @@ class ResidualMLPDataset(SparseFeatureDataset):
 
         if calc_labels:
             self.label_coeffs = (
-                self.calc_label_coeffs(label_fn_seed)
-                if not use_trivial_label_coeffs
-                else torch.ones(n_instances, n_features, device=device)
+                self.calc_label_coeffs(label_fn_seed) if label_coeffs is None else label_coeffs
             ).to(self.device)
 
             assert label_type is not None, "Must provide label_type if calc_labels is True"

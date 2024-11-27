@@ -328,6 +328,9 @@ class ResidualMLPModel(Model):
             Float[Tensor, "batch n_instances d_embed"] | Float[Tensor, "batch n_instances d_mlp"],
         ],
     ]:
+        # Make sure that n_instances are correct to avoid unintended broadcasting
+        assert x.shape[1] == self.n_instances, "n_instances mismatch"
+        assert x.shape[2] == self.n_features, "n_features mismatch"
         layer_pre_acts = {}
         layer_post_acts = {}
         residual = einops.einsum(

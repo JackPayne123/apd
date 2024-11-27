@@ -313,13 +313,13 @@ def main(
     # Copy the biases from the target model to the SPD model and set requires_grad to False
     for i in range(target_model.n_layers):
         if target_model.in_bias:
-            model.layers[i].linear1.bias.data[:] = (
-                target_model.layers[i].input_layer.bias.data.detach().clone()
+            model.layers[i].linear1.bias.data[:, :] = (
+                target_model.layers[i].bias1.data.detach().clone()
             )
             model.layers[i].linear1.bias.requires_grad = False
         if target_model.out_bias:
-            model.layers[i].linear2.bias.data[:] = (
-                target_model.layers[i].output_layer.bias.data.detach().clone()
+            model.layers[i].linear2.bias.data[:, :] = (
+                target_model.layers[i].bias2.data.detach().clone()
             )
             model.layers[i].linear2.bias.requires_grad = False
 
