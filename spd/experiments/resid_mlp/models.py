@@ -292,21 +292,22 @@ class ResidualMLPModel(Model):
         self.n_instances = n_instances
         self.in_bias = in_bias
         self.out_bias = out_bias
-        assert act_fn_name in ["gelu", "relu"]
-        self.act_fn = F.gelu if act_fn_name == "gelu" else F.relu
+        self.act_fn_name = act_fn_name
         self.apply_output_act_fn = apply_output_act_fn
         self.W_E = nn.Parameter(torch.empty(n_instances, n_features, d_embed))
         init_param_(self.W_E)
         self.W_U = nn.Parameter(torch.empty(n_instances, d_embed, n_features))
         init_param_(self.W_U)
 
+        assert act_fn_name in ["gelu", "relu"]
+        act_fn = F.gelu if act_fn_name == "gelu" else F.relu
         self.layers = nn.ModuleList(
             [
                 InstancesMLP(
                     n_instances=n_instances,
                     d_model=d_embed,
                     d_mlp=d_mlp,
-                    act_fn=self.act_fn,
+                    act_fn=act_fn,
                     in_bias=in_bias,
                     out_bias=out_bias,
                 )
@@ -585,9 +586,9 @@ class ResidualMLPSPDRankPenaltyModel(SPDRankPenaltyModel):
             n_instances=target_model_config["n_instances"],
             k=config.task_config.k,
             init_scale=config.task_config.init_scale,
-            act_fn_name=config.task_config.act_fn_name,
-            in_bias=config.task_config.in_bias,
-            out_bias=config.task_config.out_bias,
+            act_fn_name=target_model_config["act_fn_name"],
+            in_bias=target_model_config["in_bias"],
+            out_bias=target_model_config["out_bias"],
         )
         model.load_state_dict(params)
 
