@@ -83,7 +83,6 @@ def train(
 ) -> float | None:
     if config.wandb_project:
         config = init_wandb(config, config.wandb_project, name=run_name)
-        # save_config_to_wandb(config, filename="train_config.yaml")
 
     out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -223,23 +222,23 @@ if __name__ == "__main__":
         wandb_project="spd-train-resid-linear",
         seed=0,
         label_fn_seed=0,
-        n_instances=10,
-        n_features=5,
-        d_embed=5,
-        d_mlp=5,
+        n_instances=1,
+        n_features=100,
+        d_embed=100,
+        d_mlp=50,
         n_layers=1,
-        act_fn_name="relu",
+        act_fn_name="gelu",
         apply_output_act_fn=False,
-        label_type="abs",
+        label_type="act_plus_resid",
         data_generation_type="at_least_zero_active",
         use_trivial_label_coeffs=True,
         in_bias=False,
         out_bias=False,
-        feature_probability=0.2,
-        batch_size=256,
+        feature_probability=0.01,
+        batch_size=16,
         steps=10_000,
         print_freq=100,
-        lr=1e-2,
+        lr=3e-3,
         lr_schedule="cosine",
     )
 
