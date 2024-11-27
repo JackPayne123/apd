@@ -167,10 +167,6 @@ def run_train(config: Config, device: str) -> None:
                 n_instances=config.n_instances,
             )
 
-    label_coeffs = None
-    if config.use_trivial_label_coeffs:
-        label_coeffs = torch.ones(config.n_instances, config.n_features, device=device)
-
     dataset = ResidualMLPDataset(
         n_instances=config.n_instances,
         n_features=config.n_features,
@@ -180,7 +176,7 @@ def run_train(config: Config, device: str) -> None:
         label_type=config.label_type,
         act_fn_name=config.act_fn_name,
         label_fn_seed=config.label_fn_seed,
-        label_coeffs=label_coeffs,
+        use_trivial_label_coeffs=config.use_trivial_label_coeffs,
         data_generation_type=config.data_generation_type,
     )
     dataloader = DatasetGeneratedDataLoader(dataset, batch_size=config.batch_size, shuffle=False)
