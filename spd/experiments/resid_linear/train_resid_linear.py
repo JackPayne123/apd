@@ -13,6 +13,7 @@ from jaxtyping import Float
 from pydantic import BaseModel, ConfigDict, PositiveFloat, PositiveInt, model_validator
 from torch import Tensor, nn
 from torch.nn import functional as F
+from tqdm import tqdm
 
 from spd.experiments.resid_linear.models import ResidualLinearModel
 from spd.experiments.resid_linear.resid_linear_dataset import (
@@ -124,7 +125,7 @@ def train(
     lr_schedule_fn = get_lr_schedule_fn(config.lr_schedule)
 
     final_loss = None
-    for step, (batch, labels) in enumerate(dataloader):
+    for step, (batch, labels) in tqdm(enumerate(dataloader), total=config.steps):
         if step >= config.steps:
             break
 
@@ -136,7 +137,6 @@ def train(
         optimizer.zero_grad()
         batch = batch.to(device)
         labels = labels.to(device)
-        print(labels)
         labels = labels.detach()
         out, _, _ = model(batch)
         if config.loss_at_resid:
@@ -153,10 +153,10 @@ def train(
         final_loss = loss.item()
         if step % config.print_freq == 0:
             print(f"Step {step}: loss={final_loss}, lr={current_lr}")
-            with torch.inference_mode():
-                eval_losses, id_losses = evaluate(model, [dataloader, *eval_dataloaders])
-                for eval_loss, id_loss in zip(eval_losses, id_losses, strict=False):
-                    print(f"Eval loss: {eval_loss}, id loss: {id_loss}")
+            # with torch.inference_mode():
+            #     eval_losses, id_losses = evaluate(model, [dataloader, *eval_dataloaders])
+            #     for eval_loss, id_loss in zip(eval_losses, id_losses, strict=False):
+            #         print(f"Eval loss: {eval_loss}, id loss: {id_loss}")
 
     if out_dir is not None:
         model_path = out_dir / "target_model.pth"
@@ -175,24 +175,24 @@ def train(
         with open(label_coeffs_path, "w") as f:
             json.dump(label_coeffs, f)
         print(f"Saved label coefficients to {label_coeffs_path}")
-        print("Trying Lucius handcoded model:")
-        print("WE", model.W_E.shape, model.W_E)
-        # assert config.d_mlp == 3000
-        p = 20 / config.d_mlp
-        model.W_E.data = torch.eye(model.W_E.data.shape[0]).to(device)
-        model.layers[0].input_layer.weight.data.fill_(0)
-        model.layers[0].input_layer.weight.data[
-            torch.rand(model.layers[0].input_layer.weight.data.shape) < p
-        ] = 1
-        model.layers[0].output_layer.weight.data[:, :] = model.layers[0].input_layer.weight.data.T
-        assert model.layers[0].output_layer.weight.data.shape == (config.d_embed, config.d_mlp)
-        model.layers[0].output_layer.weight.data = model.layers[0].output_layer.weight.data / (
-            1e-16 + model.layers[0].output_layer.weight.data.norm(dim=1, keepdim=True) ** 2
-        )
-        with torch.inference_mode():
-            eval_losses, id_losses = evaluate(model, [dataloader, *eval_dataloaders])
-            for eval_loss, id_loss in zip(eval_losses, id_losses, strict=False):
-                print(f"Eval loss: {eval_loss}, id loss: {id_loss}")
+        # print("Trying Lucius handcoded model:")
+        # print("WE", model.W_E.shape, model.W_E)
+        # # assert config.d_mlp == 3000
+        # p = 20 / config.d_mlp
+        # model.W_E.data = torch.eye(model.W_E.data.shape[0]).to(device)
+        # model.layers[0].input_layer.weight.data.fill_(0)
+        # model.layers[0].input_layer.weight.data[
+        #     torch.rand(model.layers[0].input_layer.weight.data.shape) < p
+        # ] = 1
+        # model.layers[0].output_layer.weight.data[:, :] = model.layers[0].input_layer.weight.data.T
+        # assert model.layers[0].output_layer.weight.data.shape == (config.d_embed, config.d_mlp)
+        # model.layers[0].output_layer.weight.data = model.layers[0].output_layer.weight.data / (
+        #     1e-16 + model.layers[0].output_layer.weight.data.norm(dim=1, keepdim=True) ** 2
+        # )
+        # with torch.inference_mode():
+        #     eval_losses, id_losses = evaluate(model, [dataloader, *eval_dataloaders])
+        #     for eval_loss, id_loss in zip(eval_losses, id_losses, strict=False):
+        #         print(f"Eval loss: {eval_loss}, id loss: {id_loss}")
 
     print(f"Final loss: {final_loss}")
     return final_loss
@@ -289,11 +289,11 @@ def training_run(config: Config, device: str) -> float:
 
 if __name__ == "__main__":
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    n_steps = 10
-    n_features = 40000
-    d_embed = 40000
-    d_mlp = 30000
-    p = 1 / 40000
+    n_steps = 10_000
+    n_features = 100
+    d_embed = 1000
+    d_mlp = 50
+    p = 0.01
     data_generation_type = "at_least_zero_active"
     config = Config(
         seed=0,
@@ -306,10 +306,10 @@ if __name__ == "__main__":
         feature_probability=p,
         batch_size=2048,
         steps=n_steps,
-        print_freq=100,
+        print_freq=10000000,
         lr=3e-3,
         lr_schedule="cosine",
-        random_embedding_matrix=False,
+        random_embedding_matrix=True,
         act_fn_name="relu",
         data_generation_type=data_generation_type,
     )
