@@ -110,9 +110,10 @@ def test_resid_mlp_rank_penalty_decomposition_happy_path() -> None:
         param_map[f"layers.{i}.linear2"] = f"layers.{i}.linear2"
 
     # Calculate initial loss
-    batch, labels = next(iter(dataloader))
-    initial_out, _, _ = model(batch)
-    initial_loss = torch.mean((labels - initial_out) ** 2).item()
+    with torch.inference_mode():
+        batch, labels = next(iter(dataloader))
+        initial_out, _, _ = model(batch)
+        initial_loss = torch.mean((labels - initial_out) ** 2).item()
 
     # Run optimize function
     optimize(
@@ -127,9 +128,11 @@ def test_resid_mlp_rank_penalty_decomposition_happy_path() -> None:
     )
 
     # Calculate final loss
-    final_out, _, _ = model(batch)
-    final_loss = torch.mean((labels - final_out) ** 2).item()
+    with torch.inference_mode():
+        final_out, _, _ = model(batch)
+        final_loss = torch.mean((labels - final_out) ** 2).item()
 
+    print(f"Final loss: {final_loss}, initial loss: {initial_loss}")
     # Assert that the final loss is lower than the initial loss
     assert (
         final_loss < initial_loss
@@ -139,7 +142,7 @@ def test_resid_mlp_rank_penalty_decomposition_happy_path() -> None:
     assert torch.allclose(model.W_E, target_model.W_E, atol=1e-6)
 
 
-def test_resid_mlp_spd_equivalence() -> None:
+def test_resid_mlp_rank_penalty_equivalent_to_raw_model() -> None:
     device = "cpu"
     set_seed(0)
     n_instances = 2
