@@ -293,10 +293,9 @@ class ResidualMLPModel(Model):
         self.act_fn = F.gelu if act_fn_name == "gelu" else F.relu
 
         self.W_E = nn.Parameter(torch.empty(n_instances, n_features, d_embed))
-        # Init with randn values and make unit norm
-        self.W_E.data.normal_(0, 1)
-        # Ensure each feature has unit norm
-        self.W_E.data /= self.W_E.data.norm(dim=-1, keepdim=True)
+        init_param_(self.W_E)
+        self.W_U = nn.Parameter(torch.empty(n_instances, d_embed, n_features))
+        init_param_(self.W_U)
 
         self.layers = nn.ModuleList(
             [
@@ -339,8 +338,13 @@ class ResidualMLPModel(Model):
             for k, v in post_acts_i.items():
                 layer_post_acts[f"layers.{i}.{k}"] = v
             residual = residual + out
+        out = einops.einsum(
+            residual,
+            self.W_U,
+            "batch n_instances d_embed, n_instances d_embed n_features -> batch n_instances n_features",
+        )
 
-        return residual, layer_pre_acts, layer_post_acts
+        return out, layer_pre_acts, layer_post_acts
 
     @classmethod
     def from_pretrained(

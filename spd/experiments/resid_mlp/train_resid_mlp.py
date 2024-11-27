@@ -36,6 +36,7 @@ class Config(BaseModel):
     act_fn_name: Literal["gelu", "relu"]
     in_bias: bool = False
     out_bias: bool = False
+    train_embeds: bool = True
     feature_probability: PositiveFloat
     batch_size: PositiveInt
     steps: PositiveInt
@@ -148,8 +149,18 @@ if __name__ == "__main__":
         out_bias=config.out_bias,
     ).to(device)
 
-    # Don't train the Embedding matrix
-    model.W_E.requires_grad = False
+    trainable_params = list(model.parameters())
+    if not config.train_embeds:
+        # Don't train the Embedding matrices
+        model.W_E.requires_grad = False
+        model.W_U.requires_grad = False
+        # Remove both fromn trainable_params
+        trainable_params = [p for n, p in model.named_parameters() if n not in ["W_E", "W_U"]]
+        # Init with randn values and make unit norm
+        model.W_E.data.normal_(0, 1)
+        model.W_E.data /= model.W_E.data.norm(dim=-1, keepdim=True)
+        # Set W_U to W_E^T
+        model.W_U.data = model.W_E.data.transpose(-2, -1)
 
     label_coeffs = None
     if config.use_trivial_label_coeffs:
@@ -171,7 +182,7 @@ if __name__ == "__main__":
     train(
         config=config,
         model=model,
-        trainable_params=list(model.parameters()),
+        trainable_params=trainable_params,
         dataloader=dataloader,
         device=device,
         out_dir=out_dir,
