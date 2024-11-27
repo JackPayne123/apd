@@ -80,7 +80,7 @@ def train(
         batch = batch.to(device)
         labels = labels.to(device)
         out, _, _ = model(batch)
-        loss = F.mse_loss(out, labels)
+        loss = F.mse_loss(out, labels) * out.shape[-1]
         loss.backward()
         optimizer.step()
         final_loss = loss.item()
