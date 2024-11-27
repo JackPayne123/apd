@@ -111,8 +111,9 @@ def test_resid_mlp_rank_penalty_decomposition_happy_path() -> None:
 
     # Calculate initial loss
     with torch.inference_mode():
-        batch, labels = next(iter(dataloader))
+        batch, _ = next(iter(dataloader))
         initial_out, _, _ = model(batch)
+        labels, _, _ = target_model(batch)
         initial_loss = torch.mean((labels - initial_out) ** 2).item()
 
     # Run optimize function
