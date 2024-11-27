@@ -39,9 +39,9 @@ def plot_individual_feature_response(
     sweep_str = "set to 1" if not sweep else "between -1 and 1"
     title = (
         f"Feature response with one active feature {sweep_str}\n"
-        f"Trained with p={task_config['feature_probability']},"
-        f"n_features={task_config['n_features']},"
-        f"d_embed={task_config['d_embed']},"
+        f"Trained with p={task_config['feature_probability']}, "
+        f"n_features={task_config['n_features']}, "
+        f"d_embed={task_config['d_embed']}, "
         f"d_mlp={task_config['d_mlp']}"
     )
     fig.suptitle(title)
