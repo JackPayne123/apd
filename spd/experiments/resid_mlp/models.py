@@ -349,13 +349,13 @@ class ResidualMLPModel(Model):
     @classmethod
     def from_pretrained(
         cls, path: str | Path
-    ) -> tuple["ResidualMLPModel", dict[str, Any], list[float]]:
+    ) -> tuple["ResidualMLPModel", dict[str, Any], Float[Tensor, "n_instances n_features"]]:
         params = torch.load(path, weights_only=True, map_location="cpu")
         with open(Path(path).parent / "target_model_config.yaml") as f:
             config_dict = yaml.safe_load(f)
 
         with open(Path(path).parent / "label_coeffs.json") as f:
-            label_coeffs = json.load(f)
+            label_coeffs = torch.tensor(json.load(f))
 
         model = cls(
             n_features=config_dict["n_features"],

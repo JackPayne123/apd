@@ -38,6 +38,9 @@ class Config(BaseModel):
     out_bias: bool = False
     train_embeds: bool = True
     feature_probability: PositiveFloat
+    data_generation_type: Literal[
+        "exactly_one_active", "exactly_two_active", "at_least_zero_active"
+    ] = "at_least_zero_active"
     batch_size: PositiveInt
     steps: PositiveInt
     print_freq: PositiveInt
@@ -119,6 +122,7 @@ if __name__ == "__main__":
         n_layers=1,
         act_fn_name="relu",
         label_type="abs",
+        data_generation_type="at_least_zero_active",
         use_trivial_label_coeffs=True,
         in_bias=False,
         out_bias=False,
@@ -176,7 +180,7 @@ if __name__ == "__main__":
         act_fn_name=config.act_fn_name,
         label_fn_seed=config.label_fn_seed,
         label_coeffs=label_coeffs,
-        data_generation_type="at_least_zero_active",
+        data_generation_type=config.data_generation_type,
     )
     dataloader = DatasetGeneratedDataLoader(dataset, batch_size=config.batch_size, shuffle=False)
     train(
