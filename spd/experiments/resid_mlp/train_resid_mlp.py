@@ -2,13 +2,14 @@
 
 import json
 from pathlib import Path
-from typing import Literal
+from typing import Literal, Self
 
+import einops
 import torch
 import wandb
 import yaml
 from jaxtyping import Float
-from pydantic import BaseModel, ConfigDict, PositiveFloat, PositiveInt
+from pydantic import BaseModel, ConfigDict, PositiveFloat, PositiveInt, model_validator
 from torch import Tensor, nn
 from torch.nn import functional as F
 
@@ -46,6 +47,19 @@ class Config(BaseModel):
     print_freq: PositiveInt
     lr: PositiveFloat
     lr_schedule: Literal["linear", "constant", "cosine", "exponential"] = "constant"
+    fixed_random_embedding: bool = False
+    fixed_identity_embedding: bool = False
+
+    @model_validator(mode="after")
+    def validate_model(self) -> Self:
+        assert not (
+            self.fixed_random_embedding and self.fixed_identity_embedding
+        ), "Can't have both fixed_random_embedding and fixed_identity_embedding"
+        if self.fixed_identity_embedding:
+            assert (
+                self.n_features == self.d_embed
+            ), "n_features must equal d_embed if we are using an identity embedding matrix"
+        return self
 
 
 def train(
@@ -53,7 +67,10 @@ def train(
     model: ResidualMLPModel,
     trainable_params: list[nn.Parameter],
     dataloader: DatasetGeneratedDataLoader[
-        tuple[Float[Tensor, "batch n_features"], Float[Tensor, "batch d_resid"]]
+        tuple[
+            Float[Tensor, "batch n_instances n_features"],
+            Float[Tensor, "batch n_instances d_resid"],
+        ]
     ],
     device: str,
     out_dir: Path | None = None,
@@ -153,18 +170,26 @@ if __name__ == "__main__":
         out_bias=config.out_bias,
     ).to(device)
 
-    trainable_params = list(model.parameters())
-    if not config.train_embeds:
-        # Don't train the Embedding matrices
+    if config.fixed_random_embedding or config.fixed_identity_embedding:
+        # Don't train the embedding matrices
         model.W_E.requires_grad = False
         model.W_U.requires_grad = False
-        # Remove both fromn trainable_params
-        trainable_params = [p for n, p in model.named_parameters() if n not in ["W_E", "W_U"]]
-        # Init with randn values and make unit norm
-        model.W_E.data.normal_(0, 1)
-        model.W_E.data /= model.W_E.data.norm(dim=-1, keepdim=True)
-        # Set W_U to W_E^T
-        model.W_U.data = model.W_E.data.transpose(-2, -1)
+        if config.fixed_random_embedding:
+            # Init with randn values and make unit norm
+            model.W_E.data[:, :, :] = torch.randn(
+                config.n_instances, config.n_features, config.d_embed, device=device
+            )
+            model.W_E.data /= model.W_E.data.norm(dim=-1, keepdim=True)
+            # Set W_U to W_E^T
+            model.W_U.data = model.W_E.data.transpose(-2, -1)
+        elif config.fixed_identity_embedding:
+            assert config.n_features == config.d_embed, "n_features must equal d_embed for W_E=id"
+            # Make W_E the identity matrix
+            model.W_E.data[:, :, :] = einops.repeat(
+                torch.eye(config.d_embed, device=device),
+                "d_features d_embed -> n_instances d_features d_embed",
+                n_instances=config.n_instances,
+            )
 
     label_coeffs = None
     if config.use_trivial_label_coeffs:
@@ -183,10 +208,11 @@ if __name__ == "__main__":
         data_generation_type=config.data_generation_type,
     )
     dataloader = DatasetGeneratedDataLoader(dataset, batch_size=config.batch_size, shuffle=False)
+
     train(
         config=config,
         model=model,
-        trainable_params=trainable_params,
+        trainable_params=[p for p in model.parameters() if p.requires_grad],
         dataloader=dataloader,
         device=device,
         out_dir=out_dir,
