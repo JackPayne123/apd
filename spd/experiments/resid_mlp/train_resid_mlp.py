@@ -103,7 +103,6 @@ def train(
         out, _, _ = model(batch)
         # Scale by feature importance as in Anthropic paper
 
-        # loss = F.mse_loss(out, labels) * out.shape[-1]
         loss = ((out - labels) ** 2) * feature_importances
         loss = loss.mean()
         loss.backward()
