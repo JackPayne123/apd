@@ -233,7 +233,7 @@ def save_target_model_info(
         yaml.dump(target_model_config_dict, f, indent=2)
 
     with open(out_dir / "label_coeffs.json", "w") as f:
-        json.dump(label_coeffs, f, indent=2)
+        json.dump(label_coeffs.tolist(), f, indent=2)
 
     if save_to_wandb:
         wandb.save(str(out_dir / "target_model.pth"), base_path=out_dir)
