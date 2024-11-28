@@ -12,14 +12,16 @@ from spd.utils import DatasetGeneratedDataLoader, set_seed
 RESID_MLP_TASK_CONFIG = ResidualMLPConfig(
     task_name="residual_mlp",
     init_scale=1.0,
-    k=6,
-    feature_probability=0.2,
+    k=3,
+    feature_probability=0.333,
     pretrained_model_path=Path(),  # We'll create this later
     data_generation_type="at_least_zero_active",
 )
 
 
 def test_resid_mlp_rank_penalty_decomposition_happy_path() -> None:
+    # Just noting that this test will only work on 98/100 seeds. So it's possible that future
+    # changes will break this test.
     set_seed(0)
     n_instances = 2
     n_features = 3
@@ -38,9 +40,9 @@ def test_resid_mlp_rank_penalty_decomposition_happy_path() -> None:
         topk_recon_coeff=1,
         topk_l2_coeff=1e-2,
         attribution_type="gradient",
-        lr=1e-2,
-        batch_size=8,
-        steps=5,  # Run only a few steps for the test
+        lr=1e-3,
+        batch_size=32,
+        steps=10,  # Run only a few steps for the test
         print_freq=2,
         image_freq=5,
         save_freq=None,
@@ -76,9 +78,11 @@ def test_resid_mlp_rank_penalty_decomposition_happy_path() -> None:
         out_bias=True,
     ).to(device)
 
-    # Use the pretrained model's embedding matrix and don't train it further
+    # Use the pretrained model's embedding matrices and don't train them further
     model.W_E.data[:, :] = target_model.W_E.data.detach().clone()
     model.W_E.requires_grad = False
+    model.W_U.data[:, :] = target_model.W_U.data.detach().clone()
+    model.W_U.requires_grad = False
 
     # Copy the biases from the target model to the SPD model and set requires_grad to False
     for i in range(target_model.n_layers):
