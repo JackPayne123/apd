@@ -3,13 +3,18 @@ from pathlib import Path
 import torch
 from jaxtyping import Float
 
-from spd.experiments.resid_mlp.models import ResidualMLPModel, ResidualMLPSPDRankPenaltyModel
+from spd.experiments.resid_mlp.models import (
+    ResidualMLPConfig,
+    ResidualMLPModel,
+    ResidualMLPSPDRankPenaltyModel,
+    ResidualMLPTaskConfig,
+)
 from spd.experiments.resid_mlp.resid_mlp_dataset import ResidualMLPDataset
-from spd.run_spd import Config, ResidualMLPConfig, optimize
+from spd.run_spd import Config, optimize
 from spd.utils import DatasetGeneratedDataLoader, set_seed
 
 # Create a simple ResidualMLP config that we can use in multiple tests
-RESID_MLP_TASK_CONFIG = ResidualMLPConfig(
+RESID_MLP_TASK_CONFIG = ResidualMLPTaskConfig(
     task_name="residual_mlp",
     init_scale=1.0,
     k=3,
@@ -23,11 +28,17 @@ def test_resid_mlp_rank_penalty_decomposition_happy_path() -> None:
     # Just noting that this test will only work on 98/100 seeds. So it's possible that future
     # changes will break this test.
     set_seed(0)
-    n_instances = 2
-    n_features = 3
-    d_embed = 2
-    d_mlp = 3
-    n_layers = 1
+    resid_mlp_config = ResidualMLPConfig(
+        n_instances=2,
+        n_features=3,
+        d_embed=2,
+        d_mlp=3,
+        n_layers=1,
+        act_fn_name="relu",
+        apply_output_act_fn=False,
+        in_bias=True,
+        out_bias=True,
+    )
 
     device = "cpu"
     config = Config(
@@ -51,26 +62,17 @@ def test_resid_mlp_rank_penalty_decomposition_happy_path() -> None:
         task_config=RESID_MLP_TASK_CONFIG,
     )
 
-    assert isinstance(config.task_config, ResidualMLPConfig)
+    assert isinstance(config.task_config, ResidualMLPTaskConfig)
     # Create a pretrained model
-    target_model = ResidualMLPModel(
-        n_features=n_features,
-        d_embed=d_embed,
-        d_mlp=d_mlp,
-        n_layers=n_layers,
-        n_instances=n_instances,
-        act_fn_name="relu",
-        in_bias=True,
-        out_bias=True,
-    ).to(device)
+    target_model = ResidualMLPModel(config=resid_mlp_config).to(device)
 
     # Create the SPD model
     model = ResidualMLPSPDRankPenaltyModel(
-        n_features=target_model.n_features,
-        d_embed=target_model.d_embed,
-        d_mlp=target_model.d_mlp,
-        n_layers=target_model.n_layers,
-        n_instances=n_instances,
+        n_features=resid_mlp_config.n_features,
+        d_embed=resid_mlp_config.d_embed,
+        d_mlp=resid_mlp_config.d_mlp,
+        n_layers=resid_mlp_config.n_layers,
+        n_instances=resid_mlp_config.n_instances,
         k=config.task_config.k,
         init_scale=config.task_config.init_scale,
         act_fn_name="relu",
@@ -85,13 +87,13 @@ def test_resid_mlp_rank_penalty_decomposition_happy_path() -> None:
     model.W_U.requires_grad = False
 
     # Copy the biases from the target model to the SPD model and set requires_grad to False
-    for i in range(target_model.n_layers):
-        if target_model.in_bias:
+    for i in range(resid_mlp_config.n_layers):
+        if resid_mlp_config.in_bias:
             model.layers[i].linear1.bias.data[:, :] = (
                 target_model.layers[i].bias1.data.detach().clone()
             )
             model.layers[i].linear1.bias.requires_grad = False
-        if target_model.out_bias:
+        if resid_mlp_config.out_bias:
             model.layers[i].linear2.bias.data[:, :] = (
                 target_model.layers[i].bias2.data.detach().clone()
             )
@@ -99,7 +101,7 @@ def test_resid_mlp_rank_penalty_decomposition_happy_path() -> None:
 
     # Create dataset and dataloader
     dataset = ResidualMLPDataset(
-        n_instances=n_instances,
+        n_instances=model.n_instances,
         n_features=model.n_features,
         feature_probability=config.task_config.feature_probability,
         device=device,
@@ -109,7 +111,7 @@ def test_resid_mlp_rank_penalty_decomposition_happy_path() -> None:
 
     # Set up param_map
     param_map = {}
-    for i in range(target_model.n_layers):
+    for i in range(resid_mlp_config.n_layers):
         param_map[f"layers.{i}.linear1"] = f"layers.{i}.linear1"
         param_map[f"layers.{i}.linear2"] = f"layers.{i}.linear2"
 
@@ -150,36 +152,33 @@ def test_resid_mlp_rank_penalty_decomposition_happy_path() -> None:
 def test_resid_mlp_rank_penalty_equivalent_to_raw_model() -> None:
     device = "cpu"
     set_seed(0)
-    n_instances = 2
-    n_features = 3
-    d_embed = 2
-    d_mlp = 3
-    n_layers = 2
-    k = 2  # Single subnetwork
-
-    target_model = ResidualMLPModel(
-        n_features=n_features,
-        d_embed=d_embed,
-        d_mlp=d_mlp,
-        n_layers=n_layers,
-        n_instances=n_instances,
+    resid_mlp_config = ResidualMLPConfig(
+        n_instances=2,
+        n_features=3,
+        d_embed=2,
+        d_mlp=3,
+        n_layers=2,
         act_fn_name="relu",
+        apply_output_act_fn=False,
         in_bias=True,
         out_bias=True,
-    ).to(device)
+    )
+    k = 2  # Single subnetwork
+
+    target_model = ResidualMLPModel(config=resid_mlp_config).to(device)
 
     # Create the SPD model with k=1
     spd_model = ResidualMLPSPDRankPenaltyModel(
-        n_features=n_features,
-        d_embed=d_embed,
-        d_mlp=d_mlp,
-        n_layers=n_layers,
-        n_instances=n_instances,
+        n_features=resid_mlp_config.n_features,
+        d_embed=resid_mlp_config.d_embed,
+        d_mlp=resid_mlp_config.d_mlp,
+        n_layers=resid_mlp_config.n_layers,
+        n_instances=resid_mlp_config.n_instances,
         k=k,
         init_scale=1.0,
-        act_fn_name="relu",
-        in_bias=True,
-        out_bias=True,
+        act_fn_name=resid_mlp_config.act_fn_name,
+        in_bias=resid_mlp_config.in_bias,
+        out_bias=resid_mlp_config.out_bias,
     ).to(device)
 
     # Init all params to random values
@@ -195,14 +194,14 @@ def test_resid_mlp_rank_penalty_equivalent_to_raw_model() -> None:
     # Also copy the embeddings and biases
     target_model.W_E.data[:, :, :] = spd_model.W_E.data
     target_model.W_U.data[:, :, :] = spd_model.W_U.data
-    for i in range(n_layers):
+    for i in range(resid_mlp_config.n_layers):
         target_model.layers[i].bias1.data[:, :] = spd_model.layers[i].linear1.bias.data
         target_model.layers[i].bias2.data[:, :] = spd_model.layers[i].linear2.bias.data
 
     # Create a random input
     batch_size = 4
     input_data: Float[torch.Tensor, "batch n_instances n_features"] = torch.rand(
-        batch_size, n_instances, n_features, device=device
+        batch_size, resid_mlp_config.n_instances, resid_mlp_config.n_features, device=device
     )
 
     with torch.inference_mode():

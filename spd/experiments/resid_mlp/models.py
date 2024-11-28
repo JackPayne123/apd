@@ -9,15 +9,18 @@ import torch.nn.functional as F
 import wandb
 import yaml
 from jaxtyping import Bool, Float
+from pydantic import BaseModel, ConfigDict, Field, PositiveInt
 from torch import Tensor, nn
 from wandb.apis.public import Run
 
 from spd.models.base import Model, SPDRankPenaltyModel
-from spd.run_spd import Config, ResidualMLPConfig
+from spd.run_spd import Config, ResidualMLPTaskConfig
 from spd.types import RootPath
 from spd.utils import (
     download_wandb_file,
+    fetch_latest_wandb_checkpoint,
     init_param_,
+    is_wandb_path,
     load_yaml,
     remove_grad_parallel_to_subnetwork_vecs,
 )
@@ -271,47 +274,52 @@ class InstancesMLPComponentsRankPenalty(nn.Module):
         return x, layer_acts, inner_acts
 
 
+class ResidualMLPPaths(BaseModel):
+    """Paths to output files from a ResidualMLPModel training run."""
+
+    resid_mlp_train_config: Path
+    label_coeffs: Path
+    checkpoint: Path
+
+
+class ResidualMLPConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    n_instances: PositiveInt
+    n_features: PositiveInt
+    d_embed: PositiveInt
+    d_mlp: PositiveInt
+    n_layers: PositiveInt
+    act_fn_name: Literal["gelu", "relu"] = Field(
+        description="Defines the activation function in the model. Also used in the labeling "
+        "function if label_type is act_plus_resid."
+    )
+    apply_output_act_fn: bool
+    in_bias: bool
+    out_bias: bool
+
+
 class ResidualMLPModel(Model):
-    def __init__(
-        self,
-        n_features: int,
-        d_embed: int,
-        d_mlp: int,
-        n_layers: int,
-        n_instances: int,
-        act_fn_name: Literal["gelu", "relu"],
-        in_bias: bool,
-        out_bias: bool,
-        apply_output_act_fn: bool = False,
-    ):
+    def __init__(self, config: ResidualMLPConfig):
         super().__init__()
-        self.n_features = n_features
-        self.d_embed = d_embed
-        self.d_mlp = d_mlp
-        self.n_layers = n_layers
-        self.n_instances = n_instances
-        self.in_bias = in_bias
-        self.out_bias = out_bias
-        self.act_fn_name = act_fn_name
-        self.apply_output_act_fn = apply_output_act_fn
-        self.W_E = nn.Parameter(torch.empty(n_instances, n_features, d_embed))
+        self.config = config
+        self.W_E = nn.Parameter(torch.empty(config.n_instances, config.n_features, config.d_embed))
         init_param_(self.W_E)
-        self.W_U = nn.Parameter(torch.empty(n_instances, d_embed, n_features))
+        self.W_U = nn.Parameter(torch.empty(config.n_instances, config.d_embed, config.n_features))
         init_param_(self.W_U)
 
-        assert act_fn_name in ["gelu", "relu"]
-        self.act_fn = F.gelu if act_fn_name == "gelu" else F.relu
+        assert config.act_fn_name in ["gelu", "relu"]
+        self.act_fn = F.gelu if config.act_fn_name == "gelu" else F.relu
         self.layers = nn.ModuleList(
             [
                 InstancesMLP(
-                    n_instances=n_instances,
-                    d_model=d_embed,
-                    d_mlp=d_mlp,
+                    n_instances=config.n_instances,
+                    d_model=config.d_embed,
+                    d_mlp=config.d_mlp,
                     act_fn=self.act_fn,
-                    in_bias=in_bias,
-                    out_bias=out_bias,
+                    in_bias=config.in_bias,
+                    out_bias=config.out_bias,
                 )
-                for _ in range(n_layers)
+                for _ in range(config.n_layers)
             ]
         )
 
@@ -329,8 +337,8 @@ class ResidualMLPModel(Model):
         ],
     ]:
         # Make sure that n_instances are correct to avoid unintended broadcasting
-        assert x.shape[1] == self.n_instances, "n_instances mismatch"
-        assert x.shape[2] == self.n_features, "n_features mismatch"
+        assert x.shape[1] == self.config.n_instances, "n_instances mismatch"
+        assert x.shape[2] == self.config.n_features, "n_features mismatch"
         layer_pre_acts = {}
         layer_post_acts = {}
         residual = einops.einsum(
@@ -350,33 +358,64 @@ class ResidualMLPModel(Model):
             self.W_U,
             "batch n_instances d_embed, n_instances d_embed n_features -> batch n_instances n_features",
         )
-        if self.apply_output_act_fn:
+        if self.config.apply_output_act_fn:
             out = self.act_fn(out)
         return out, layer_pre_acts, layer_post_acts
+
+    @staticmethod
+    def _download_wandb_files(wandb_project_run_id: str) -> ResidualMLPPaths:
+        """Download the relevant files from a wandb run."""
+        api = wandb.Api()
+        run: Run = api.run(wandb_project_run_id)
+
+        resid_mlp_train_config_path = download_wandb_file(run, "resid_mlp_train_config.yaml")
+        label_coeffs_path = download_wandb_file(run, "label_coeffs.json")
+        checkpoint = fetch_latest_wandb_checkpoint(run)
+        checkpoint_path = download_wandb_file(run, checkpoint.name)
+        return ResidualMLPPaths(
+            resid_mlp_train_config=resid_mlp_train_config_path,
+            label_coeffs=label_coeffs_path,
+            checkpoint=checkpoint_path,
+        )
 
     @classmethod
     def from_pretrained(
         cls, path: str | Path
     ) -> tuple["ResidualMLPModel", dict[str, Any], Float[Tensor, "n_instances n_features"]]:
-        params = torch.load(path, weights_only=True, map_location="cpu")
-        with open(Path(path).parent / "target_model_config.yaml") as f:
-            config_dict = yaml.safe_load(f)
+        """Fetch a pretrained model from wandb or a local path to a checkpoint.
 
-        with open(Path(path).parent / "label_coeffs.json") as f:
+        Args:
+            path: The path to local checkpoint or wandb project. If a wandb project, the format
+                must be `wandb:entity/project/run_id`. If `api.entity` is set (e.g. via setting
+                WANDB_ENTITY in .env), this can be in the form `wandb:project/run_id` and if
+                form `wandb:project/run_id` and if `api.project` is set this can just be
+                `wandb:run_id`. If local path, assumes that `resid_mlp_train_config.yaml` and
+                `label_coeffs.json` are in the same directory as the checkpoint.
+        """
+        if is_wandb_path(path):
+            assert isinstance(path, str) and path.startswith("wandb:")
+            wandb_path = path.split(":")[1]
+            paths = cls._download_wandb_files(wandb_path)
+        else:
+            # `path` should be a local path
+            paths = ResidualMLPPaths(
+                resid_mlp_train_config=Path(path).parent / "resid_mlp_train_config.yaml",
+                label_coeffs=Path(path).parent / "label_coeffs.json",
+                checkpoint=Path(path),
+            )
+
+        params = torch.load(paths.checkpoint, weights_only=True, map_location="cpu")
+        with open(paths.resid_mlp_train_config) as f:
+            resid_mlp_train_config_dict = yaml.safe_load(f)
+
+        with open(paths.label_coeffs) as f:
             label_coeffs = torch.tensor(json.load(f))
 
-        model = cls(
-            n_features=config_dict["n_features"],
-            d_embed=config_dict["d_embed"],
-            d_mlp=config_dict["d_mlp"],
-            n_layers=config_dict["n_layers"],
-            n_instances=config_dict["n_instances"],
-            act_fn_name=config_dict["act_fn_name"],
-            in_bias=config_dict["in_bias"],
-            out_bias=config_dict["out_bias"],
-        )
-        model.load_state_dict(params)
-        return model, config_dict, label_coeffs
+        resid_mlp_config = ResidualMLPConfig(**resid_mlp_train_config_dict["resid_mlp_config"])
+        resid_mlp = cls(resid_mlp_config)
+        resid_mlp.load_state_dict(params)
+
+        return resid_mlp, resid_mlp_train_config_dict, label_coeffs
 
     def all_decomposable_params(
         self,
@@ -567,33 +606,33 @@ class ResidualMLPSPDRankPenaltyModel(SPDRankPenaltyModel):
     def _load_model(
         cls,
         config_path: Path,
-        target_model_config_path: Path,
+        resid_mlp_config_path: Path,
         checkpoint_path: Path,
         label_coeffs_path: Path,
     ) -> tuple["ResidualMLPSPDRankPenaltyModel", Config, list[float]]:
         """Helper function to load the model from local files."""
         # Load config
         config = Config(**load_yaml(config_path))
-        assert isinstance(config.task_config, ResidualMLPConfig)
+        assert isinstance(config.task_config, ResidualMLPTaskConfig)
 
         # Load target model config
-        target_model_config = load_yaml(target_model_config_path)
+        resid_mlp_config = load_yaml(resid_mlp_config_path)
 
         # Load checkpoint
         params = torch.load(checkpoint_path, weights_only=True, map_location="cpu")
 
         # Create model
         model = cls(
-            n_features=target_model_config["n_features"],
-            d_embed=target_model_config["d_embed"],
-            d_mlp=target_model_config["d_mlp"],
-            n_layers=target_model_config["n_layers"],
-            n_instances=target_model_config["n_instances"],
+            n_features=resid_mlp_config["n_features"],
+            d_embed=resid_mlp_config["d_embed"],
+            d_mlp=resid_mlp_config["d_mlp"],
+            n_layers=resid_mlp_config["n_layers"],
+            n_instances=resid_mlp_config["n_instances"],
             k=config.task_config.k,
             init_scale=config.task_config.init_scale,
-            act_fn_name=target_model_config["act_fn_name"],
-            in_bias=target_model_config["in_bias"],
-            out_bias=target_model_config["out_bias"],
+            act_fn_name=resid_mlp_config["act_fn_name"],
+            in_bias=resid_mlp_config["in_bias"],
+            out_bias=resid_mlp_config["out_bias"],
         )
         model.load_state_dict(params)
 
@@ -612,7 +651,7 @@ class ResidualMLPSPDRankPenaltyModel(SPDRankPenaltyModel):
         model_dir = path.parent
         return cls._load_model(
             config_path=model_dir / "final_config.yaml",
-            target_model_config_path=model_dir / "target_model_train_config.yaml",
+            resid_mlp_config_path=model_dir / "resid_mlp_train_config.yaml",
             checkpoint_path=path,
             label_coeffs_path=model_dir / "label_coeffs.json",
         )
@@ -629,7 +668,7 @@ class ResidualMLPSPDRankPenaltyModel(SPDRankPenaltyModel):
         checkpoints = [
             file
             for file in run.files()
-            if file.name.endswith(".pth") and "target_model" not in file.name
+            if file.name.endswith(".pth") and "resid_mlp" not in file.name
         ]
         if not checkpoints:
             raise ValueError(f"No checkpoint files found in run {wandb_project_run_id}")
@@ -638,13 +677,13 @@ class ResidualMLPSPDRankPenaltyModel(SPDRankPenaltyModel):
         )[-1]
 
         config_path = download_wandb_file(run, "final_config.yaml")
-        target_model_config_path = download_wandb_file(run, "target_model_train_config.yaml")
+        resid_mlp_config_path = download_wandb_file(run, "resid_mlp_train_config.yaml")
         label_coeffs_path = download_wandb_file(run, "label_coeffs.json")
         checkpoint_path = download_wandb_file(run, latest_checkpoint_remote.name)
 
         return cls._load_model(
             config_path=config_path,
-            target_model_config_path=target_model_config_path,
+            resid_mlp_config_path=resid_mlp_config_path,
             checkpoint_path=checkpoint_path,
             label_coeffs_path=label_coeffs_path,
         )

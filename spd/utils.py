@@ -17,7 +17,7 @@ from pydantic import BaseModel
 from pydantic.v1.utils import deep_update
 from torch import Tensor
 from torch.utils.data import DataLoader, Dataset
-from wandb.apis.public import Run
+from wandb.apis.public import File, Run
 
 from spd.models.base import Model, SPDFullRankModel, SPDModel, SPDRankPenaltyModel
 from spd.settings import REPO_ROOT
@@ -156,6 +156,31 @@ def replace_pydantic_model(model: BaseModelType, *updates: dict[str, Any]) -> Ba
         Bar(foo=Foo(a=3, b=2))
     """
     return model.__class__(**deep_update(model.model_dump(), *updates))
+
+
+def is_wandb_path(path: Path | str) -> bool:
+    """Check if a path is a wandb path. We prefix all wandb paths with `wandb:`."""
+    return isinstance(path, str) and path.startswith("wandb:")
+
+
+def fetch_latest_wandb_checkpoint(run: Run) -> File:
+    """Fetch the latest checkpoint from a wandb run.
+
+    NOTE: Assumes that the only files that end in `.pth` are checkpoints.
+    """
+    # Get the latest checkpoint. Assume format is <name>_<step>.pth or <name>.pth
+    checkpoints = [file for file in run.files() if file.name.endswith(".pth")]
+    if not checkpoints:
+        raise ValueError(f"No checkpoint files found in run {run.name}")
+
+    if len(checkpoints) == 1:
+        latest_checkpoint_remote = checkpoints[0]
+    else:
+        # Assume format is <name>_<step>.pth
+        latest_checkpoint_remote = sorted(
+            checkpoints, key=lambda x: int(x.name.split(".pth")[0].split("_")[-1])
+        )[-1]
+    return latest_checkpoint_remote
 
 
 def init_wandb(

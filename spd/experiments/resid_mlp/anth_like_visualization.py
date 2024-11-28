@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import torch
 import yaml
-from train_resid_mlp import Config
+from train_resid_mlp import ResidMLPTrainConfig
 
 from spd.experiments.resid_mlp.models import ResidualMLPModel
 from spd.experiments.resid_mlp.resid_mlp_dataset import ResidualMLPDataset
@@ -13,13 +13,13 @@ from spd.utils import DatasetGeneratedDataLoader, set_seed
 
 
 def plot_activations_single_features(
-    config: Config,
+    config: ResidMLPTrainConfig,
     model: ResidualMLPModel,
 ):
     # Generate a batch of data that has one active feature (identity will do)
-    half_batch_size = config.n_features
+    half_batch_size = config.resid_mlp_config.n_features
     batch_size = 2 * half_batch_size
-    n_instances = config.n_instances
+    n_instances = config.resid_mlp_config.n_instances
     pos_batch = torch.eye(half_batch_size, device=device) * 0.5
     neg_batch = -pos_batch
     batch = torch.cat([pos_batch, neg_batch], dim=0)
@@ -108,37 +108,26 @@ if __name__ == "__main__":
     # Load config
     with open(model_path / "target_model_config.yaml") as f:
         config_dict = yaml.safe_load(f)
-    config = Config(**config_dict)
+    config = ResidMLPTrainConfig(**config_dict)
 
     # Load label coefficients
     with open(model_path / "label_coeffs.json") as f:
         label_coeffs = torch.tensor(json.load(f), device=device)
 
     # Initialize and load model
-    model = ResidualMLPModel(
-        n_instances=config.n_instances,
-        n_features=config.n_features,
-        d_embed=config.d_embed,
-        d_mlp=config.d_mlp,
-        n_layers=config.n_layers,
-        act_fn_name=config.act_fn_name,
-        apply_output_act_fn=config.apply_output_act_fn,
-        in_bias=config.in_bias,
-        out_bias=config.out_bias,
-    ).to(device)
-
-    model.load_state_dict(torch.load(model_path / "target_model.pth"))
+    model = ResidualMLPModel(config.resid_mlp_config).to(device)
+    model.load_state_dict(torch.load(model_path / "resid_mlp.pth"))
     model.eval()
 
     # Load the dataset
     dataset = ResidualMLPDataset(
-        n_instances=config.n_instances,
-        n_features=config.n_features,
+        n_instances=config.resid_mlp_config.n_instances,
+        n_features=config.resid_mlp_config.n_features,
         feature_probability=config.feature_probability,
         device=device,
         calc_labels=True,
         label_type=config.label_type,
-        act_fn_name=config.act_fn_name,
+        act_fn_name=config.resid_mlp_config.act_fn_name,
         label_fn_seed=config.label_fn_seed,
         data_generation_type=config.data_generation_type,
     )

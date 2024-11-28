@@ -3,7 +3,7 @@
 
 from spd.experiments.resid_mlp.models import ResidualMLPModel, ResidualMLPSPDRankPenaltyModel
 from spd.experiments.resid_mlp.resid_mlp_dataset import ResidualMLPDataset
-from spd.run_spd import ResidualMLPConfig, calc_recon_mse
+from spd.run_spd import ResidualMLPTaskConfig, calc_recon_mse
 from spd.utils import run_spd_forward_pass, set_seed
 
 # %%
@@ -22,7 +22,7 @@ if __name__ == "__main__":
     # Load the pretrained SPD model
     model, config, label_coeffs = ResidualMLPSPDRankPenaltyModel.from_wandb(wandb_path)
 
-    assert isinstance(config.task_config, ResidualMLPConfig)
+    assert isinstance(config.task_config, ResidualMLPTaskConfig)
     # Path must be local
     target_model, target_config_dict, target_label_coeffs = ResidualMLPModel.from_pretrained(
         config.task_config.pretrained_model_path
