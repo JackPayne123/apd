@@ -77,7 +77,7 @@ def train(
     ],
     device: str,
     out_dir: Path | None = None,
-) -> float | None:
+) -> float:
     if out_dir is not None:
         out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -86,7 +86,7 @@ def train(
     # Add this line to get the lr_schedule_fn
     lr_schedule_fn = get_lr_schedule_fn(config.lr_schedule)
 
-    final_loss = None
+    final_loss = torch.inf
     for step, (batch, labels) in enumerate(dataloader):
         if step >= config.steps:
             break
@@ -130,7 +130,7 @@ def train(
     return final_loss
 
 
-def run_train(config: Config, device: str) -> None:
+def run_train(config: Config, device: str) -> float:
     run_name = (
         f"resid_mlp_identity_{config.label_type}_n-instances{config.n_instances}_"
         f"n-features{config.n_features}_d-resid{config.d_embed}_"
@@ -188,7 +188,7 @@ def run_train(config: Config, device: str) -> None:
     )
     dataloader = DatasetGeneratedDataLoader(dataset, batch_size=config.batch_size, shuffle=False)
 
-    train(
+    final_loss = train(
         config=config,
         model=model,
         trainable_params=[p for p in model.parameters() if p.requires_grad],
@@ -196,6 +196,7 @@ def run_train(config: Config, device: str) -> None:
         device=device,
         out_dir=out_dir,
     )
+    return final_loss
 
 
 if __name__ == "__main__":
