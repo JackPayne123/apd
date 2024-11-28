@@ -32,7 +32,7 @@ if __name__ == "__main__":
         print_freq=100,
         lr=3e-3,
         lr_schedule="cosine",
-        fixed_random_embedding=False,
+        fixed_random_embedding=True,
         fixed_identity_embedding=False,
     )
 

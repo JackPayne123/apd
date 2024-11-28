@@ -13,7 +13,7 @@ from spd.experiments.resid_mlp.resid_mlp_dataset import ResidualMLPDataset
 from spd.utils import REPO_ROOT, set_seed
 
 # %% Load model and config
-model = "resid_mlp_identity_act_plus_resid_n-instances4_n-features100_d-resid1000_d-mlp10_n-layers5_seed0"
+model = "resid_mlp_identity_act_plus_resid_n-instances20_n-features100_d-resid1000_d-mlp10_n-layers5_seed0"
 path = REPO_ROOT / "spd/experiments/resid_mlp/out" / model / "target_model.pth"
 
 set_seed(0)
