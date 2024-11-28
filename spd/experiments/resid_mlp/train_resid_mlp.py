@@ -18,31 +18,9 @@ from spd.experiments.resid_mlp.resid_mlp_dataset import (
 )
 from spd.log import logger
 from spd.run_spd import get_lr_schedule_fn
-from spd.utils import DatasetGeneratedDataLoader, init_wandb, set_seed
+from spd.utils import DatasetGeneratedDataLoader, compute_feature_importances, init_wandb, set_seed
 
 wandb.require("core")
-
-
-def compute_feature_importances(
-    batch_size: int,
-    n_instances: int,
-    n_features: int,
-    importance_val: float | None,
-    device: str,
-) -> Float[Tensor, "batch_size n_instances n_features"]:
-    # Defines a tensor where the i^th feature has importance importance^i
-    if importance_val is None or importance_val == 1.0:
-        importance_tensor = torch.ones(batch_size, n_instances, n_features, device=device)
-    else:
-        importances = torch.ones(n_features, device=device) * importance_val
-        importances = torch.cumprod(importances, dim=-1)
-        importance_tensor = einops.repeat(
-            importances,
-            "n_features -> batch_size n_instances n_features",
-            batch_size=batch_size,
-            n_instances=n_instances,
-        )
-    return importance_tensor
 
 
 class Config(BaseModel):
@@ -149,7 +127,6 @@ def train(
         out, _, _ = model(batch)
         # Scale by feature importance as in Anthropic paper
 
-        # loss = F.mse_loss(out, labels) * out.shape[-1]
         loss = ((out - labels) ** 2) * feature_importances
         loss = loss.mean()
         loss.backward()
@@ -275,8 +252,8 @@ if __name__ == "__main__":
         use_trivial_label_coeffs=True,
         in_bias=False,
         out_bias=False,
-        feature_probability=1.0,
-        importance_val=0.8,
+        feature_probability=0.5,
+        importance_val=0.97,
         batch_size=256,
         steps=50_000,
         print_freq=100,
