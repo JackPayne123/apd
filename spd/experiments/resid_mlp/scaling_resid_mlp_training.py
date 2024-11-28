@@ -11,7 +11,6 @@ from spd.utils import set_seed
 
 
 def test_train(
-    batch_size: int,
     n_instances: int,
     n_steps: int,
     d_embed: int,
@@ -40,7 +39,7 @@ def test_train(
         out_bias=bias,
         feature_probability=p,
         importance_val=None,
-        batch_size=batch_size,
+        batch_size=256,
         steps=n_steps,
         print_freq=100,
         lr=3e-3,
@@ -85,7 +84,6 @@ def naive_loss(n_features: int, d_mlp: int, p: float, bias: bool, embed: str) ->
 if __name__ == "__main__":
     out_dir = REPO_ROOT / "spd/experiments/resid_mlp/out"
     os.makedirs(out_dir, exist_ok=True)
-    batch_size = 256
     n_instances = 20
     n_features = 100
     d_mlp = 50
@@ -102,12 +100,11 @@ if __name__ == "__main__":
             losses = {}
             fixed_random_embedding = embed == "random"
             fixed_identity_embedding = embed == "identity"
-            for n_steps in [5000, 1000, 100]:
+            for n_steps in [10_000, 1000, 100]:
                 losses[n_steps] = {}
                 for d_embed in d_embeds:
                     print(f"Run {n_steps} steps, {d_embed} d_embed")
                     losses[n_steps][d_embed] = test_train(
-                        batch_size=batch_size,
                         n_instances=n_instances,
                         n_steps=n_steps,
                         d_embed=d_embed,
@@ -142,19 +139,18 @@ if __name__ == "__main__":
     # Scale p
     fig, axes = plt.subplots(nrows=2, ncols=2, figsize=(10, 10), constrained_layout=True)
     fig.suptitle(f"Loss scaling with p. Using {n_instances} instances")
-    ps = np.array([0.01, 0.1, 1.0])
+    ps = np.array([0.01, 0.1, 0.5, 1.0])
     for bias in [True, False]:
         for i, embed in enumerate(["trained", "random"]):
             losses = {}
             fixed_random_embedding = embed == "random"
             fixed_identity_embedding = embed == "identity"
             print(f"Quadrant {bias=} and {embed=}")
-            for n_steps in [5000, 1000]:
+            for n_steps in [10_000, 1000, 100]:
                 losses[n_steps] = {}
                 for p in ps:
                     print(f"Run {n_steps} steps, {p} p")
                     losses[n_steps][p] = test_train(
-                        batch_size=batch_size,
                         n_instances=n_instances,
                         n_steps=n_steps,
                         d_embed=d_embed,
