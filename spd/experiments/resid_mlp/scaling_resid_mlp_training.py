@@ -12,6 +12,7 @@ from spd.utils import set_seed
 
 def test_train(
     batch_size: int,
+    n_instances: int,
     n_steps: int,
     d_embed: int,
     p: float,
@@ -27,7 +28,7 @@ def test_train(
         label_fn_seed=0,
         label_type="act_plus_resid",
         use_trivial_label_coeffs=True,
-        n_instances=1,
+        n_instances=n_instances,
         n_features=n_features,
         d_embed=d_embed,
         d_mlp=d_mlp,
@@ -51,31 +52,63 @@ def test_train(
     set_seed(config.seed)
     loss = run_train(config, device)
     loss_as_previously_computed = loss * config.n_features
-    return loss_as_previously_computed
+    loss_dict = {i: loss_as_previously_computed[i].item() for i in range(n_instances)}
+    return loss_dict
+
+
+def plot_loss_curve(ax: plt.Axes, losses: dict[int, dict[int, float]], label: str):
+    xvals = np.array(list(losses.keys()))
+    # 2D array of y vals, due to instance dimension
+    yvals = np.array([list(losses[x].values()) for x in xvals])
+    yvals_mean = yvals.mean(axis=1)
+    yvals_lower = yvals.min(axis=1)
+    yvals_upper = yvals.max(axis=1)
+    ax.plot(xvals, yvals_mean, label=label)
+    ax.fill_between(xvals, yvals_lower, yvals_upper, alpha=0.2)
+
+
+def naive_loss(n_features: int, d_mlp: int, p: float, bias: bool, embed: str) -> float:
+    if embed == "random":
+        if bias:
+            return (n_features - d_mlp) * (8 - 3 * p) * p / 48
+        else:
+            return (n_features - d_mlp) * p / 6
+    elif embed == "trained":
+        if bias:
+            return (n_features - d_mlp) * (4 - 3 * p) * p / 48
+        else:
+            return (n_features - d_mlp) * p / 12
+    else:
+        raise ValueError(f"Unknown embedding type {embed}")
 
 
 if __name__ == "__main__":
     out_dir = REPO_ROOT / "spd/experiments/resid_mlp/out"
     os.makedirs(out_dir, exist_ok=True)
-    batch_size = 2048
+    batch_size = 256
+    n_instances = 20
     n_features = 100
     d_mlp = 50
     p = 0.01
     d_embed = 1000
+    n_steps = 1000
     # Scale d_embed
-    losses = {}
     fig, axes = plt.subplots(nrows=2, ncols=2, figsize=(10, 10), constrained_layout=True)
+    fig.suptitle("Loss scaling with d_embed")
+    d_embeds = [10_000, 1000, 100, 50, 10]
     for bias in [True, False]:
         for i, embed in enumerate(["trained", "random"]):
+            print(f"Quadrant {bias=} and {embed=}")
+            losses = {}
             fixed_random_embedding = embed == "random"
             fixed_identity_embedding = embed == "identity"
-            for n_steps in [500, 1000, 2000, 5000, 10_000]:
+            for n_steps in [5000, 1000, 100]:
                 losses[n_steps] = {}
-                for d_embed in np.geomspace(100, 100_000, 4):
-                    d_embed = int(d_embed)
-                    print(f"Testing {n_steps} steps, {d_embed} d_embed")
+                for d_embed in d_embeds:
+                    print(f"Run {n_steps} steps, {d_embed} d_embed")
                     losses[n_steps][d_embed] = test_train(
                         batch_size=batch_size,
+                        n_instances=n_instances,
                         n_steps=n_steps,
                         d_embed=d_embed,
                         p=p,
@@ -85,51 +118,44 @@ if __name__ == "__main__":
                         fixed_random_embedding=fixed_random_embedding,
                         fixed_identity_embedding=fixed_identity_embedding,
                     )
-            # Save losses to json
-            with open(
-                out_dir
-                / f"losses_scale_embed_{d_embed=}_{bias=}_{embed=}_{p=}_{n_features=}_{d_mlp=}.json",
-                "w",
-            ) as f:
+            title_str = f"W_E={embed}_{bias=}_{n_features=}_{d_mlp=}_{p=}"
+            with open(out_dir / f"losses_scale_embed_{title_str}.json", "w") as f:
                 json.dump(losses, f)
             # Make plot
             ax = axes[int(bias), i]  # type: ignore
-            naive_loss = (
-                (n_features - d_mlp) * (8 - 3 * p) * p / 48
-                if bias
-                else (n_features - d_mlp) * p / 6
+            ax.set_title(title_str, fontsize=8)
+            naive_losses = naive_loss(n_features, d_mlp, p, bias, embed)
+            ax.axhline(
+                naive_losses, color="k", linestyle="--", label=f"Naive loss {naive_losses:.2e}"
             )
             for n_steps in losses:
-                ax.plot(
-                    list(losses[n_steps].keys()),
-                    list(losses[n_steps].values()),
-                    label=f"{n_steps} steps",
-                )
-            ax.set_title(f"{n_features=}, {d_mlp=}, {p=}, {bias=}, W_E={embed}", fontsize=8)
-            ax.axhline(naive_loss, color="k", linestyle="--", label=f"Naive loss {naive_loss:.2e}")
+                plot_loss_curve(ax, losses[n_steps], label=f"{n_steps} steps")
             ax.set_yscale("log")
             ax.set_xscale("log")
-            ax.legend(loc="upper right")
             ax.set_xlabel("d_embed")
-            ax.set_ylabel("Loss")
-    fig.suptitle("Loss scaling with training steps")
-    fig.savefig(out_dir / "loss_scaling_resid_mlp_training_d_embed.png")
+            ax.set_ylabel("Loss L")
+            ax.legend(loc="upper center")
+            fig.savefig(out_dir / "loss_scaling_resid_mlp_training_d_embed.png")
+    print("Saved plot to", out_dir / "loss_scaling_resid_mlp_training_d_embed.png")
     plt.show()
+
     # Scale p
-    losses = {}
     fig, axes = plt.subplots(nrows=2, ncols=2, figsize=(10, 10), constrained_layout=True)
-    ps = np.geomspace(0.01, 1, 4)
+    fig.suptitle("Loss scaling with p")
+    ps = np.array([0.01, 0.1, 1.0])
     for bias in [True, False]:
         for i, embed in enumerate(["trained", "random"]):
+            losses = {}
             fixed_random_embedding = embed == "random"
             fixed_identity_embedding = embed == "identity"
-            print(f"Setting {bias=} and {embed=}")
-            for n_steps in [500, 1000, 2000, 10000]:
+            print(f"Quadrant {bias=} and {embed=}")
+            for n_steps in [5000, 1000, 100]:
                 losses[n_steps] = {}
                 for p in ps:
-                    print(f"Testing {n_steps} steps, {p} p")
+                    print(f"Run {n_steps} steps, {p} p")
                     losses[n_steps][p] = test_train(
                         batch_size=batch_size,
+                        n_instances=n_instances,
                         n_steps=n_steps,
                         d_embed=d_embed,
                         p=p,
@@ -139,33 +165,22 @@ if __name__ == "__main__":
                         fixed_random_embedding=fixed_random_embedding,
                         fixed_identity_embedding=fixed_identity_embedding,
                     )
-            # Save losses to json
-            with open(
-                out_dir
-                / f"losses_scale_p_{bias=}_{embed=}_{p=}_{d_embed=}_{n_features=}_{d_mlp=}.json",
-                "w",
-            ) as f:
+            title_str = f"W_E={embed}_{bias=}_{n_features=}_{d_mlp=}_{d_embed=}"
+            with open(out_dir / f"losses_scale_p_{title_str}.json", "w") as f:
                 json.dump(losses, f)
             # Make plot
             ax = axes[int(bias), i]  # type: ignore
-            naive_losses = [
-                (n_features - d_mlp) * (8 - 3 * p) * p / 48
-                if bias
-                else (n_features - d_mlp) * p / 6
-                for p in ps
-            ]
+            ax.set_title(title_str, fontsize=8)
+            naive_losses = [naive_loss(n_features, d_mlp, p, bias, embed) for p in ps]
             ax.plot(ps, naive_losses, color="k", linestyle="--", label="Naive loss")
-            for n_steps in losses:
-                ax.plot(
-                    list(losses[n_steps].keys()),
-                    list(losses[n_steps].values()),
-                    label=f"{n_steps} steps",
-                )
-            ax.set_title(f"{n_features=}, {d_embed=}, {d_mlp=}, {bias=}, W_E={embed}", fontsize=8)
+            for p in ps:
+                scaled_loss = {i: losses[p][i] / p for i in range(n_instances)}
+                plot_loss_curve(ax, scaled_loss, label=f"{p=}")
             ax.set_yscale("log")
             ax.set_xscale("log")
-            ax.legend(loc="upper left")
             ax.set_xlabel("p")
-            ax.set_ylabel("Loss")
-    fig.suptitle("Loss scaling with p")
+            ax.set_ylabel("Scaled loss L / p")
+            ax.legend(loc="upper center")
+    fig.savefig(out_dir / "loss_scaling_resid_mlp_training_p.png")
+    print("Saved plot to", out_dir / "loss_scaling_resid_mlp_training_p.png")
     plt.show()
