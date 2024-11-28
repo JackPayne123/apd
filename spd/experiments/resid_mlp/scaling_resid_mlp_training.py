@@ -16,7 +16,7 @@ def test_train(
     d_embed: int,
     p: float,
     bias: bool,
-    d_features: int,
+    n_features: int,
     d_mlp: int,
     fixed_random_embedding: bool,
     fixed_identity_embedding: bool,
@@ -28,7 +28,7 @@ def test_train(
         label_type="act_plus_resid",
         use_trivial_label_coeffs=True,
         n_instances=1,
-        n_features=d_features,
+        n_features=n_features,
         d_embed=d_embed,
         d_mlp=d_mlp,
         n_layers=1,
@@ -49,15 +49,16 @@ def test_train(
     )
 
     set_seed(config.seed)
-
-    return run_train(config, device)
+    loss = run_train(config, device)
+    loss_as_previously_computed = loss * config.n_features
+    return loss_as_previously_computed
 
 
 if __name__ == "__main__":
     out_dir = REPO_ROOT / "spd/experiments/resid_mlp/out"
     os.makedirs(out_dir, exist_ok=True)
     batch_size = 2048
-    d_features = 100
+    n_features = 100
     d_mlp = 50
     p = 0.01
     d_embed = 1000
@@ -79,7 +80,7 @@ if __name__ == "__main__":
                         d_embed=d_embed,
                         p=p,
                         bias=bias,
-                        d_features=d_features,
+                        n_features=n_features,
                         d_mlp=d_mlp,
                         fixed_random_embedding=fixed_random_embedding,
                         fixed_identity_embedding=fixed_identity_embedding,
@@ -87,16 +88,16 @@ if __name__ == "__main__":
             # Save losses to json
             with open(
                 out_dir
-                / f"losses_scale_embed_{d_embed=}_{bias=}_{embed=}_{p=}_{d_features=}_{d_mlp=}.json",
+                / f"losses_scale_embed_{d_embed=}_{bias=}_{embed=}_{p=}_{n_features=}_{d_mlp=}.json",
                 "w",
             ) as f:
                 json.dump(losses, f)
             # Make plot
             ax = axes[int(bias), i]  # type: ignore
             naive_loss = (
-                (d_features - d_mlp) * (8 - 3 * p) * p / 48
+                (n_features - d_mlp) * (8 - 3 * p) * p / 48
                 if bias
-                else (d_features - d_mlp) * p / 6
+                else (n_features - d_mlp) * p / 6
             )
             for n_steps in losses:
                 ax.plot(
@@ -104,7 +105,7 @@ if __name__ == "__main__":
                     list(losses[n_steps].values()),
                     label=f"{n_steps} steps",
                 )
-            ax.set_title(f"{d_features=}, {d_mlp=}, {p=}, {bias=}, W_E={embed}", fontsize=8)
+            ax.set_title(f"{n_features=}, {d_mlp=}, {p=}, {bias=}, W_E={embed}", fontsize=8)
             ax.axhline(naive_loss, color="k", linestyle="--", label=f"Naive loss {naive_loss:.2e}")
             ax.set_yscale("log")
             ax.set_xscale("log")
@@ -133,7 +134,7 @@ if __name__ == "__main__":
                         d_embed=d_embed,
                         p=p,
                         bias=bias,
-                        d_features=d_features,
+                        n_features=n_features,
                         d_mlp=d_mlp,
                         fixed_random_embedding=fixed_random_embedding,
                         fixed_identity_embedding=fixed_identity_embedding,
@@ -141,16 +142,16 @@ if __name__ == "__main__":
             # Save losses to json
             with open(
                 out_dir
-                / f"losses_scale_p_{bias=}_{embed=}_{p=}_{d_embed=}_{d_features=}_{d_mlp=}.json",
+                / f"losses_scale_p_{bias=}_{embed=}_{p=}_{d_embed=}_{n_features=}_{d_mlp=}.json",
                 "w",
             ) as f:
                 json.dump(losses, f)
             # Make plot
             ax = axes[int(bias), i]  # type: ignore
             naive_losses = [
-                (d_features - d_mlp) * (8 - 3 * p) * p / 48
+                (n_features - d_mlp) * (8 - 3 * p) * p / 48
                 if bias
-                else (d_features - d_mlp) * p / 6
+                else (n_features - d_mlp) * p / 6
                 for p in ps
             ]
             ax.plot(ps, naive_losses, color="k", linestyle="--", label="Naive loss")
@@ -160,7 +161,7 @@ if __name__ == "__main__":
                     list(losses[n_steps].values()),
                     label=f"{n_steps} steps",
                 )
-            ax.set_title(f"{d_features=}, {d_embed=}, {d_mlp=}, {bias=}, W_E={embed}", fontsize=8)
+            ax.set_title(f"{n_features=}, {d_embed=}, {d_mlp=}, {bias=}, W_E={embed}", fontsize=8)
             ax.set_yscale("log")
             ax.set_xscale("log")
             ax.legend(loc="upper left")
