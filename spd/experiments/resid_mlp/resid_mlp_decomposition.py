@@ -16,7 +16,11 @@ from matplotlib.colors import CenteredNorm
 from torch import Tensor
 from tqdm import tqdm
 
-from spd.experiments.resid_mlp.models import ResidualMLPModel, ResidualMLPSPDRankPenaltyModel
+from spd.experiments.resid_mlp.models import (
+    ResidualMLPModel,
+    ResidualMLPSPDRankPenaltyConfig,
+    ResidualMLPSPDRankPenaltyModel,
+)
 from spd.experiments.resid_mlp.resid_mlp_dataset import (
     ResidualMLPDataset,
 )
@@ -289,20 +293,10 @@ def main(
 
     # Create the SPD model
     if config.spd_type == "rank_penalty":
-        model = ResidualMLPSPDRankPenaltyModel(
-            n_features=target_model.config.n_features,
-            d_embed=target_model.config.d_embed,
-            d_mlp=target_model.config.d_mlp,
-            n_layers=target_model.config.n_layers,
-            n_instances=target_model.config.n_instances,
-            k=config.task_config.k,
-            init_scale=config.task_config.init_scale,
-            act_fn_name=target_model.config.act_fn_name,
-            apply_output_act_fn=target_model.config.apply_output_act_fn,
-            in_bias=target_model.config.in_bias,
-            out_bias=target_model.config.out_bias,
-            m=config.m,
-        ).to(device)
+        model_config = ResidualMLPSPDRankPenaltyConfig(
+            **target_model.config.model_dump(mode="json"), k=config.task_config.k, m=config.m
+        )
+        model = ResidualMLPSPDRankPenaltyModel(config=model_config).to(device)
     else:
         raise ValueError(f"Unknown/unsupported spd_type: {config.spd_type}")
 
@@ -331,8 +325,8 @@ def main(
         param_map[f"layers.{i}.linear2"] = f"layers.{i}.linear2"
 
     dataset = ResidualMLPDataset(
-        n_instances=model.n_instances,
-        n_features=model.n_features,
+        n_instances=model.config.n_instances,
+        n_features=model.config.n_features,
         feature_probability=config.task_config.feature_probability,
         device=device,
         calc_labels=False,  # Our labels will be the output of the target model

@@ -224,8 +224,8 @@ if __name__ == "__main__":
         seed=0,
         label_fn_seed=0,
         resid_mlp_config=ResidualMLPConfig(
-            n_instances=10,
-            n_features=10,
+            n_instances=2,
+            n_features=6,
             d_embed=5,
             d_mlp=5,
             n_layers=2,

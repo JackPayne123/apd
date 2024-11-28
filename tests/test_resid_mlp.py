@@ -6,6 +6,7 @@ from jaxtyping import Float
 from spd.experiments.resid_mlp.models import (
     ResidualMLPConfig,
     ResidualMLPModel,
+    ResidualMLPSPDRankPenaltyConfig,
     ResidualMLPSPDRankPenaltyModel,
     ResidualMLPTaskConfig,
 )
@@ -67,7 +68,7 @@ def test_resid_mlp_rank_penalty_decomposition_happy_path() -> None:
     target_model = ResidualMLPModel(config=resid_mlp_config).to(device)
 
     # Create the SPD model
-    model = ResidualMLPSPDRankPenaltyModel(
+    spd_config = ResidualMLPSPDRankPenaltyConfig(
         n_features=resid_mlp_config.n_features,
         d_embed=resid_mlp_config.d_embed,
         d_mlp=resid_mlp_config.d_mlp,
@@ -78,7 +79,8 @@ def test_resid_mlp_rank_penalty_decomposition_happy_path() -> None:
         act_fn_name="relu",
         in_bias=True,
         out_bias=True,
-    ).to(device)
+    )
+    model = ResidualMLPSPDRankPenaltyModel(config=spd_config).to(device)
 
     # Use the pretrained model's embedding matrices and don't train them further
     model.W_E.data[:, :] = target_model.W_E.data.detach().clone()
