@@ -819,3 +819,26 @@ class SparseFeatureDataset(
         )
         mask = torch.rand_like(batch) < self.feature_probability
         return batch * mask
+
+
+def compute_feature_importances(
+    batch_size: int,
+    n_instances: int,
+    n_features: int,
+    importance_val: float | None,
+    device: str,
+) -> Float[Tensor, "batch_size n_instances n_features"]:
+    # Defines a tensor where the i^th feature has importance importance^i
+    if importance_val is None or importance_val == 1.0:
+        importance_tensor = torch.ones(batch_size, n_instances, n_features, device=device)
+    else:
+        powers = torch.arange(n_features, device=device)
+        importances = torch.pow(importance_val, powers)
+        # Now make it a tensor of shape (batch_size, n_instances, n_features)
+        importance_tensor = einops.repeat(
+            importances,
+            "n_features -> batch_size n_instances n_features",
+            batch_size=batch_size,
+            n_instances=n_instances,
+        )
+    return importance_tensor

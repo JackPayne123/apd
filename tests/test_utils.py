@@ -13,6 +13,7 @@ from spd.utils import (
     calc_grad_attributions_rank_one,
     calc_topk_mask,
     calculate_closeness_to_identity,
+    compute_feature_importances,
     permute_to_identity,
 )
 
@@ -371,3 +372,31 @@ def test_dataset_exactly_two_active():
     assert torch.all(
         (non_zero_values >= value_range[0]) & (non_zero_values <= value_range[1])
     ), f"Non-zero values should be between {value_range[0]} and {value_range[1]}"
+
+
+@pytest.mark.parametrize(
+    "importance_val, expected_tensor",
+    [
+        (
+            1.0,
+            torch.tensor([[[1.0, 1.0, 1.0], [1.0, 1.0, 1.0]], [[1.0, 1.0, 1.0], [1.0, 1.0, 1.0]]]),
+        ),
+        (
+            0.5,
+            torch.tensor(
+                [[[1.0, 0.5, 0.25], [1.0, 0.5, 0.25]], [[1.0, 0.5, 0.25], [1.0, 0.5, 0.25]]]
+            ),
+        ),
+        (
+            0.0,
+            torch.tensor([[[1.0, 0.0, 0.0], [1.0, 0.0, 0.0]], [[1.0, 0.0, 0.0], [1.0, 0.0, 0.0]]]),
+        ),
+    ],
+)
+def test_compute_feature_importances(
+    importance_val: float, expected_tensor: Float[Tensor, "batch_size n_instances n_features"]
+):
+    importances = compute_feature_importances(
+        batch_size=2, n_instances=2, n_features=3, importance_val=importance_val, device="cpu"
+    )
+    torch.testing.assert_close(importances, expected_tensor)

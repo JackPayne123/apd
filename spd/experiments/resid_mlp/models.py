@@ -427,6 +427,8 @@ class ResidualMLPSPDRankPenaltyModel(SPDRankPenaltyModel):
 
         self.W_E = nn.Parameter(torch.empty(n_instances, n_features, d_embed))
         self.W_U = nn.Parameter(torch.empty(n_instances, d_embed, n_features))
+        init_param_(self.W_E)
+        init_param_(self.W_U)
 
         self.m = min(d_embed, d_mlp) if m is None else m
 
