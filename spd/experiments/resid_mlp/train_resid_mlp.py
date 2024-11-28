@@ -88,7 +88,7 @@ def train(
     # Add this line to get the lr_schedule_fn
     lr_schedule_fn = get_lr_schedule_fn(config.lr_schedule)
 
-    final_losses = torch.tensor([])
+    current_losses = torch.tensor([])
     pbar = tqdm(range(config.steps), total=config.steps)
     for step, (batch, labels) in zip(pbar, dataloader, strict=False):
         if step >= config.steps:
@@ -107,12 +107,12 @@ def train(
 
         loss = ((out - labels) ** 2) * feature_importances
         loss = loss.mean(dim=(0, 2))
-        final_losses = loss.detach()
+        current_losses = loss.detach()
         loss = loss.mean(dim=0)
         loss.backward()
         optimizer.step()
         if step % config.print_freq == 0:
-            pbar.set_description(f"loss={final_losses.mean():.2e}, lr={current_lr:.2e}")
+            pbar.set_description(f"loss={current_losses.mean():.2e}, lr={current_lr:.2e}")
 
     if out_dir is not None:
         model_path = out_dir / "target_model.pth"
@@ -133,8 +133,20 @@ def train(
             json.dump(label_coeffs, f)
         print(f"Saved label coefficients to {label_coeffs_path}")
 
-    print(f"Final losses: {final_losses.cpu().numpy()}")
-    return final_losses.cpu()
+    # Calculate final losses by averaging many batches
+    n_batches = 100
+    final_losses = []
+    for _ in range(n_batches):
+        batch, labels = next(iter(dataloader))
+        batch = batch.to(device)
+        labels = labels.to(device)
+        out, _, _ = model(batch)
+        loss = ((out - labels) ** 2) * feature_importances
+        loss = loss.mean(dim=(0, 2))
+        final_losses.append(loss)
+    final_losses = torch.stack(final_losses).mean(dim=0).cpu().detach()
+    print(f"Final losses: {final_losses.numpy()}")
+    return final_losses
 
 
 def run_train(config: Config, device: str) -> Float[Tensor, " n_instances"]:
