@@ -94,7 +94,7 @@ if __name__ == "__main__":
     n_steps = 1000
     # Scale d_embed
     fig, axes = plt.subplots(nrows=2, ncols=2, figsize=(10, 10), constrained_layout=True)
-    fig.suptitle("Loss scaling with d_embed")
+    fig.suptitle(f"Loss scaling with d_embed. Using {n_instances} instances")
     d_embeds = [10_000, 1000, 100, 50, 10]
     for bias in [True, False]:
         for i, embed in enumerate(["trained", "random"]):
@@ -141,7 +141,7 @@ if __name__ == "__main__":
 
     # Scale p
     fig, axes = plt.subplots(nrows=2, ncols=2, figsize=(10, 10), constrained_layout=True)
-    fig.suptitle("Loss scaling with p")
+    fig.suptitle(f"Loss scaling with p. Using {n_instances} instances")
     ps = np.array([0.01, 0.1, 1.0])
     for bias in [True, False]:
         for i, embed in enumerate(["trained", "random"]):
@@ -149,7 +149,7 @@ if __name__ == "__main__":
             fixed_random_embedding = embed == "random"
             fixed_identity_embedding = embed == "identity"
             print(f"Quadrant {bias=} and {embed=}")
-            for n_steps in [5000, 1000, 100]:
+            for n_steps in [5000, 1000]:
                 losses[n_steps] = {}
                 for p in ps:
                     print(f"Run {n_steps} steps, {p} p")
@@ -171,16 +171,18 @@ if __name__ == "__main__":
             # Make plot
             ax = axes[int(bias), i]  # type: ignore
             ax.set_title(title_str, fontsize=8)
-            naive_losses = [naive_loss(n_features, d_mlp, p, bias, embed) for p in ps]
-            ax.plot(ps, naive_losses, color="k", linestyle="--", label="Naive loss")
-            for p in ps:
-                scaled_loss = {i: losses[p][i] / p for i in range(n_instances)}
-                plot_loss_curve(ax, scaled_loss, label=f"{p=}")
+            scaled_naive_losses = [naive_loss(n_features, d_mlp, p, bias, embed) / p for p in ps]
+            ax.plot(ps, scaled_naive_losses, color="k", linestyle="--", label="Naive loss (scaled)")
+            for n_steps in losses:
+                scaled_loss = {
+                    p: {i: losses[n_steps][p][i] / p for i in range(n_instances)} for p in ps
+                }
+                plot_loss_curve(ax, scaled_loss, label=f"{n_steps} steps")
             ax.set_yscale("log")
             ax.set_xscale("log")
             ax.set_xlabel("p")
             ax.set_ylabel("Scaled loss L / p")
             ax.legend(loc="upper center")
-    fig.savefig(out_dir / "loss_scaling_resid_mlp_training_p.png")
+            fig.savefig(out_dir / "loss_scaling_resid_mlp_training_p.png")
     print("Saved plot to", out_dir / "loss_scaling_resid_mlp_training_p.png")
     plt.show()
