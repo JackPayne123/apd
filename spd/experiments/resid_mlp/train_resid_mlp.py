@@ -79,7 +79,7 @@ def train(
     feature_importances: Float[Tensor, "batch_size n_instances n_features"],
     device: str,
     out_dir: Path | None = None,
-) -> float:
+) -> Float[Tensor, " n_instances"]:
     if out_dir is not None:
         out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -88,7 +88,7 @@ def train(
     # Add this line to get the lr_schedule_fn
     lr_schedule_fn = get_lr_schedule_fn(config.lr_schedule)
 
-    final_loss = torch.inf
+    final_losses = torch.tensor([])
     pbar = tqdm(range(config.steps), total=config.steps)
     for step, (batch, labels) in zip(pbar, dataloader, strict=False):
         if step >= config.steps:
@@ -106,12 +106,13 @@ def train(
         # Scale by feature importance as in Anthropic paper
 
         loss = ((out - labels) ** 2) * feature_importances
-        loss = loss.mean()
+        loss = loss.mean(dim=(0, 2))
+        final_losses = loss.detach()
+        loss = loss.mean(dim=0)
         loss.backward()
         optimizer.step()
-        final_loss = loss.item()
         if step % config.print_freq == 0:
-            pbar.set_description(f"loss={final_loss:.2e}, lr={current_lr:.2e}")
+            pbar.set_description(f"loss={final_losses.mean():.2e}, lr={current_lr:.2e}")
 
     if out_dir is not None:
         model_path = out_dir / "target_model.pth"
@@ -132,11 +133,11 @@ def train(
             json.dump(label_coeffs, f)
         print(f"Saved label coefficients to {label_coeffs_path}")
 
-    print(f"Final loss: {final_loss}")
-    return final_loss
+    print(f"Final losses: {final_losses.cpu().numpy()}")
+    return final_losses.cpu()
 
 
-def run_train(config: Config, device: str) -> float:
+def run_train(config: Config, device: str) -> Float[Tensor, " n_instances"]:
     run_name = (
         f"resid_mlp_identity_{config.label_type}_n-instances{config.n_instances}_"
         f"n-features{config.n_features}_d-resid{config.d_embed}_"
@@ -203,7 +204,7 @@ def run_train(config: Config, device: str) -> float:
         device=device,
     )
 
-    final_loss = train(
+    final_losses = train(
         config=config,
         model=model,
         trainable_params=[p for p in model.parameters() if p.requires_grad],
@@ -212,7 +213,7 @@ def run_train(config: Config, device: str) -> float:
         device=device,
         out_dir=out_dir,
     )
-    return final_loss
+    return final_losses
 
 
 if __name__ == "__main__":
