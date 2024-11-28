@@ -45,11 +45,9 @@ class InstancesMLP(nn.Module):
         self.bias1 = None
         self.bias2 = None
         if in_bias:
-            self.bias1 = nn.Parameter(torch.empty(n_instances, d_mlp))
-            init_param_(self.bias1)
+            self.bias1 = nn.Parameter(torch.zeros(n_instances, d_mlp))
         if out_bias:
-            self.bias2 = nn.Parameter(torch.empty(n_instances, d_model))
-            init_param_(self.bias2)
+            self.bias2 = nn.Parameter(torch.zeros(n_instances, d_model))
 
     def forward(
         self, x: Float[Tensor, "batch n_instances d_model"]
