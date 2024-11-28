@@ -300,14 +300,14 @@ class ResidualMLPModel(Model):
         init_param_(self.W_U)
 
         assert act_fn_name in ["gelu", "relu"]
-        act_fn = F.gelu if act_fn_name == "gelu" else F.relu
+        self.act_fn = F.gelu if act_fn_name == "gelu" else F.relu
         self.layers = nn.ModuleList(
             [
                 InstancesMLP(
                     n_instances=n_instances,
                     d_model=d_embed,
                     d_mlp=d_mlp,
-                    act_fn=act_fn,
+                    act_fn=self.act_fn,
                     in_bias=in_bias,
                     out_bias=out_bias,
                 )
@@ -328,6 +328,9 @@ class ResidualMLPModel(Model):
             Float[Tensor, "batch n_instances d_embed"] | Float[Tensor, "batch n_instances d_mlp"],
         ],
     ]:
+        # Make sure that n_instances are correct to avoid unintended broadcasting
+        assert x.shape[1] == self.n_instances, "n_instances mismatch"
+        assert x.shape[2] == self.n_features, "n_features mismatch"
         layer_pre_acts = {}
         layer_post_acts = {}
         residual = einops.einsum(
@@ -424,6 +427,8 @@ class ResidualMLPSPDRankPenaltyModel(SPDRankPenaltyModel):
 
         self.W_E = nn.Parameter(torch.empty(n_instances, n_features, d_embed))
         self.W_U = nn.Parameter(torch.empty(n_instances, d_embed, n_features))
+        init_param_(self.W_E)
+        init_param_(self.W_U)
 
         self.m = min(d_embed, d_mlp) if m is None else m
 

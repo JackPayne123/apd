@@ -11,7 +11,6 @@ import yaml
 from jaxtyping import Float
 from pydantic import BaseModel, ConfigDict, Field, PositiveFloat, PositiveInt, model_validator
 from torch import Tensor, nn
-from torch.nn import functional as F
 
 from spd.experiments.resid_mlp.models import ResidualMLPModel
 from spd.experiments.resid_mlp.resid_mlp_dataset import (
@@ -22,6 +21,28 @@ from spd.run_spd import get_lr_schedule_fn
 from spd.utils import DatasetGeneratedDataLoader, init_wandb, set_seed
 
 wandb.require("core")
+
+
+def compute_feature_importances(
+    batch_size: int,
+    n_instances: int,
+    n_features: int,
+    importance_val: float | None,
+    device: str,
+) -> Float[Tensor, "batch_size n_instances n_features"]:
+    # Defines a tensor where the i^th feature has importance importance^i
+    if importance_val is None or importance_val == 1.0:
+        importance_tensor = torch.ones(batch_size, n_instances, n_features, device=device)
+    else:
+        importances = torch.ones(n_features, device=device) * importance_val
+        importances = torch.cumprod(importances, dim=-1)
+        importance_tensor = einops.repeat(
+            importances,
+            "n_features -> batch_size n_instances n_features",
+            batch_size=batch_size,
+            n_instances=n_instances,
+        )
+    return importance_tensor
 
 
 class Config(BaseModel):
@@ -44,6 +65,7 @@ class Config(BaseModel):
     in_bias: bool
     out_bias: bool
     feature_probability: PositiveFloat
+    importance_val: float | None = None
     data_generation_type: Literal[
         "exactly_one_active", "exactly_two_active", "at_least_zero_active"
     ] = "at_least_zero_active"
@@ -77,6 +99,7 @@ def train(
             Float[Tensor, "batch n_instances d_resid"],
         ]
     ],
+    feature_importances: Float[Tensor, "batch_size n_instances n_features"],
     device: str,
     out_dir: Path,
     run_name: str,
@@ -105,7 +128,11 @@ def train(
         batch = batch.to(device)
         labels = labels.to(device)
         out, _, _ = model(batch)
-        loss = F.mse_loss(out, labels) * out.shape[-1]
+        # Scale by feature importance as in Anthropic paper
+
+        # loss = F.mse_loss(out, labels) * out.shape[-1]
+        loss = ((out - labels) ** 2) * feature_importances
+        loss = loss.mean()
         loss.backward()
         optimizer.step()
         final_loss = loss.item()
@@ -166,6 +193,7 @@ def run_train(config: Config, device: str) -> None:
         d_mlp=config.d_mlp,
         n_layers=config.n_layers,
         act_fn_name=config.act_fn_name,
+        apply_output_act_fn=config.apply_output_act_fn,
         in_bias=config.in_bias,
         out_bias=config.out_bias,
     ).to(device)
@@ -191,6 +219,10 @@ def run_train(config: Config, device: str) -> None:
                 n_instances=config.n_instances,
             )
 
+    label_coeffs = None
+    if config.use_trivial_label_coeffs:
+        label_coeffs = torch.ones(config.n_instances, config.n_features, device=device)
+
     dataset = ResidualMLPDataset(
         n_instances=config.n_instances,
         n_features=config.n_features,
@@ -200,16 +232,25 @@ def run_train(config: Config, device: str) -> None:
         label_type=config.label_type,
         act_fn_name=config.act_fn_name,
         label_fn_seed=config.label_fn_seed,
-        use_trivial_label_coeffs=config.use_trivial_label_coeffs,
+        label_coeffs=label_coeffs,
         data_generation_type=config.data_generation_type,
     )
     dataloader = DatasetGeneratedDataLoader(dataset, batch_size=config.batch_size, shuffle=False)
+
+    feature_importances = compute_feature_importances(
+        batch_size=config.batch_size,
+        n_instances=config.n_instances,
+        n_features=config.n_features,
+        importance_val=config.importance_val,
+        device=device,
+    )
 
     train(
         config=config,
         model=model,
         trainable_params=[p for p in model.parameters() if p.requires_grad],
         dataloader=dataloader,
+        feature_importances=feature_importances,
         device=device,
         out_dir=out_dir,
         run_name=run_name,
@@ -222,23 +263,24 @@ if __name__ == "__main__":
         wandb_project="spd-train-resid-linear",
         seed=0,
         label_fn_seed=0,
-        n_instances=1,
+        n_instances=10,
         n_features=100,
         d_embed=100,
-        d_mlp=50,
+        d_mlp=40,
         n_layers=1,
-        act_fn_name="gelu",
-        apply_output_act_fn=False,
-        label_type="act_plus_resid",
+        act_fn_name="relu",
+        apply_output_act_fn=True,
+        label_type="abs",
         data_generation_type="at_least_zero_active",
         use_trivial_label_coeffs=True,
         in_bias=False,
         out_bias=False,
-        feature_probability=0.01,
-        batch_size=16,
-        steps=10_000,
+        feature_probability=1.0,
+        importance_val=0.8,
+        batch_size=256,
+        steps=50_000,
         print_freq=100,
-        lr=3e-3,
+        lr=5e-3,
         lr_schedule="cosine",
     )
 
