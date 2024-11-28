@@ -11,6 +11,7 @@ import yaml
 from jaxtyping import Float
 from pydantic import BaseModel, ConfigDict, Field, PositiveFloat, PositiveInt, model_validator
 from torch import Tensor, nn
+from tqdm import tqdm
 
 from spd.experiments.resid_mlp.models import ResidualMLPModel
 from spd.experiments.resid_mlp.resid_mlp_dataset import (
@@ -110,7 +111,8 @@ def train(
     lr_schedule_fn = get_lr_schedule_fn(config.lr_schedule)
 
     final_loss = torch.inf
-    for step, (batch, labels) in enumerate(dataloader):
+    pbar = tqdm(range(config.steps), total=config.steps)
+    for step, (batch, labels) in zip(pbar, dataloader, strict=False):
         if step >= config.steps:
             break
 
@@ -120,8 +122,8 @@ def train(
             param_group["lr"] = current_lr
 
         optimizer.zero_grad()
-        batch = batch.to(device)
-        labels = labels.to(device)
+        batch: Float[Tensor, "batch n_instances n_features"] = batch.to(device)
+        labels: Float[Tensor, "batch n_instances n_features"] = labels.to(device)
         out, _, _ = model(batch)
         # Scale by feature importance as in Anthropic paper
 
@@ -132,7 +134,7 @@ def train(
         optimizer.step()
         final_loss = loss.item()
         if step % config.print_freq == 0:
-            print(f"Step {step}: loss={final_loss}, lr={current_lr}")
+            pbar.set_description(f"loss={final_loss:.2e}, lr={current_lr:.2e}")
 
     if out_dir is not None:
         model_path = out_dir / "target_model.pth"
