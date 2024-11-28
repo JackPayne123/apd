@@ -109,6 +109,25 @@ def train(
 
     out_dir.mkdir(parents=True, exist_ok=True)
 
+    # Save config
+    config_path = out_dir / "target_model_train_config.yaml"
+    with open(config_path, "w") as f:
+        yaml.dump(config.model_dump(mode="json"), f, indent=2)
+    logger.info(f"Saved config to {config_path}")
+    if config.wandb_project:
+        wandb.save(str(config_path), base_path=out_dir)
+
+    # Save the coefficients used to generate the labels
+    assert isinstance(dataloader.dataset, ResidualMLPDataset)
+    assert dataloader.dataset.label_coeffs is not None
+    label_coeffs = dataloader.dataset.label_coeffs.tolist()
+    label_coeffs_path = out_dir / "label_coeffs.json"
+    with open(label_coeffs_path, "w") as f:
+        json.dump(label_coeffs, f)
+    logger.info(f"Saved label coefficients to {label_coeffs_path}")
+    if config.wandb_project:
+        wandb.save(str(label_coeffs_path), base_path=out_dir)
+
     optimizer = torch.optim.AdamW(trainable_params, lr=config.lr, weight_decay=0.01)
 
     # Add this line to get the lr_schedule_fn
@@ -141,33 +160,14 @@ def train(
             if config.wandb_project:
                 wandb.log({"loss": final_loss, "lr": current_lr}, step=step)
 
+    logger.info(f"Final loss: {final_loss}")
+
     # Save model
     model_path = out_dir / "target_model.pth"
     torch.save(model.state_dict(), model_path)
     logger.info(f"Saved model to {model_path}")
     if config.wandb_project:
         wandb.save(str(model_path), base_path=out_dir)
-
-    # Save config
-    config_path = out_dir / "target_model_train_config.yaml"
-    with open(config_path, "w") as f:
-        yaml.dump(config.model_dump(mode="json"), f, indent=2)
-    logger.info(f"Saved config to {config_path}")
-    if config.wandb_project:
-        wandb.save(str(config_path), base_path=out_dir)
-
-    # Save the coefficients used to generate the labels
-    assert isinstance(dataloader.dataset, ResidualMLPDataset)
-    assert dataloader.dataset.label_coeffs is not None
-    label_coeffs = dataloader.dataset.label_coeffs.tolist()
-    label_coeffs_path = out_dir / "label_coeffs.json"
-    with open(label_coeffs_path, "w") as f:
-        json.dump(label_coeffs, f)
-    logger.info(f"Saved label coefficients to {label_coeffs_path}")
-    if config.wandb_project:
-        wandb.save(str(label_coeffs_path), base_path=out_dir)
-
-    logger.info(f"Final loss: {final_loss}")
 
     if config.wandb_project:
         wandb.finish()
