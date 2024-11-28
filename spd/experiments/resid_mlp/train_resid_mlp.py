@@ -53,6 +53,7 @@ class Config(BaseModel):
     lr_schedule: Literal["linear", "constant", "cosine", "exponential"] = "constant"
     fixed_random_embedding: bool = False
     fixed_identity_embedding: bool = False
+    n_batches_final_losses: PositiveInt = 1
 
     @model_validator(mode="after")
     def validate_model(self) -> Self:
@@ -134,9 +135,8 @@ def train(
         print(f"Saved label coefficients to {label_coeffs_path}")
 
     # Calculate final losses by averaging many batches
-    n_batches = 100
     final_losses = []
-    for _ in range(n_batches):
+    for _ in range(config.n_batches_final_losses):
         batch, labels = next(iter(dataloader))
         batch = batch.to(device)
         labels = labels.to(device)

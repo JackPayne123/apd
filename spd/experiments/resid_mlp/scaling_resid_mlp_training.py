@@ -46,6 +46,7 @@ def test_train(
         lr_schedule="cosine",
         fixed_random_embedding=fixed_random_embedding,
         fixed_identity_embedding=fixed_identity_embedding,
+        n_batches_final_losses=100,
     )
 
     set_seed(config.seed)
@@ -94,7 +95,7 @@ if __name__ == "__main__":
     fig, axes = plt.subplots(nrows=2, ncols=2, figsize=(10, 10), constrained_layout=True)
     fig.suptitle(f"Loss scaling with d_embed. Using {n_instances} instances")
     d_embeds = [10_000, 1000, 100, 50, 10]
-    for bias in [True, False]:
+    for bias in [False, True]:
         for i, embed in enumerate(["trained", "random"]):
             print(f"Quadrant {bias=} and {embed=}")
             losses = {}
