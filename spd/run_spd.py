@@ -25,7 +25,7 @@ from tqdm import tqdm
 
 from spd.log import logger
 from spd.models.base import Model, SPDFullRankModel, SPDModel, SPDRankPenaltyModel
-from spd.types import Probability, RootPath
+from spd.types import ModelPath, Probability, RootPath
 from spd.utils import calc_topk_mask, calculate_attributions
 
 
@@ -94,7 +94,7 @@ class ResidualMLPTaskConfig(BaseModel):
     data_generation_type: Literal[
         "exactly_one_active", "exactly_two_active", "at_least_zero_active"
     ] = "at_least_zero_active"
-    pretrained_model_path: RootPath
+    pretrained_model_path: ModelPath  # e.g. wandb:spd-resid-mlp/runs/j9kmavzi
 
 
 class Config(BaseModel):

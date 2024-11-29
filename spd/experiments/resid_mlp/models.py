@@ -15,8 +15,8 @@ from wandb.apis.public import Run
 
 from spd.models.base import Model, SPDRankPenaltyModel
 from spd.run_spd import Config, ResidualMLPTaskConfig
+from spd.types import WANDB_PATH_PREFIX, ModelPath
 from spd.utils import (
-    WANDB_PATH_PREFIX,
     download_wandb_file,
     fetch_latest_wandb_checkpoint,
     init_param_,
@@ -379,17 +379,23 @@ class ResidualMLPModel(Model):
 
     @classmethod
     def from_pretrained(
-        cls, path: str | Path
+        cls, path: ModelPath
     ) -> tuple["ResidualMLPModel", dict[str, Any], Float[Tensor, "n_instances n_features"]]:
         """Fetch a pretrained model from wandb or a local path to a checkpoint.
 
         Args:
-            path: The path to local checkpoint or wandb project. If a wandb project, the format
-                must be `wandb:entity/project/run_id`. If `api.entity` is set (e.g. via setting
-                WANDB_ENTITY in .env), this can be in the form `wandb:project/run_id` and if
-                form `wandb:project/run_id` and if `api.project` is set this can just be
-                `wandb:run_id`. If local path, assumes that `resid_mlp_train_config.yaml` and
-                `label_coeffs.json` are in the same directory as the checkpoint.
+            path: The path to local checkpoint or wandb project. If a wandb project, format must be
+                `wandb:<entity>/<project>/<run_id>` or `wandb:<entity>/<project>/runs/<run_id>`.
+                If `api.entity` is set (e.g. via setting WANDB_ENTITY in .env), <entity> can be
+                omitted, and if `api.project` is set, <project> can be omitted. If local path,
+                assumes that `resid_mlp_train_config.yaml` and `label_coeffs.json` are in the same
+                directory as the checkpoint.
+
+        Returns:
+            model: The pretrained ResidualMLPModel
+            resid_mlp_train_config_dict: The config dict used to train the model (we don't
+                instantiate a train config due to circular import issues)
+            label_coeffs: The label coefficients used to train the model
         """
         if isinstance(path, str) and path.startswith(WANDB_PATH_PREFIX):
             wandb_path = path.split(":")[1]

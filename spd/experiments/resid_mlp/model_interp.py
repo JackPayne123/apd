@@ -11,6 +11,7 @@ from spd.experiments.resid_mlp.plotting import (
 )
 from spd.experiments.resid_mlp.resid_mlp_dataset import ResidualMLPDataset
 from spd.experiments.resid_mlp.train_resid_mlp import ResidMLPTrainConfig
+from spd.types import ModelPath
 from spd.utils import REPO_ROOT, set_seed
 
 # %% Load model and config
@@ -18,7 +19,7 @@ from spd.utils import REPO_ROOT, set_seed
 #     REPO_ROOT
 #     / "spd/experiments/resid_mlp/out/resid_mlp_identity_act_plus_resid_n-instances2_n-features100_d-resid1000_d-mlp50_n-layers1_seed0/target_model.pth"
 # )
-path = (
+path: ModelPath = (
     REPO_ROOT
     / "spd/experiments/resid_mlp/out/resid_mlp_abs_n-instances2_n-features6_d-resid5_d-mlp5_n-layers2_seed0/resid_mlp.pth"
 )
