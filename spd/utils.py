@@ -727,12 +727,48 @@ def run_spd_forward_pass(
     )
 
 
-def download_wandb_file(run: Run, file_name: str) -> Path:
-    cache_dir = Path(os.environ.get("SPD_CACHE_DIR", "/tmp/"))
-    run_cache_dir = cache_dir / run.id
-    run_cache_dir.mkdir(parents=True, exist_ok=True)
+def fetch_wandb_run_dir(run_id: str) -> Path:
+    """Find or create a directory in the W&B cache for a given run.
+
+    We first check if we already have a directory with the suffix "run_id" (if we created the run
+    ourselves, a directory of the name "run-<timestamp>-<run_id>" should exist). If not, we create a
+    new wandb_run_dir.
+    """
+    # Default to REPO_ROOT/wandb if SPD_CACHE_DIR not set
+    base_cache_dir = Path(os.environ.get("SPD_CACHE_DIR", REPO_ROOT / "wandb"))
+
+    # Set default wandb_run_dir
+    wandb_run_dir = base_cache_dir / run_id / "files"
+
+    # Check if we already have a directory with the suffix "run_id"
+    presaved_run_dirs = [
+        d for d in base_cache_dir.iterdir() if d.is_dir() and d.name.endswith(run_id)
+    ]
+    # If there is more than one dir, just ignore the presaved dirs and use the new wandb_run_dir
+    if presaved_run_dirs and len(presaved_run_dirs) == 1:
+        presaved_file_path = presaved_run_dirs[0] / "files"
+        if presaved_file_path.exists():
+            # Found a cached run directory, use it
+            wandb_run_dir = presaved_file_path
+
+    wandb_run_dir.mkdir(parents=True, exist_ok=True)
+    return wandb_run_dir
+
+
+def download_wandb_file(run: Run, wandb_run_dir: Path, file_name: str) -> Path:
+    """Download a file from W&B. Don't overwrite the file if it already exists.
+
+    Args:
+        run: The W&B run to download from
+        file_name: Name of the file to download
+        wandb_run_dir: The directory to download the file to
+    Returns:
+        Path to the downloaded file
+    """
     file_on_wandb = run.file(file_name)
-    return Path(file_on_wandb.download(exist_ok=True, replace=True, root=run_cache_dir).name)  # type: ignore
+    assert isinstance(file_on_wandb, File)
+    path = Path(file_on_wandb.download(exist_ok=True, replace=False, root=str(wandb_run_dir)).name)
+    return path
 
 
 def load_yaml(file_path: Path) -> dict[str, Any]:

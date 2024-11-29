@@ -19,6 +19,7 @@ from spd.types import WANDB_PATH_PREFIX, ModelPath
 from spd.utils import (
     download_wandb_file,
     fetch_latest_wandb_checkpoint,
+    fetch_wandb_run_dir,
     init_param_,
     remove_grad_parallel_to_subnetwork_vecs,
 )
@@ -367,10 +368,15 @@ class ResidualMLPModel(Model):
         api = wandb.Api()
         run: Run = api.run(wandb_project_run_id)
 
-        resid_mlp_train_config_path = download_wandb_file(run, "resid_mlp_train_config.yaml")
-        label_coeffs_path = download_wandb_file(run, "label_coeffs.json")
         checkpoint = fetch_latest_wandb_checkpoint(run)
-        checkpoint_path = download_wandb_file(run, checkpoint.name)
+
+        run_dir = fetch_wandb_run_dir(run.id)
+
+        resid_mlp_train_config_path = download_wandb_file(
+            run, run_dir, "resid_mlp_train_config.yaml"
+        )
+        label_coeffs_path = download_wandb_file(run, run_dir, "label_coeffs.json")
+        checkpoint_path = download_wandb_file(run, run_dir, checkpoint.name)
         return ResidualMLPPaths(
             resid_mlp_train_config=resid_mlp_train_config_path,
             label_coeffs=label_coeffs_path,
@@ -401,7 +407,7 @@ class ResidualMLPModel(Model):
             wandb_path = path.split(":")[1]
             paths = cls._download_wandb_files(wandb_path)
         else:
-            # `path` should be a local path
+            # `path` should be a local path to a checkpoint
             paths = ResidualMLPPaths(
                 resid_mlp_train_config=Path(path).parent / "resid_mlp_train_config.yaml",
                 label_coeffs=Path(path).parent / "label_coeffs.json",
@@ -621,11 +627,16 @@ class ResidualMLPSPDRankPenaltyModel(SPDRankPenaltyModel):
         api = wandb.Api()
         run: Run = api.run(wandb_project_run_id)
 
-        final_config_path = download_wandb_file(run, "final_config.yaml")
-        resid_mlp_train_config_path = download_wandb_file(run, "resid_mlp_train_config.yaml")
-        label_coeffs_path = download_wandb_file(run, "label_coeffs.json")
         checkpoint = fetch_latest_wandb_checkpoint(run)
-        checkpoint_path = download_wandb_file(run, checkpoint.name)
+
+        run_dir = fetch_wandb_run_dir(run.id)
+
+        final_config_path = download_wandb_file(run, run_dir, "final_config.yaml")
+        resid_mlp_train_config_path = download_wandb_file(
+            run, run_dir, "resid_mlp_train_config.yaml"
+        )
+        label_coeffs_path = download_wandb_file(run, run_dir, "label_coeffs.json")
+        checkpoint_path = download_wandb_file(run, run_dir, checkpoint.name)
         return ResidualMLPSPDRankPenaltyPaths(
             final_config=final_config_path,
             resid_mlp_train_config=resid_mlp_train_config_path,

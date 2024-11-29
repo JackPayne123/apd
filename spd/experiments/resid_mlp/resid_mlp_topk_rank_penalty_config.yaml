@@ -25,4 +25,4 @@ task_config:
   k: 5
   feature_probability: 0.2
   data_generation_type: "at_least_zero_active"
-  pretrained_model_path: wandb:spd-train-resid-mlp/runs/j9kmavzi
+  pretrained_model_path: wandb:spd-train-resid-mlp/runs/njgvwytn
