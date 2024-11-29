@@ -31,4 +31,4 @@ task_config:
   feature_probability: 0.05
   data_generation_type: "at_least_zero_active"
   # File obtained by running spd/experiments/tms/train_tms.py
-  pretrained_model_path: spd/experiments/tms/out/tms_n-features5_n-hidden2_n-instances12_seed0.pth/model.pth
+  pretrained_model_path: spd/experiments/tms/out/tms_n-features5_n-hidden2_n-hidden-layers0_n-instances12_seed0.pth/model.pth

@@ -40,6 +40,7 @@ def get_run_name(config: Config, task_config: TMSConfig) -> str:
         run_suffix = get_common_run_name_suffix(config)
         run_suffix += f"ft{task_config.n_features}_"
         run_suffix += f"hid{task_config.n_hidden}"
+        run_suffix += f"hid-layers{task_config.n_hidden_layers}"
         if task_config.handcoded:
             run_suffix += "_handcoded"
     return config.wandb_run_name_prefix + run_suffix
@@ -276,6 +277,7 @@ def main(
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
     if config.spd_type == "full_rank":
+        # Note that we don't currently support n_hidden_layers for full rank
         model = TMSSPDFullRankModel(
             n_instances=task_config.n_instances,
             n_features=task_config.n_features,
@@ -289,6 +291,7 @@ def main(
             n_instances=task_config.n_instances,
             n_features=task_config.n_features,
             n_hidden=task_config.n_hidden,
+            n_hidden_layers=task_config.n_hidden_layers,
             k=task_config.k,
             m=config.m,
             bias_val=task_config.bias_val,
@@ -301,6 +304,7 @@ def main(
         n_instances=task_config.n_instances,
         n_features=task_config.n_features,
         n_hidden=task_config.n_hidden,
+        n_hidden_layers=task_config.n_hidden_layers,
         device=device,
     )
     pretrained_model.load_state_dict(

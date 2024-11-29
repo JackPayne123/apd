@@ -14,7 +14,7 @@ import numpy as np
 import torch
 from jaxtyping import Float
 from matplotlib import collections as mc
-from pydantic import BaseModel, PositiveInt
+from pydantic import BaseModel, NonNegativeInt, PositiveInt
 from torch import Tensor
 from tqdm import tqdm, trange
 
@@ -25,6 +25,7 @@ from spd.utils import DatasetGeneratedDataLoader, SparseFeatureDataset, set_seed
 class TMSTrainConfig(BaseModel):
     n_features: PositiveInt
     n_hidden: PositiveInt
+    n_hidden_layers: NonNegativeInt
     n_instances: PositiveInt
     feature_probability: float
     batch_size: PositiveInt
@@ -153,6 +154,7 @@ if __name__ == "__main__":
     config = TMSTrainConfig(
         n_features=5,
         n_hidden=2,
+        n_hidden_layers=0,
         n_instances=12,
         feature_probability=0.05,
         batch_size=1024,
@@ -168,6 +170,7 @@ if __name__ == "__main__":
         n_instances=config.n_instances,
         n_features=config.n_features,
         n_hidden=config.n_hidden,
+        n_hidden_layers=config.n_hidden_layers,
         device=device,
     )
 
@@ -184,7 +187,8 @@ if __name__ == "__main__":
 
     run_name = (
         f"tms_n-features{config.n_features}_n-hidden{config.n_hidden}_"
-        f"n-instances{config.n_instances}_seed{config.seed}.pth"
+        f"n-hidden-layers{config.n_hidden_layers}_n-instances{config.n_instances}_"
+        f"seed{config.seed}.pth"
     )
     out_dir = Path(__file__).parent / "out" / run_name
     out_dir.mkdir(parents=True, exist_ok=True)

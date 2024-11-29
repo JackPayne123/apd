@@ -36,6 +36,7 @@ def tms_spd_rank_penalty_happy_path(config: Config):
         n_instances=config.task_config.n_instances,
         n_features=config.task_config.n_features,
         n_hidden=config.task_config.n_hidden,
+        n_hidden_layers=0,
         k=config.task_config.k,
         bias_val=config.task_config.bias_val,
         device=device,
@@ -45,6 +46,7 @@ def tms_spd_rank_penalty_happy_path(config: Config):
         n_instances=config.task_config.n_instances,
         n_features=config.task_config.n_features,
         n_hidden=config.task_config.n_hidden,
+        n_hidden_layers=0,
         device=device,
     )
     # Randomly initialize the bias for the pretrained model
@@ -180,6 +182,7 @@ def test_train_tms_happy_path():
         n_features=3,
         n_hidden=2,
         n_instances=2,
+        n_hidden_layers=0,
         feature_probability=0.1,
         batch_size=32,
         steps=5,
@@ -193,6 +196,7 @@ def test_train_tms_happy_path():
         n_instances=config.n_instances,
         n_features=config.n_features,
         n_hidden=config.n_hidden,
+        n_hidden_layers=config.n_hidden_layers,
         device=device,
     )
     dataset = SparseFeatureDataset(
@@ -239,6 +243,7 @@ def test_tms_spd_full_rank_equivalence() -> None:
         n_instances=n_instances,
         n_features=n_features,
         n_hidden=n_hidden,
+        n_hidden_layers=0,
         device=device,
     )
 
@@ -302,6 +307,7 @@ def test_set_full_rank_handcoded_spd_params():
         n_instances=n_instances,
         n_features=n_features,
         n_hidden=n_hidden,
+        n_hidden_layers=0,
         device=device,
     )
 
@@ -390,6 +396,7 @@ def test_tms_spd_rank_penalty_full_rank_equivalence() -> None:
         n_instances=n_instances,
         n_features=n_features,
         n_hidden=n_hidden,
+        n_hidden_layers=0,
         k=k,
         bias_val=0.0,
         device=device,

@@ -1,3 +1,4 @@
+import einops
 import torch
 from einops import rearrange
 from jaxtyping import Bool, Float
@@ -5,6 +6,7 @@ from torch import Tensor, nn
 from torch.nn import functional as F
 
 from spd.models.base import Model, SPDFullRankModel, SPDRankPenaltyModel
+from spd.models.components import InstancesParamComponentsRankPenalty
 from spd.types import RootPath
 from spd.utils import remove_grad_parallel_to_subnetwork_vecs
 
@@ -185,6 +187,7 @@ class TMSSPDRankPenaltyModel(SPDRankPenaltyModel):
         n_instances: int,
         n_features: int,
         n_hidden: int,
+        n_hidden_layers: int,
         k: int | None,
         bias_val: float,
         m: int | None = None,
@@ -194,6 +197,7 @@ class TMSSPDRankPenaltyModel(SPDRankPenaltyModel):
         self.n_instances = n_instances
         self.n_features = n_features
         self.n_hidden = n_hidden
+        self.n_hidden_layers = n_hidden_layers
         self.k = k if k is not None else n_features
         self.bias_val = bias_val
 
@@ -208,17 +212,47 @@ class TMSSPDRankPenaltyModel(SPDRankPenaltyModel):
         nn.init.xavier_normal_(self.A)
         nn.init.xavier_normal_(self.B)
 
-        self.n_param_matrices = 2  # Two W matrices (even though they're tied)
+        self.hidden_layers = None
+        if n_hidden_layers > 0:
+            self.hidden_layers = nn.ModuleList(
+                [
+                    InstancesParamComponentsRankPenalty(
+                        n_instances=n_instances,
+                        in_dim=n_hidden,
+                        out_dim=n_hidden,
+                        k=self.k,
+                        bias=False,
+                        init_scale=1.0,
+                        m=self.m,
+                    )
+                    for _ in range(n_hidden_layers)
+                ]
+            )
 
     def all_subnetwork_params(self) -> dict[str, Float[Tensor, "n_instances k d_in d_out"]]:
         """Get all subnetwork parameters."""
-        W = torch.einsum("ikfm,ikmh->ikfh", self.A, self.B)
-        return {"W": W, "W_T": rearrange(W, "i k f h -> i k h f")}
+        W = einops.einsum(
+            self.A,
+            self.B,
+            "n_instances k n_features m, n_instances k m n_hidden -> n_instances k n_features n_hidden",
+        )
+        W_T = einops.rearrange(
+            W, "n_instances k n_features n_hidden -> n_instances k n_hidden n_features"
+        )
+        params = {"W": W, "W_T": W_T}
+        if self.hidden_layers is not None:
+            for i, layer in enumerate(self.hidden_layers):
+                assert isinstance(layer, InstancesParamComponentsRankPenalty)
+                params[f"hidden_{i}"] = einops.einsum(
+                    layer.A,
+                    layer.B,
+                    "n_instances k d_in m, n_instances k m d_out -> n_instances k d_in d_out",
+                )
+        return params
 
     def all_subnetwork_params_summed(self) -> dict[str, Float[Tensor, "n_instances d_in d_out"]]:
         """All subnetwork params summed over the subnetwork dimension."""
-        W = torch.einsum("ikfm,ikmh->ifh", self.A, self.B)
-        return {"W": W, "W_T": rearrange(W, "i f h -> i h f")}
+        return {p_name: p.sum(dim=1) for p_name, p in self.all_subnetwork_params().items()}
 
     def forward(
         self,
@@ -229,45 +263,70 @@ class TMSSPDRankPenaltyModel(SPDRankPenaltyModel):
         dict[str, Float[Tensor, "batch n_instances n_features"]],
         dict[str, Float[Tensor, "batch n_instances k n_features"]],
     ]:
-        # First layer: x -> A -> m dimension -> B -> hidden
+        layer_acts = {}
+        inner_acts = {}
+
+        # First layer/embedding: x -> A -> m dimension -> B -> hidden
         pre_inner_act_0 = torch.einsum("bif,ikfm->bikm", x, self.A)
         if topk_mask is not None:
             assert topk_mask.shape == pre_inner_act_0.shape[:-1]
             pre_inner_act_0 = torch.einsum("bikm,bik->bikm", pre_inner_act_0, topk_mask)
-        inner_act_0 = torch.einsum("bikm,ikmh->bikh", pre_inner_act_0, self.B)
-        layer_act_0 = torch.einsum("bikh->bih", inner_act_0)
+        inner_acts["W"] = torch.einsum("bikm,ikmh->bikh", pre_inner_act_0, self.B)
+        layer_acts["W"] = torch.einsum("bikh->bih", inner_acts["W"])
+        x = layer_acts["W"]
 
-        # Second layer: hidden -> B.T -> m dimension -> A.T -> features
-        pre_inner_act_1 = torch.einsum("bih,ikmh->bikm", layer_act_0, self.B)
+        # Hidden layers
+        if self.hidden_layers is not None:
+            for i, layer in enumerate(self.hidden_layers):
+                assert isinstance(layer, InstancesParamComponentsRankPenalty)
+                x, hidden_inner_act_i = layer(x, topk_mask)
+                layer_acts[f"hidden_{i}"] = x
+                inner_acts[f"hidden_{i}"] = hidden_inner_act_i
+
+        # Second layer/unembedding: hidden -> B.T -> m dimension -> A.T -> features
+        pre_inner_act_1 = torch.einsum("bih,ikmh->bikm", x, self.B)
         if topk_mask is not None:
             assert topk_mask.shape == pre_inner_act_1.shape[:-1]
             pre_inner_act_1 = torch.einsum("bikm,bik->bikm", pre_inner_act_1, topk_mask)
-        inner_act_1 = torch.einsum("bikm,ikfm->bikf", pre_inner_act_1, self.A)
-        layer_act_1 = torch.einsum("bikf->bif", inner_act_1) + self.b_final
+        inner_acts["W_T"] = torch.einsum("bikm,ikfm->bikf", pre_inner_act_1, self.A)
+        layer_acts["W_T"] = torch.einsum("bikf->bif", inner_acts["W_T"]) + self.b_final
 
-        out = F.relu(layer_act_1)
-        layer_acts = {"W": layer_act_0, "W_T": layer_act_1}
-        inner_acts = {"W": inner_act_0, "W_T": inner_act_1}
+        out = F.relu(layer_acts["W_T"])
         return out, layer_acts, inner_acts
 
     def set_subnet_to_zero(
         self, subnet_idx: int
-    ) -> dict[str, Float[Tensor, "n_instances n_features m"]]:
+    ) -> dict[str, Float[Tensor, "n_instances in_dim m"] | Float[Tensor, "n_instances m out_dim"]]:
         stored_vals = {
             "A": self.A.data[:, subnet_idx, :, :].detach().clone(),
             "B": self.B.data[:, subnet_idx, :, :].detach().clone(),
         }
         self.A.data[:, subnet_idx, :, :] = 0.0
         self.B.data[:, subnet_idx, :, :] = 0.0
+        if self.hidden_layers is not None:
+            for i, layer in enumerate(self.hidden_layers):
+                assert isinstance(layer, InstancesParamComponentsRankPenalty)
+                stored_vals[f"hidden_{i}_A"] = layer.A.data[:, subnet_idx, :, :].detach().clone()
+                stored_vals[f"hidden_{i}_B"] = layer.B.data[:, subnet_idx, :, :].detach().clone()
+                layer.A.data[:, subnet_idx, :, :] = 0.0
+                layer.B.data[:, subnet_idx, :, :] = 0.0
+
         return stored_vals
 
     def restore_subnet(
         self,
         subnet_idx: int,
-        stored_vals: dict[str, Float[Tensor, "n_instances n_features m"]],
+        stored_vals: dict[
+            str, Float[Tensor, "n_instances in_dim m"] | Float[Tensor, "n_instances m out_dim"]
+        ],
     ) -> None:
         self.A.data[:, subnet_idx, :, :] = stored_vals["A"]
         self.B.data[:, subnet_idx, :, :] = stored_vals["B"]
+        if self.hidden_layers is not None:
+            for i, layer in enumerate(self.hidden_layers):
+                assert isinstance(layer, InstancesParamComponentsRankPenalty)
+                layer.A.data[:, subnet_idx, :, :] = stored_vals[f"hidden_{i}_A"]
+                layer.B.data[:, subnet_idx, :, :] = stored_vals[f"hidden_{i}_B"]
 
     @classmethod
     def from_pretrained(cls, path: str | RootPath) -> "TMSSPDRankPenaltyModel":  # type: ignore
@@ -279,19 +338,33 @@ class TMSSPDRankPenaltyModel(SPDRankPenaltyModel):
         str, tuple[Float[Tensor, "n_instances k d_in m"], Float[Tensor, "n_instances k m d_out"]]
     ]:
         """Get all A and B matrices. Note that this won't return bias components."""
-        return {
+        params = {
             "W": (self.A, self.B),
             "W_T": (
                 rearrange(self.B, "i k m h -> i k h m"),
                 rearrange(self.A, "i k f m -> i k m f"),
             ),
         }
+        if self.hidden_layers is not None:
+            for i, layer in enumerate(self.hidden_layers):
+                assert isinstance(layer, InstancesParamComponentsRankPenalty)
+                params[f"hidden_{i}"] = (layer.A, layer.B)
+        return params
 
     def set_matrices_to_unit_norm(self) -> None:
         """Set the matrices that need to be normalized to unit norm."""
         self.A.data /= self.A.data.norm(p=2, dim=-2, keepdim=True)
+        if self.hidden_layers is not None:
+            for layer in self.hidden_layers:
+                assert isinstance(layer, InstancesParamComponentsRankPenalty)
+                layer.A.data /= layer.A.data.norm(p=2, dim=-2, keepdim=True)
 
     def fix_normalized_adam_gradients(self) -> None:
         """Modify the gradient by subtracting it's component parallel to the activation."""
         assert self.A.grad is not None
         remove_grad_parallel_to_subnetwork_vecs(self.A.data, self.A.grad)
+        if self.hidden_layers is not None:
+            for layer in self.hidden_layers:
+                assert isinstance(layer, InstancesParamComponentsRankPenalty)
+                assert layer.A.grad is not None
+                remove_grad_parallel_to_subnetwork_vecs(layer.A.data, layer.A.grad)
