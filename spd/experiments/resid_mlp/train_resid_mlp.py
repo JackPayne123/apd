@@ -128,23 +128,11 @@ def train(
         if step % config.print_freq == 0:
             pbar.set_description(f"loss={current_losses.mean():.2e}, lr={current_lr:.2e}")
 
-    model_path = out_dir / "target_model.pth"
+    model_path = out_dir / "resid_mlp.pth"
     torch.save(model.state_dict(), model_path)
+    if config.wandb_project:
+        wandb.save(str(model_path), base_path=out_dir)
     print(f"Saved model to {model_path}")
-
-    config_path = out_dir / "target_model_config.yaml"
-    with open(config_path, "w") as f:
-        yaml.dump(config.model_dump(mode="json"), f, indent=2)
-    print(f"Saved config to {config_path}")
-
-    # Save the coefficients used to generate the labels if label_type is act_plus_resid
-    assert isinstance(dataloader.dataset, ResidualMLPDataset)
-    assert dataloader.dataset.label_coeffs is not None
-    label_coeffs = dataloader.dataset.label_coeffs.tolist()
-    label_coeffs_path = out_dir / "label_coeffs.json"
-    with open(label_coeffs_path, "w") as f:
-        json.dump(label_coeffs, f)
-    print(f"Saved label coefficients to {label_coeffs_path}")
 
     # Calculate final losses by averaging many batches
     final_losses = []
@@ -241,10 +229,10 @@ if __name__ == "__main__":
         seed=0,
         label_fn_seed=0,
         resid_mlp_config=ResidualMLPConfig(
-            n_instances=10,
-            n_features=100,
-            d_embed=100,
-            d_mlp=40,
+            n_instances=5,
+            n_features=10,
+            d_embed=5,
+            d_mlp=5,
             n_layers=1,
             act_fn_name="relu",
             apply_output_act_fn=True,
