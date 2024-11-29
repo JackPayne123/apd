@@ -16,13 +16,8 @@ from wandb.apis.public import Run
 from spd.models.base import Model, SPDRankPenaltyModel
 from spd.run_spd import Config, ResidualMLPTaskConfig
 from spd.types import WANDB_PATH_PREFIX, ModelPath
-from spd.utils import (
-    download_wandb_file,
-    fetch_latest_wandb_checkpoint,
-    fetch_wandb_run_dir,
-    init_param_,
-    remove_grad_parallel_to_subnetwork_vecs,
-)
+from spd.utils import init_param_, remove_grad_parallel_to_subnetwork_vecs
+from spd.wandb_utils import download_wandb_file, fetch_latest_wandb_checkpoint, fetch_wandb_run_dir
 
 
 class InstancesMLP(nn.Module):

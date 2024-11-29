@@ -19,7 +19,8 @@ from spd.experiments.resid_mlp.resid_mlp_dataset import (
 )
 from spd.log import logger
 from spd.run_spd import get_lr_schedule_fn
-from spd.utils import DatasetGeneratedDataLoader, compute_feature_importances, init_wandb, set_seed
+from spd.utils import DatasetGeneratedDataLoader, compute_feature_importances, set_seed
+from spd.wandb_utils import init_wandb
 
 wandb.require("core")
 

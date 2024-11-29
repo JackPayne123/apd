@@ -38,11 +38,10 @@ from spd.run_spd import (
 from spd.utils import (
     DatasetGeneratedDataLoader,
     collect_subnetwork_attributions,
-    init_wandb,
     load_config,
-    save_config_to_wandb,
     set_seed,
 )
+from spd.wandb_utils import init_wandb, save_config_to_wandb
 
 wandb.require("core")
 
