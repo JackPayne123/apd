@@ -399,7 +399,7 @@ class ResidualMLPModel(Model):
             label_coeffs: The label coefficients used to train the model
         """
         if isinstance(path, str) and path.startswith(WANDB_PATH_PREFIX):
-            wandb_path = path.split(":")[1]
+            wandb_path = path.removeprefix(WANDB_PATH_PREFIX)
             paths = cls._download_wandb_files(wandb_path)
         else:
             # `path` should be a local path to a checkpoint
@@ -654,7 +654,7 @@ class ResidualMLPSPDRankPenaltyModel(SPDRankPenaltyModel):
                 `label_coeffs.json` are in the same directory as the checkpoint.
         """
         if isinstance(path, str) and path.startswith(WANDB_PATH_PREFIX):
-            wandb_path = path.split(":")[1]
+            wandb_path = path.removeprefix(WANDB_PATH_PREFIX)
             paths = cls._download_wandb_files(wandb_path)
         else:
             paths = ResidualMLPSPDRankPenaltyPaths(
