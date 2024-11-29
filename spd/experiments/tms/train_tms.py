@@ -1,3 +1,7 @@
+"""TMS model, adapted from
+https://colab.research.google.com/github/anthropics/toy-models-of-superposition/blob/main/toy_models.ipynb
+"""
+
 import json
 import warnings
 from collections.abc import Callable
@@ -21,12 +25,6 @@ from spd.utils import DatasetGeneratedDataLoader, SparseFeatureDataset, set_seed
 class TMSTrainConfig(BaseModel):
     n_features: PositiveInt
     n_hidden: PositiveInt
-
-    # We optimize n_instances models in a single training loop
-    # to let us sweep over sparsity or importance curves
-    # efficiently.
-
-    # We could potentially use torch.vmap instead.
     n_instances: PositiveInt
     feature_probability: float
     batch_size: PositiveInt

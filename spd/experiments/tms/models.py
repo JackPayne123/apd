@@ -15,15 +15,26 @@ class TMSModel(Model):
         n_instances: int,
         n_features: int,
         n_hidden: int,
+        n_hidden_layers: int,
         device: str = "cuda",
     ):
         super().__init__()
         self.n_instances = n_instances
         self.n_features = n_features
         self.n_hidden = n_hidden
+        self.n_hidden_layers = n_hidden_layers
+
         self.W = nn.Parameter(torch.empty((n_instances, n_features, n_hidden), device=device))
         nn.init.xavier_normal_(self.W)
         self.b_final = nn.Parameter(torch.zeros((n_instances, n_features), device=device))
+
+        self.hidden_layers = None
+        if n_hidden_layers > 0:
+            self.hidden_layers = nn.ParameterList()
+            for _ in range(n_hidden_layers):
+                layer = nn.Parameter(torch.empty((n_instances, n_hidden, n_hidden), device=device))
+                nn.init.xavier_normal_(layer)
+                self.hidden_layers.append(layer)
 
     def forward(
         self, features: Float[Tensor, "... n_instances n_features"]
@@ -41,15 +52,29 @@ class TMSModel(Model):
         # features: [..., instance, n_features]
         # W: [instance, n_features, n_hidden]
         hidden = torch.einsum("...if,ifh->...ih", features, self.W)
+
+        pre_acts = {"W": features}
+        post_acts = {"W": hidden}
+        if self.hidden_layers is not None:
+            for i, layer in enumerate(self.hidden_layers):
+                pre_acts[f"hidden_{i}"] = hidden
+                hidden = torch.einsum("...ik,ikj->...ij", hidden, layer)
+                post_acts[f"hidden_{i}"] = hidden
+
         out_pre_relu = torch.einsum("...ih,ifh->...if", hidden, self.W) + self.b_final
         out = F.relu(out_pre_relu)
-        pre_acts = {"W": features, "W_T": hidden}
-        post_acts = {"W": hidden, "W_T": out_pre_relu}
+
+        pre_acts["W_T"] = hidden
+        post_acts["W_T"] = out_pre_relu
         return out, pre_acts, post_acts
 
     def all_decomposable_params(self) -> dict[str, Float[Tensor, "n_instances d_in d_out"]]:
         """Dictionary of all parameters which will be decomposed with SPD."""
-        return {"W": self.W, "W_T": rearrange(self.W, "i f h -> i h f")}
+        params = {"W": self.W, "W_T": rearrange(self.W, "i f h -> i h f")}
+        if self.hidden_layers is not None:
+            for i, layer in enumerate(self.hidden_layers):
+                params[f"hidden_{i}"] = layer
+        return params
 
 
 class TMSSPDModel(SPDModel):
