@@ -8,10 +8,9 @@ from spd.experiments.resid_mlp.models import (
     ResidualMLPModel,
     ResidualMLPSPDRankPenaltyConfig,
     ResidualMLPSPDRankPenaltyModel,
-    ResidualMLPTaskConfig,
 )
 from spd.experiments.resid_mlp.resid_mlp_dataset import ResidualMLPDataset
-from spd.run_spd import Config, optimize
+from spd.run_spd import Config, ResidualMLPTaskConfig, optimize
 from spd.utils import DatasetGeneratedDataLoader, set_seed
 
 # Create a simple ResidualMLP config that we can use in multiple tests
@@ -69,16 +68,7 @@ def test_resid_mlp_rank_penalty_decomposition_happy_path() -> None:
 
     # Create the SPD model
     spd_config = ResidualMLPSPDRankPenaltyConfig(
-        n_features=resid_mlp_config.n_features,
-        d_embed=resid_mlp_config.d_embed,
-        d_mlp=resid_mlp_config.d_mlp,
-        n_layers=resid_mlp_config.n_layers,
-        n_instances=resid_mlp_config.n_instances,
-        k=config.task_config.k,
-        init_scale=config.task_config.init_scale,
-        act_fn_name="relu",
-        in_bias=True,
-        out_bias=True,
+        **resid_mlp_config.model_dump(), k=config.task_config.k
     )
     model = ResidualMLPSPDRankPenaltyModel(config=spd_config).to(device)
 
@@ -170,18 +160,8 @@ def test_resid_mlp_rank_penalty_equivalent_to_raw_model() -> None:
     target_model = ResidualMLPModel(config=resid_mlp_config).to(device)
 
     # Create the SPD model with k=1
-    spd_model = ResidualMLPSPDRankPenaltyModel(
-        n_features=resid_mlp_config.n_features,
-        d_embed=resid_mlp_config.d_embed,
-        d_mlp=resid_mlp_config.d_mlp,
-        n_layers=resid_mlp_config.n_layers,
-        n_instances=resid_mlp_config.n_instances,
-        k=k,
-        init_scale=1.0,
-        act_fn_name=resid_mlp_config.act_fn_name,
-        in_bias=resid_mlp_config.in_bias,
-        out_bias=resid_mlp_config.out_bias,
-    ).to(device)
+    resid_mlp_spd_config = ResidualMLPSPDRankPenaltyConfig(**resid_mlp_config.model_dump(), k=k)
+    spd_model = ResidualMLPSPDRankPenaltyModel(config=resid_mlp_spd_config).to(device)
 
     # Init all params to random values
     for param in spd_model.parameters():

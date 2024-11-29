@@ -14,7 +14,7 @@ from torch import Tensor, nn
 from wandb.apis.public import Run
 
 from spd.models.base import Model, SPDRankPenaltyModel
-from spd.run_spd import Config
+from spd.run_spd import Config, ResidualMLPTaskConfig
 from spd.utils import (
     download_wandb_file,
     fetch_latest_wandb_checkpoint,
@@ -610,92 +610,6 @@ class ResidualMLPSPDRankPenaltyModel(SPDRankPenaltyModel):
             assert mlp.linear2.A.grad is not None
             remove_grad_parallel_to_subnetwork_vecs(mlp.linear2.A.data, mlp.linear2.A.grad)
 
-    # @classmethod
-    # def _load_model(
-    #     cls,
-    #     config_path: Path,
-    #     resid_mlp_config_path: Path,
-    #     checkpoint_path: Path,
-    #     label_coeffs_path: Path,
-    # ) -> tuple["ResidualMLPSPDRankPenaltyModel", Config, list[float]]:
-    #     """Helper function to load the model from local files."""
-    #     # Load config
-    #     config = Config(**load_yaml(config_path))
-    #     assert isinstance(config.task_config, ResidualMLPTaskConfig)
-
-    #     # Load target model config
-    #     resid_mlp_config = load_yaml(resid_mlp_config_path)
-
-    #     # Load checkpoint
-    #     params = torch.load(checkpoint_path, weights_only=True, map_location="cpu")
-
-    #     # Create model
-    #     model = cls(
-    #         n_features=resid_mlp_config["n_features"],
-    #         d_embed=resid_mlp_config["d_embed"],
-    #         d_mlp=resid_mlp_config["d_mlp"],
-    #         n_layers=resid_mlp_config["n_layers"],
-    #         n_instances=resid_mlp_config["n_instances"],
-    #         k=config.task_config.k,
-    #         init_scale=config.task_config.init_scale,
-    #         act_fn_name=resid_mlp_config["act_fn_name"],
-    #         in_bias=resid_mlp_config["in_bias"],
-    #         out_bias=resid_mlp_config["out_bias"],
-    #     )
-    #     model.load_state_dict(params)
-
-    #     # Load label coefficients
-    #     with open(label_coeffs_path) as f:
-    #         label_coeffs = json.load(f)
-
-    #     return model, config, label_coeffs
-
-    # @classmethod
-    # def from_local_path(
-    #     cls, path: RootPath
-    # ) -> tuple["ResidualMLPSPDRankPenaltyModel", Config, list[float]]:
-    #     """Instantiate from a checkpoint file."""
-    #     path = Path(path)
-    #     model_dir = path.parent
-    #     return cls._load_model(
-    #         config_path=model_dir / "final_config.yaml",
-    #         resid_mlp_config_path=model_dir / "resid_mlp_train_config.yaml",
-    #         checkpoint_path=path,
-    #         label_coeffs_path=model_dir / "label_coeffs.json",
-    #     )
-
-    # @classmethod
-    # def from_wandb(
-    #     cls, wandb_project_run_id: str
-    # ) -> tuple["ResidualMLPSPDRankPenaltyModel", Config, list[float]]:
-    #     """Instantiate model using the latest checkpoint from a wandb run."""
-    #     api = wandb.Api()
-    #     run: Run = api.run(wandb_project_run_id)
-
-    #     # Get the latest checkpoint
-    #     checkpoints = [
-    #         file
-    #         for file in run.files()
-    #         if file.name.endswith(".pth") and "resid_mlp" not in file.name
-    #     ]
-    #     if not checkpoints:
-    #         raise ValueError(f"No checkpoint files found in run {wandb_project_run_id}")
-    #     latest_checkpoint_remote = sorted(
-    #         checkpoints, key=lambda x: int(x.name.split(".pth")[0].split("_")[-1])
-    #     )[-1]
-
-    #     config_path = download_wandb_file(run, "final_config.yaml")
-    #     resid_mlp_config_path = download_wandb_file(run, "resid_mlp_train_config.yaml")
-    #     label_coeffs_path = download_wandb_file(run, "label_coeffs.json")
-    #     checkpoint_path = download_wandb_file(run, latest_checkpoint_remote.name)
-
-    #     return cls._load_model(
-    #         config_path=config_path,
-    #         resid_mlp_config_path=resid_mlp_config_path,
-    #         checkpoint_path=checkpoint_path,
-    #         label_coeffs_path=label_coeffs_path,
-    #     )
-
     @staticmethod
     def _download_wandb_files(wandb_project_run_id: str) -> ResidualMLPSPDRankPenaltyPaths:
         """Download the relevant files from a wandb run."""
@@ -750,6 +664,7 @@ class ResidualMLPSPDRankPenaltyModel(SPDRankPenaltyModel):
         with open(paths.label_coeffs) as f:
             label_coeffs = torch.tensor(json.load(f))
 
+        assert isinstance(config.task_config, ResidualMLPTaskConfig)
         resid_mlp_spd_rank_penalty_config = ResidualMLPSPDRankPenaltyConfig(
             **resid_mlp_train_config_dict, k=config.task_config.k, m=config.m
         )

@@ -11,6 +11,7 @@ import yaml
 from jaxtyping import Float
 from pydantic import BaseModel, ConfigDict, PositiveFloat, PositiveInt, model_validator
 from torch import Tensor, nn
+from tqdm import tqdm
 
 from spd.experiments.resid_mlp.models import ResidualMLPConfig, ResidualMLPModel
 from spd.experiments.resid_mlp.resid_mlp_dataset import (
@@ -43,6 +44,7 @@ class ResidMLPTrainConfig(BaseModel):
     lr_schedule: Literal["linear", "constant", "cosine", "exponential"] = "constant"
     fixed_random_embedding: bool = False
     fixed_identity_embedding: bool = False
+    n_batches_final_losses: PositiveInt = 1
 
     @model_validator(mode="after")
     def validate_model(self) -> Self:
@@ -70,7 +72,7 @@ def train(
     device: str,
     out_dir: Path,
     run_name: str,
-) -> float | None:
+) -> Float[Tensor, " n_instances"]:
     if config.wandb_project:
         config = init_wandb(config, config.wandb_project, name=run_name)
 
@@ -100,8 +102,9 @@ def train(
     # Add this line to get the lr_schedule_fn
     lr_schedule_fn = get_lr_schedule_fn(config.lr_schedule)
 
-    final_loss = None
-    for step, (batch, labels) in enumerate(dataloader):
+    current_losses = torch.tensor([])
+    pbar = tqdm(range(config.steps), total=config.steps)
+    for step, (batch, labels) in zip(pbar, dataloader, strict=False):
         if step >= config.steps:
             break
 
@@ -111,50 +114,63 @@ def train(
             param_group["lr"] = current_lr
 
         optimizer.zero_grad()
-        batch = batch.to(device)
-        labels = labels.to(device)
+        batch: Float[Tensor, "batch n_instances n_features"] = batch.to(device)
+        labels: Float[Tensor, "batch n_instances n_features"] = labels.to(device)
         out, _, _ = model(batch)
         # Scale by feature importance as in Anthropic paper
 
         loss = ((out - labels) ** 2) * feature_importances
-        loss = loss.mean()
+        loss = loss.mean(dim=(0, 2))
+        current_losses = loss.detach()
+        loss = loss.mean(dim=0)
         loss.backward()
         optimizer.step()
-        final_loss = loss.item()
         if step % config.print_freq == 0:
-            logger.info(f"Step {step}: loss={final_loss}, lr={current_lr}")
-            if config.wandb_project:
-                wandb.log({"loss": final_loss, "lr": current_lr}, step=step)
+            pbar.set_description(f"loss={current_losses.mean():.2e}, lr={current_lr:.2e}")
 
-    logger.info(f"Final loss: {final_loss}")
-
-    # Save model
-    model_path = out_dir / "resid_mlp.pth"
+    model_path = out_dir / "target_model.pth"
     torch.save(model.state_dict(), model_path)
-    logger.info(f"Saved model to {model_path}")
-    if config.wandb_project:
-        wandb.save(str(model_path), base_path=out_dir)
+    print(f"Saved model to {model_path}")
 
-    if config.wandb_project:
-        wandb.finish()
+    config_path = out_dir / "target_model_config.yaml"
+    with open(config_path, "w") as f:
+        yaml.dump(config.model_dump(mode="json"), f, indent=2)
+    print(f"Saved config to {config_path}")
 
-    return final_loss
+    # Save the coefficients used to generate the labels if label_type is act_plus_resid
+    assert isinstance(dataloader.dataset, ResidualMLPDataset)
+    assert dataloader.dataset.label_coeffs is not None
+    label_coeffs = dataloader.dataset.label_coeffs.tolist()
+    label_coeffs_path = out_dir / "label_coeffs.json"
+    with open(label_coeffs_path, "w") as f:
+        json.dump(label_coeffs, f)
+    print(f"Saved label coefficients to {label_coeffs_path}")
+
+    # Calculate final losses by averaging many batches
+    final_losses = []
+    for _ in range(config.n_batches_final_losses):
+        batch, labels = next(iter(dataloader))
+        batch = batch.to(device)
+        labels = labels.to(device)
+        out, _, _ = model(batch)
+        loss = ((out - labels) ** 2) * feature_importances
+        loss = loss.mean(dim=(0, 2))
+        final_losses.append(loss)
+    final_losses = torch.stack(final_losses).mean(dim=0).cpu().detach()
+    print(f"Final losses: {final_losses.numpy()}")
+    return final_losses
 
 
-def run_train(config: ResidMLPTrainConfig, device: str) -> None:
-    set_seed(config.seed)
-
+def run_train(config: ResidMLPTrainConfig, device: str) -> Float[Tensor, " n_instances"]:
     model_cfg = config.resid_mlp_config
-
     run_name = (
-        f"resid_mlp_{config.label_type}_n-instances{model_cfg.n_instances}_"
+        f"resid_mlp_identity_{config.label_type}_n-instances{model_cfg.n_instances}_"
         f"n-features{model_cfg.n_features}_d-resid{model_cfg.d_embed}_"
         f"d-mlp{model_cfg.d_mlp}_n-layers{model_cfg.n_layers}_seed{config.seed}"
     )
-
     out_dir = Path(__file__).parent / "out" / run_name
 
-    model = ResidualMLPModel(model_cfg).to(device)
+    model = ResidualMLPModel(config=model_cfg).to(device)
 
     if config.fixed_random_embedding or config.fixed_identity_embedding:
         # Don't train the embedding matrices
@@ -205,7 +221,7 @@ def run_train(config: ResidMLPTrainConfig, device: str) -> None:
         device=device,
     )
 
-    train(
+    final_losses = train(
         config=config,
         model=model,
         trainable_params=[p for p in model.parameters() if p.requires_grad],
@@ -215,6 +231,7 @@ def run_train(config: ResidMLPTrainConfig, device: str) -> None:
         out_dir=out_dir,
         run_name=run_name,
     )
+    return final_losses
 
 
 if __name__ == "__main__":
@@ -224,11 +241,11 @@ if __name__ == "__main__":
         seed=0,
         label_fn_seed=0,
         resid_mlp_config=ResidualMLPConfig(
-            n_instances=2,
-            n_features=6,
-            d_embed=5,
-            d_mlp=5,
-            n_layers=2,
+            n_instances=10,
+            n_features=100,
+            d_embed=100,
+            d_mlp=40,
+            n_layers=1,
             act_fn_name="relu",
             apply_output_act_fn=True,
             in_bias=False,
@@ -246,4 +263,6 @@ if __name__ == "__main__":
         lr_schedule="cosine",
     )
 
-    run_train(config, device=device)
+    set_seed(config.seed)
+
+    run_train(config, device)

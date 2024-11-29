@@ -29,7 +29,12 @@ from spd.plotting import (
     plot_subnetwork_attributions_statistics,
     plot_subnetwork_correlations,
 )
-from spd.run_spd import Config, ResidualMLPTaskConfig, get_common_run_name_suffix, optimize
+from spd.run_spd import (
+    Config,
+    ResidualMLPTaskConfig,
+    get_common_run_name_suffix,
+    optimize,
+)
 from spd.utils import (
     DatasetGeneratedDataLoader,
     collect_subnetwork_attributions,
