@@ -25,6 +25,8 @@ from spd.settings import REPO_ROOT
 T = TypeVar("T", bound=BaseModel)
 Q = TypeVar("Q")
 
+WANDB_PATH_PREFIX = "wandb:"
+
 
 def to_root_path(path: str | Path) -> Path:
     """Converts relative paths to absolute ones, assuming they are relative to the rib root."""
@@ -156,11 +158,6 @@ def replace_pydantic_model(model: BaseModelType, *updates: dict[str, Any]) -> Ba
         Bar(foo=Foo(a=3, b=2))
     """
     return model.__class__(**deep_update(model.model_dump(), *updates))
-
-
-def is_wandb_path(path: Path | str) -> bool:
-    """Check if a path is a wandb path. We prefix all wandb paths with `wandb:`."""
-    return isinstance(path, str) and path.startswith("wandb:")
 
 
 def fetch_latest_wandb_checkpoint(run: Run) -> File:

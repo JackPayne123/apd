@@ -16,10 +16,10 @@ from wandb.apis.public import Run
 from spd.models.base import Model, SPDRankPenaltyModel
 from spd.run_spd import Config, ResidualMLPTaskConfig
 from spd.utils import (
+    WANDB_PATH_PREFIX,
     download_wandb_file,
     fetch_latest_wandb_checkpoint,
     init_param_,
-    is_wandb_path,
     remove_grad_parallel_to_subnetwork_vecs,
 )
 
@@ -391,8 +391,7 @@ class ResidualMLPModel(Model):
                 `wandb:run_id`. If local path, assumes that `resid_mlp_train_config.yaml` and
                 `label_coeffs.json` are in the same directory as the checkpoint.
         """
-        if is_wandb_path(path):
-            assert isinstance(path, str) and path.startswith("wandb:")
+        if isinstance(path, str) and path.startswith(WANDB_PATH_PREFIX):
             wandb_path = path.split(":")[1]
             paths = cls._download_wandb_files(wandb_path)
         else:
@@ -642,8 +641,7 @@ class ResidualMLPSPDRankPenaltyModel(SPDRankPenaltyModel):
                 `wandb:run_id`. If local path, assumes that `resid_mlp_train_config.yaml` and
                 `label_coeffs.json` are in the same directory as the checkpoint.
         """
-        if is_wandb_path(path):
-            assert isinstance(path, str) and path.startswith("wandb:")
+        if isinstance(path, str) and path.startswith(WANDB_PATH_PREFIX):
             wandb_path = path.split(":")[1]
             paths = cls._download_wandb_files(wandb_path)
         else:
