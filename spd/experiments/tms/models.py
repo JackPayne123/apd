@@ -4,7 +4,7 @@ from jaxtyping import Bool, Float
 from torch import Tensor, nn
 from torch.nn import functional as F
 
-from spd.models.base import Model, SPDFullRankModel, SPDModel, SPDRankPenaltyModel
+from spd.models.base import Model, SPDFullRankModel, SPDRankPenaltyModel
 from spd.types import RootPath
 from spd.utils import remove_grad_parallel_to_subnetwork_vecs
 
@@ -75,107 +75,6 @@ class TMSModel(Model):
             for i, layer in enumerate(self.hidden_layers):
                 params[f"hidden_{i}"] = layer
         return params
-
-
-class TMSSPDModel(SPDModel):
-    def __init__(
-        self,
-        n_instances: int,
-        n_features: int,
-        n_hidden: int,
-        k: int | None,
-        bias_val: float,
-        device: str = "cuda",
-    ):
-        super().__init__()
-        self.n_instances = n_instances
-        self.n_features = n_features
-        self.n_hidden = n_hidden
-        self.k = k if k is not None else n_features
-        self.bias_val = bias_val
-
-        self.A = nn.Parameter(torch.empty((n_instances, n_features, self.k), device=device))
-        self.B = nn.Parameter(torch.empty((n_instances, self.k, n_hidden), device=device))
-
-        bias_data = torch.zeros((n_instances, n_features), device=device) + bias_val
-        self.b_final = nn.Parameter(bias_data)
-
-        nn.init.xavier_normal_(self.A)
-        # Fix the first instance to the identity to compare losses
-        assert (
-            n_features == self.k
-        ), "Currently only supports n_features == k if fixing first instance to identity"
-        self.A.data[0] = torch.eye(n_features, device=device)
-        nn.init.xavier_normal_(self.B)
-
-        self.n_param_matrices = 2  # Two W matrices (even though they're tied)
-
-    def all_As_and_Bs(
-        self,
-    ) -> dict[str, tuple[Float[Tensor, "d_layer_in k"], Float[Tensor, "k d_layer_out"]]]:
-        return {
-            "W": (self.A, self.B),
-            "W_T": (rearrange(self.B, "i k h -> i h k"), rearrange(self.A, "i f k -> i k f")),
-        }
-
-    def all_subnetwork_params(self) -> dict[str, Float[Tensor, "n_instances k d_in d_out"]]:
-        W = torch.einsum("ifk,ikh->ikfh", self.A, self.B)
-        return {"W": W, "W_T": rearrange(W, "i k f h -> i k h f")}
-
-    def all_subnetwork_params_summed(self) -> dict[str, Float[Tensor, "n_instances d_in d_out"]]:
-        """All subnetwork params summed over the subnetwork dimension. I.e. all the ABs."""
-        W = torch.einsum("ifk,ikh->ifh", self.A, self.B)
-        return {"W": W, "W_T": rearrange(W, "i f h -> i h f")}
-
-    def forward(
-        self, x: Float[Tensor, "... i f"], topk_mask: Bool[Tensor, "... k"] | None = None
-    ) -> tuple[
-        Float[Tensor, "... i f"],
-        dict[str, Float[Tensor, "... i d_layer_out"]],
-        dict[str, Float[Tensor, "... i k"]],
-    ]:
-        inner_act_0 = torch.einsum("...if,ifk->...ik", x, self.A)
-        if topk_mask is not None:
-            assert topk_mask.shape == inner_act_0.shape
-            inner_act_0 = torch.einsum("...ik,...ik->...ik", inner_act_0, topk_mask)
-        layer_act_0 = torch.einsum("...ik,ikh->...ih", inner_act_0, self.B)
-
-        inner_act_1 = torch.einsum("...ih,ikh->...ik", layer_act_0, self.B)
-        if topk_mask is not None:
-            assert topk_mask.shape == inner_act_1.shape
-            inner_act_1 = torch.einsum("...ik,...ik->...ik", inner_act_1, topk_mask)
-        layer_act_1 = torch.einsum("...ik,ifk->...if", inner_act_1, self.A) + self.b_final
-
-        out = F.relu(layer_act_1)
-        layer_acts = {"W": layer_act_0, "W_T": layer_act_1}
-        inner_acts = {"W": inner_act_0, "W_T": inner_act_1}
-        return out, layer_acts, inner_acts
-
-    @classmethod
-    def from_pretrained(cls, path: str | RootPath) -> "TMSSPDModel":  # type: ignore
-        pass
-
-    def set_matrices_to_unit_norm(self):
-        self.A.data /= self.A.data.norm(p=2, dim=-2, keepdim=True)
-
-    def fix_normalized_adam_gradients(self):
-        assert self.A.grad is not None
-        remove_grad_parallel_to_subnetwork_vecs(self.A.data, self.A.grad)
-
-    def set_subnet_to_zero(self, subnet_idx: int) -> dict[str, Float[Tensor, "n_instances dim2"]]:
-        stored_vals = {
-            "A": self.A.data[:, :, subnet_idx].detach().clone(),
-            "B": self.B.data[:, subnet_idx, :].detach().clone(),
-        }
-        self.A.data[:, :, subnet_idx] = 0.0
-        self.B.data[:, subnet_idx, :] = 0.0
-        return stored_vals
-
-    def restore_subnet(
-        self, subnet_idx: int, stored_vals: dict[str, Float[Tensor, "n_instances dim2"]]
-    ) -> None:
-        self.A.data[:, :, subnet_idx] = stored_vals["A"]
-        self.B.data[:, subnet_idx, :] = stored_vals["B"]
 
 
 class TMSSPDFullRankModel(SPDFullRankModel):

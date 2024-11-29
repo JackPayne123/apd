@@ -7,7 +7,6 @@ from jaxtyping import Float
 from spd.experiments.tms.models import (
     TMSModel,
     TMSSPDFullRankModel,
-    TMSSPDModel,
     TMSSPDRankPenaltyModel,
 )
 from spd.experiments.tms.train_tms import TMSTrainConfig, train
@@ -16,22 +15,24 @@ from spd.utils import DatasetGeneratedDataLoader, SparseFeatureDataset, set_seed
 
 # Create a simple TMS config that we can use in multiple tests
 TMS_TASK_CONFIG = TMSConfig(
+    task_name="tms",
     n_features=5,
     n_hidden=2,
     n_instances=2,
     k=5,
     feature_probability=0.5,
-    train_bias=True,
+    train_bias=False,
     bias_val=0.0,
     pretrained_model_path=Path(""),  # We'll create this later
 )
 
 
-def tms_decomposition_optimize_test(config: Config):
+def tms_spd_rank_penalty_happy_path(config: Config):
     set_seed(0)
     device = "cpu"
     assert isinstance(config.task_config, TMSConfig)
-    model = TMSSPDModel(
+
+    model = TMSSPDRankPenaltyModel(
         n_instances=config.task_config.n_instances,
         n_features=config.task_config.n_features,
         n_hidden=config.task_config.n_hidden,
@@ -39,7 +40,6 @@ def tms_decomposition_optimize_test(config: Config):
         bias_val=config.task_config.bias_val,
         device=device,
     )
-
     # For our pretrained model, just use a randomly initialized TMS model
     pretrained_model = TMSModel(
         n_instances=config.task_config.n_instances,
@@ -47,20 +47,26 @@ def tms_decomposition_optimize_test(config: Config):
         n_hidden=config.task_config.n_hidden,
         device=device,
     )
+    # Randomly initialize the bias for the pretrained model
+    pretrained_model.b_final.data = torch.randn_like(pretrained_model.b_final.data)
+    # Manually set the bias for the SPD model from the bias in the pretrained model
+    model.b_final.data[:] = pretrained_model.b_final.data.clone()
+
+    if not config.task_config.train_bias:
+        model.b_final.requires_grad = False
 
     dataset = SparseFeatureDataset(
         n_instances=config.task_config.n_instances,
         n_features=config.task_config.n_features,
         feature_probability=config.task_config.feature_probability,
         device=device,
+        data_generation_type=config.task_config.data_generation_type,
+        value_range=(0.0, 1.0),
     )
     dataloader = DatasetGeneratedDataLoader(dataset, batch_size=config.batch_size)
 
     # Pick an arbitrary parameter to check that it changes
     initial_param = model.A.clone().detach()
-
-    if not config.task_config.train_bias:
-        model.b_final.requires_grad = False
 
     optimize(
         model=model,
@@ -78,8 +84,9 @@ def tms_decomposition_optimize_test(config: Config):
     ), "Model A matrix should have changed after optimization"
 
 
-def test_tms_batch_topk_no_l2():
+def test_tms_batch_topk_no_schatten():
     config = Config(
+        spd_type="rank_penalty",
         topk=2,
         batch_topk=True,
         batch_size=4,
@@ -88,14 +95,16 @@ def test_tms_batch_topk_no_l2():
         save_freq=None,
         lr=1e-3,
         topk_recon_coeff=1,
-        topk_l2_coeff=None,
+        schatten_pnorm=None,
+        schatten_coeff=None,
         task_config=TMS_TASK_CONFIG,
     )
-    tms_decomposition_optimize_test(config)
+    tms_spd_rank_penalty_happy_path(config)
 
 
-def test_tms_batch_topk_and_l2():
+def test_tms_batch_topk_and_schatten():
     config = Config(
+        spd_type="rank_penalty",
         topk=2,
         batch_topk=True,
         batch_size=4,
@@ -104,14 +113,16 @@ def test_tms_batch_topk_and_l2():
         save_freq=None,
         lr=1e-3,
         topk_recon_coeff=1,
-        topk_l2_coeff=0.1,
+        schatten_pnorm=0.9,
+        schatten_coeff=1e-1,
         task_config=TMS_TASK_CONFIG,
     )
-    tms_decomposition_optimize_test(config)
+    tms_spd_rank_penalty_happy_path(config)
 
 
 def test_tms_topk_and_l2():
     config = Config(
+        spd_type="rank_penalty",
         topk=2,
         batch_topk=False,
         batch_size=4,
@@ -120,14 +131,16 @@ def test_tms_topk_and_l2():
         save_freq=None,
         lr=1e-3,
         topk_recon_coeff=1,
-        topk_l2_coeff=0.1,
+        schatten_pnorm=0.9,
+        schatten_coeff=1e-1,
         task_config=TMS_TASK_CONFIG,
     )
-    tms_decomposition_optimize_test(config)
+    tms_spd_rank_penalty_happy_path(config)
 
 
 def test_tms_lp():
     config = Config(
+        spd_type="rank_penalty",
         topk=None,
         batch_topk=False,
         batch_size=4,
@@ -137,14 +150,14 @@ def test_tms_lp():
         lr=1e-3,
         lp_sparsity_coeff=0.01,
         pnorm=0.9,
-        topk_l2_coeff=None,
         task_config=TMS_TASK_CONFIG,
     )
-    tms_decomposition_optimize_test(config)
+    tms_spd_rank_penalty_happy_path(config)
 
 
 def test_tms_topk_and_lp():
     config = Config(
+        spd_type="rank_penalty",
         topk=2,
         batch_topk=False,
         batch_size=4,
@@ -155,10 +168,9 @@ def test_tms_topk_and_lp():
         pnorm=0.9,
         topk_recon_coeff=1,
         lp_sparsity_coeff=1,
-        topk_l2_coeff=None,
         task_config=TMS_TASK_CONFIG,
     )
-    tms_decomposition_optimize_test(config)
+    tms_spd_rank_penalty_happy_path(config)
 
 
 def test_train_tms_happy_path():

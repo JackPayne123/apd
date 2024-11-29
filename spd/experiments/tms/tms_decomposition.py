@@ -17,12 +17,7 @@ from matplotlib.colors import CenteredNorm
 from torch import Tensor
 from tqdm import tqdm
 
-from spd.experiments.tms.models import (
-    TMSModel,
-    TMSSPDFullRankModel,
-    TMSSPDModel,
-    TMSSPDRankPenaltyModel,
-)
+from spd.experiments.tms.models import TMSModel, TMSSPDFullRankModel, TMSSPDRankPenaltyModel
 from spd.log import logger
 from spd.run_spd import Config, TMSConfig, get_common_run_name_suffix, optimize
 from spd.utils import (
@@ -30,7 +25,6 @@ from spd.utils import (
     SparseFeatureDataset,
     collect_subnetwork_attributions,
     load_config,
-    permute_to_identity,
     set_seed,
 )
 from spd.wandb_utils import init_wandb, save_config_to_wandb
@@ -79,20 +73,6 @@ def plot_A_matrix(x: torch.Tensor, pos_only: bool = False) -> plt.Figure:
     plt.subplots_adjust(wspace=0.1, bottom=0.15, top=0.9)
     fig.subplots_adjust(bottom=0.2)
 
-    return fig
-
-
-def plot_permuted_A(model: TMSSPDModel, step: int, out_dir: Path, **_) -> plt.Figure:
-    permuted_A_T_list: list[torch.Tensor] = []
-    for i in range(model.n_instances):
-        permuted_matrix = permute_to_identity(model.A[i].T.abs())
-        permuted_A_T_list.append(permuted_matrix)
-    permuted_A_T = torch.stack(permuted_A_T_list, dim=0)
-
-    fig = plot_A_matrix(permuted_A_T, pos_only=True)
-    fig.savefig(out_dir / f"A_{step}.png")
-    plt.close(fig)
-    tqdm.write(f"Saved A matrix to {out_dir / f'A_{step}.png'}")
     return fig
 
 
@@ -202,7 +182,7 @@ def plot_subnetwork_attributions_statistics_multiple_instances(
 
 
 def plot_subnetwork_params(
-    model: TMSSPDFullRankModel | TMSSPDModel | TMSSPDRankPenaltyModel, step: int, out_dir: Path, **_
+    model: TMSSPDFullRankModel | TMSSPDRankPenaltyModel, step: int, out_dir: Path, **_
 ) -> plt.Figure:
     """Plot the subnetwork parameter matrix."""
     all_params = model.all_subnetwork_params()
@@ -243,7 +223,7 @@ def plot_subnetwork_params(
 
 
 def make_plots(
-    model: TMSSPDFullRankModel | TMSSPDModel | TMSSPDRankPenaltyModel,
+    model: TMSSPDFullRankModel | TMSSPDRankPenaltyModel,
     step: int,
     out_dir: Path,
     device: str,
@@ -252,11 +232,7 @@ def make_plots(
     **_,
 ) -> dict[str, plt.Figure]:
     plots = {}
-    if isinstance(model, TMSSPDFullRankModel | TMSSPDRankPenaltyModel):
-        plots["subnetwork_params"] = plot_subnetwork_params(model, step, out_dir)
-    else:
-        plots["A"] = plot_permuted_A(model, step, out_dir)
-        plots["subnetwork_params"] = plot_subnetwork_params(model, step, out_dir)
+    plots["subnetwork_params"] = plot_subnetwork_params(model, step, out_dir)
 
     if config.topk is not None:
         assert topk_mask is not None
@@ -301,15 +277,6 @@ def main(
     device = "cuda" if torch.cuda.is_available() else "cpu"
     if config.spd_type == "full_rank":
         model = TMSSPDFullRankModel(
-            n_instances=task_config.n_instances,
-            n_features=task_config.n_features,
-            n_hidden=task_config.n_hidden,
-            k=task_config.k,
-            bias_val=task_config.bias_val,
-            device=device,
-        )
-    elif config.spd_type == "rank_one":
-        model = TMSSPDModel(
             n_instances=task_config.n_instances,
             n_features=task_config.n_features,
             n_hidden=task_config.n_hidden,
