@@ -47,7 +47,7 @@ class ResidualLinearModel(Model):
 
         self.layers = nn.ModuleList(
             [
-                MLP(d_model=d_embed, d_mlp=d_mlp, act_fn=self.act_fn, bias=True)
+                MLP(d_model=d_embed, d_mlp=d_mlp, act_fn=self.act_fn, bias=False)
                 for _ in range(n_layers)
             ]
         )

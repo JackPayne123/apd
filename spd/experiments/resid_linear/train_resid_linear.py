@@ -289,16 +289,16 @@ def training_run(config: Config, device: str) -> float:
 
 if __name__ == "__main__":
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    n_steps = 10_000
+    n_steps = 1000
     n_features = 100
-    d_embed = 1000
+    d_embed = 100
     d_mlp = 50
     p = 0.01
     data_generation_type = "at_least_zero_active"
     config = Config(
         seed=0,
         label_fn_seed=0,
-        loss_at_resid=False,
+        loss_at_resid=True,
         n_features=n_features,
         d_embed=d_embed,
         d_mlp=d_mlp,
@@ -306,7 +306,7 @@ if __name__ == "__main__":
         feature_probability=p,
         batch_size=2048,
         steps=n_steps,
-        print_freq=10000000,
+        print_freq=100,
         lr=3e-3,
         lr_schedule="cosine",
         random_embedding_matrix=True,

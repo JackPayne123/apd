@@ -22,7 +22,8 @@ print(f"Using device: {device}")
 set_seed(0)  # You can change this seed if needed
 
 # Load model and config
-path = "/data/stefan_heimersheim/projects/SPD/spd/spd/experiments/resid_linear/out/resid_linear_identity_n-features100_d-resid1000_d-mlp50_n-layers1_seed0/target_model.pth"
+path = "/data/stefan_heimersheim/projects/SPD/spd/spd/experiments/resid_linear/out/resid_linear_identity_n-features100_d-resid100_d-mlp50_n-layers1_seed0/target_model.pth"
+# path = "/data/apollo/spd/resid_linear_identity_n-features100_d-resid100_d-mlp50_n-layers1_seed0/target_model.pth"
 model, task_config, label_coeffs = ResidualLinearModel.from_pretrained(path)
 print(task_config)
 model = model.to(device)
