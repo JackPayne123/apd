@@ -61,14 +61,12 @@ plt.show()
 
 # %% Show connection strength between ReLUs and features
 # Only valid for n_layers=1
-if model.config.n_layers == 1:
-    fig = relu_contribution_plot(model, device)
-    plt.show()
+fig = relu_contribution_plot(model, device)
+plt.show()
 
 # %%
 
-if model.config.n_layers == 1:
-    fig = plot_virtual_weights(model, device)
-    plt.show()
+fig = plot_virtual_weights(model, device)
+plt.show()
 
 # %%
