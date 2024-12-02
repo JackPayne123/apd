@@ -4,6 +4,7 @@ import torch
 
 from spd.experiments.resid_mlp.models import ResidualMLPModel
 from spd.experiments.resid_mlp.plotting import (
+    calculate_virtual_weights,
     plot_2d_snr,
     plot_individual_feature_response,
     plot_virtual_weights,
@@ -13,7 +14,7 @@ from spd.experiments.resid_mlp.resid_mlp_dataset import ResidualMLPDataset
 from spd.utils import REPO_ROOT, set_seed
 
 # %% Load model and config
-model = "resid_mlp_identity_act_plus_resid_n-instances20_n-features100_d-resid1000_d-mlp10_n-layers5_seed0"
+model = "resid_mlp_identity_act_plus_resid_n-instances8_n-features20_d-resid200_d-mlp10_n-layers1_seed0_p0.05_random_embedding_True_identity_embedding_False_bias_False_False"
 path = REPO_ROOT / "spd/experiments/resid_mlp/out" / model / "target_model.pth"
 
 set_seed(0)
@@ -49,7 +50,10 @@ fig = plot_individual_feature_response(
 plt.show()
 
 # %% Show connection strength between ReLUs and features
-fig = relu_contribution_plot(model, device)
+virtual_weights = calculate_virtual_weights(model=model, device=device)
+fig = relu_contribution_plot(
+    virtual_weights=virtual_weights, model=model, device=device, instance_idx=0
+)
 plt.show()
 
 # %% Calculate S/N ratio for 1 and 2 active features.
@@ -58,7 +62,16 @@ plt.show()
 
 
 # %% Plot virtual weights
-fig = plot_virtual_weights(model, device, figsize=(20, 20))
+
+fig = plt.figure(constrained_layout=True, figsize=(20, 20))
+gs = fig.add_gridspec(ncols=2, nrows=3)
+ax1 = fig.add_subplot(gs[0, 0])
+ax2 = fig.add_subplot(gs[0, 1])
+ax3 = fig.add_subplot(gs[1:, :])
+virtual_weights = calculate_virtual_weights(model=model, device=device)
+fig = plot_virtual_weights(
+    virtual_weights=virtual_weights, device=device, ax1=ax1, ax2=ax2, ax3=ax3, instance_idx=0
+)
 plt.show()
 
 # %%

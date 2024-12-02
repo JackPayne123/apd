@@ -9,7 +9,7 @@ from mpl_toolkits.axes_grid1 import make_axes_locatable
 from torch import Tensor
 
 from spd.experiments.piecewise.plotting import plot_matrix
-from spd.experiments.resid_mlp.models import ResidualMLPModel
+from spd.experiments.resid_mlp.models import ResidualMLPModel, ResidualMLPSPDRankPenaltyModel
 
 
 def plot_individual_feature_response(
@@ -131,7 +131,7 @@ def plot_2d_snr(model: ResidualMLPModel, device: str):
     return fig
 
 
-def _calculate_virtual_weights(model: ResidualMLPModel, device: str) -> dict[str, Tensor]:
+def calculate_virtual_weights(model: ResidualMLPModel, device: str) -> dict[str, Tensor]:
     """Currently ignoring interactions between layers. Just flattening (n_layers, d_mlp)"""
     n_instances = model.n_instances
     n_features = model.n_features
@@ -202,18 +202,23 @@ def _calculate_virtual_weights(model: ResidualMLPModel, device: str) -> dict[str
     return virtual_weights
 
 
-def relu_contribution_plot(model: ResidualMLPModel, device: str, instance_idx: int = 0):
-    virtual_weights = _calculate_virtual_weights(model, device)
+def relu_contribution_plot(
+    virtual_weights: dict[str, Tensor],
+    model: ResidualMLPModel | ResidualMLPSPDRankPenaltyModel,
+    device: str,
+    instance_idx: int = 0,
+):
     diag_relu_conns: Float[Tensor, "n_features d_mlp"] = (
         virtual_weights["diag_relu_conns"][instance_idx].cpu().detach()
     )
     d_mlp = model.d_mlp
     n_layers = model.n_layers
+    n_features = model.n_features
 
     fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 5), constrained_layout=True)  # type: ignore
     ax1.set_title("How much does each ReLU contribute to each feature?")
     ax1.axvline(-0.5, color="k", linestyle="--", alpha=0.3, lw=0.5)
-    for i in range(model.n_features):
+    for i in range(n_features):
         ax1.scatter([i] * d_mlp * n_layers, diag_relu_conns[i, :], alpha=0.3, marker=".", c="k")
         ax1.axvline(i + 0.5, color="k", linestyle="--", alpha=0.3, lw=0.5)
         for j in range(d_mlp * n_layers):
@@ -223,17 +228,17 @@ def relu_contribution_plot(model: ResidualMLPModel, device: str, instance_idx: i
     ax1.axhline(0, color="k", linestyle="--", alpha=0.3)
     ax1.set_xlabel("Features")
     ax1.set_ylabel("Weights to ReLUs")
-    ax1.set_xlim(-0.5, model.n_features - 0.5)
+    ax1.set_xlim(-0.5, n_features - 0.5)
 
     ax2.set_title("How much does each feature route through each ReLU?")
     ax2.axvline(-0.5, color="k", linestyle="--", alpha=0.3, lw=0.5)
     for i in range(d_mlp * n_layers):
-        ax2.scatter([i] * model.n_features, diag_relu_conns[:, i], alpha=0.3, marker=".", c="k")
+        ax2.scatter([i] * n_features, diag_relu_conns[:, i], alpha=0.3, marker=".", c="k")
         ax2.axvline(i + 0.5, color="k", linestyle="--", alpha=0.3, lw=0.5)
-        for j in range(model.n_features):
+        for j in range(n_features):
             if diag_relu_conns[j, i] > 0.2:
                 cmap_label = plt.get_cmap("hsv")
-                ax2.text(i, diag_relu_conns[j, i], str(j), color=cmap_label(j / model.n_features))
+                ax2.text(i, diag_relu_conns[j, i], str(j), color=cmap_label(j / n_features))
     ax2.axhline(0, color="k", linestyle="--", alpha=0.3)
     ax2.set_xlabel("ReLUs (consecutively enumerated throughout layers)")
     ax2.set_ylabel("Weights to features")
@@ -242,9 +247,13 @@ def relu_contribution_plot(model: ResidualMLPModel, device: str, instance_idx: i
 
 
 def plot_virtual_weights(
-    model: ResidualMLPModel, device: str, instance_idx: int = 0, figsize: tuple[int, int] = (10, 10)
+    virtual_weights: dict[str, Tensor],
+    device: str,
+    ax1: plt.Axes,
+    ax2: plt.Axes,
+    ax3: plt.Axes | None = None,
+    instance_idx: int = 0,
 ):
-    virtual_weights = _calculate_virtual_weights(model, device)
     in_conns = virtual_weights["in_conns"][instance_idx].cpu().detach()
     out_conns = virtual_weights["out_conns"][instance_idx].cpu().detach()
     W_E_W_U = einops.einsum(
@@ -252,13 +261,8 @@ def plot_virtual_weights(
         virtual_weights["W_U"][instance_idx],
         "n_features1 d_embed, d_embed n_features2 -> n_features1 n_features2",
     )
-    fig = plt.figure(constrained_layout=True, figsize=figsize)
-    gs = fig.add_gridspec(ncols=2, nrows=3)
-    ax1 = fig.add_subplot(gs[0, 0])
     plot_matrix(ax1, in_conns.T, "Virtual input weights $(W_E W_{in})^T$", "Features", "Neurons")
-    ax2 = fig.add_subplot(gs[0, 1])
     plot_matrix(ax2, out_conns, "Virtual output weights $W_{out} W_U$", "Features", "Neurons")
     ax2.xaxis.set_label_position("top")
-    ax3 = fig.add_subplot(gs[1:, :])
-    plot_matrix(ax3, W_E_W_U, "Virtual weights $W_E W_U$", "Features", "Features")
-    return fig
+    if ax3 is not None:
+        plot_matrix(ax3, W_E_W_U, "Virtual weights $W_E W_U$", "Features", "Features")
