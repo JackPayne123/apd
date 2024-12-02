@@ -17,7 +17,12 @@ from matplotlib.colors import CenteredNorm
 from torch import Tensor
 from tqdm import tqdm
 
-from spd.experiments.tms.models import TMSModel, TMSSPDFullRankModel, TMSSPDRankPenaltyModel
+from spd.experiments.tms.models import (
+    TMSModel,
+    TMSModelConfig,
+    TMSSPDFullRankModel,
+    TMSSPDRankPenaltyModel,
+)
 from spd.log import logger
 from spd.run_spd import Config, TMSConfig, get_common_run_name_suffix, optimize
 from spd.utils import (
@@ -277,13 +282,14 @@ def main(
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
-    target_model = TMSModel(
+    tms_model_config = TMSModelConfig(
         n_instances=task_config.n_instances,
         n_features=task_config.n_features,
         n_hidden=task_config.n_hidden,
         n_hidden_layers=task_config.n_hidden_layers,
         device=device,
     )
+    target_model = TMSModel(config=tms_model_config)
     target_model.load_state_dict(torch.load(task_config.pretrained_model_path, map_location=device))
     target_model.eval()
 
