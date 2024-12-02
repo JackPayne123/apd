@@ -17,6 +17,7 @@ def plot_individual_feature_response(
     device: str,
     task_config: dict[str, Any],
     sweep: bool = False,
+    subtract_inputs: bool = False,
     instance_idx: int = 0,
 ):
     """Plot the response of the model to a single feature being active.
@@ -45,13 +46,19 @@ def plot_individual_feature_response(
         f"d_mlp={task_config['d_mlp']}"
     )
     fig.suptitle(title)
+    inputs = batch[torch.arange(n_features), instance_idx, torch.arange(n_features)].detach().cpu()
     for f in range(n_features):
-        ax.plot(out[f, :].detach().cpu().numpy(), color=cmap_viridis(f / n_features))
+        x = torch.arange(n_features)
+        y = out[f, :].detach().cpu()
+        if subtract_inputs:
+            y = y - inputs
+        ax.plot(x, y, color=cmap_viridis(f / n_features))
     # Plot labels
-    inputs = batch[torch.arange(n_features), instance_idx, torch.arange(n_features)]
     label_fn = F.relu if task_config["act_fn_name"] == "relu" else F.gelu
-    targets = inputs + label_fn(inputs)
+    targets = label_fn(inputs) if subtract_inputs else inputs + label_fn(inputs)
     ax.plot(torch.arange(n_features), targets.cpu().detach(), color="red", label="Target")
+    baseline = torch.zeros(n_features) if subtract_inputs else inputs
+    ax.plot(torch.arange(n_features), baseline, color="red", linestyle=":", label="Baseline")
     ax.legend()
 
     # Colorbar
