@@ -15,7 +15,6 @@ from pydantic import (
     ConfigDict,
     Field,
     NonNegativeFloat,
-    NonNegativeInt,
     PositiveFloat,
     PositiveInt,
     model_validator,
@@ -33,10 +32,6 @@ from spd.utils import calc_topk_mask, calculate_attributions
 class TMSTaskConfig(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
     task_name: Literal["tms"] = "tms"
-    n_features: PositiveInt
-    n_hidden: PositiveInt
-    n_hidden_layers: NonNegativeInt = 0
-    n_instances: PositiveInt
     k: PositiveInt
     feature_probability: Probability
     train_bias: bool

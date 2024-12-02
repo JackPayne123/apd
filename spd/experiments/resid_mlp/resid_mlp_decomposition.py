@@ -269,6 +269,7 @@ def main(
         config.task_config.pretrained_model_path
     )
     target_model = target_model.to(device)
+    target_model.eval()
 
     run_name = get_run_name(
         config,

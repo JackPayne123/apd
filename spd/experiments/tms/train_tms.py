@@ -247,7 +247,7 @@ if __name__ == "__main__":
         tms_model_config=TMSModelConfig(
             n_features=5,
             n_hidden=2,
-            n_hidden_layers=2,
+            n_hidden_layers=0,
             n_instances=12,
             device=device,
         ),

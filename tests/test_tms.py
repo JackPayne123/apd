@@ -18,9 +18,6 @@ from spd.utils import DatasetGeneratedDataLoader, SparseFeatureDataset, set_seed
 # Create a simple TMS config that we can use in multiple tests
 TMS_TASK_CONFIG = TMSTaskConfig(
     task_name="tms",
-    n_features=5,
-    n_hidden=2,
-    n_instances=2,
     k=5,
     feature_probability=0.5,
     train_bias=False,
@@ -34,35 +31,36 @@ def tms_spd_rank_penalty_happy_path(config: Config, n_hidden_layers: int = 0):
     device = "cpu"
     assert isinstance(config.task_config, TMSTaskConfig)
 
-    model = TMSSPDRankPenaltyModel(
-        n_instances=config.task_config.n_instances,
-        n_features=config.task_config.n_features,
-        n_hidden=config.task_config.n_hidden,
+    # For our pretrained model, just use a randomly initialized TMS model
+    tms_model_config = TMSModelConfig(
+        n_instances=2,
+        n_features=5,
+        n_hidden=2,
         n_hidden_layers=n_hidden_layers,
+        device=device,
+    )
+    target_model = TMSModel(config=tms_model_config)
+
+    model = TMSSPDRankPenaltyModel(
+        n_instances=target_model.config.n_instances,
+        n_features=target_model.config.n_features,
+        n_hidden=target_model.config.n_hidden,
+        n_hidden_layers=target_model.config.n_hidden_layers,
         k=config.task_config.k,
         bias_val=config.task_config.bias_val,
         device=device,
     )
-    # For our pretrained model, just use a randomly initialized TMS model
-    tms_model_config = TMSModelConfig(
-        n_instances=config.task_config.n_instances,
-        n_features=config.task_config.n_features,
-        n_hidden=config.task_config.n_hidden,
-        n_hidden_layers=n_hidden_layers,
-        device=device,
-    )
-    pretrained_model = TMSModel(config=tms_model_config)
     # Randomly initialize the bias for the pretrained model
-    pretrained_model.b_final.data = torch.randn_like(pretrained_model.b_final.data)
+    target_model.b_final.data = torch.randn_like(target_model.b_final.data)
     # Manually set the bias for the SPD model from the bias in the pretrained model
-    model.b_final.data[:] = pretrained_model.b_final.data.clone()
+    model.b_final.data[:] = target_model.b_final.data.clone()
 
     if not config.task_config.train_bias:
         model.b_final.requires_grad = False
 
     dataset = SparseFeatureDataset(
-        n_instances=config.task_config.n_instances,
-        n_features=config.task_config.n_features,
+        n_instances=target_model.config.n_instances,
+        n_features=target_model.config.n_features,
         feature_probability=config.task_config.feature_probability,
         device=device,
         data_generation_type=config.task_config.data_generation_type,
@@ -84,7 +82,7 @@ def tms_spd_rank_penalty_happy_path(config: Config, n_hidden_layers: int = 0):
         out_dir=None,
         device=device,
         dataloader=dataloader,
-        pretrained_model=pretrained_model,
+        pretrained_model=target_model,
         param_map=param_map,
         plot_results_fn=None,
     )
