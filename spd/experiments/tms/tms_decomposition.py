@@ -23,6 +23,7 @@ from spd.experiments.tms.models import (
     TMSModelConfig,
     TMSSPDFullRankModel,
     TMSSPDRankPenaltyModel,
+    TMSSPDRankPenaltyModelConfig,
 )
 from spd.log import logger
 from spd.run_spd import Config, TMSTaskConfig, get_common_run_name_suffix, optimize
@@ -33,7 +34,7 @@ from spd.utils import (
     load_config,
     set_seed,
 )
-from spd.wandb_utils import init_wandb, save_config_to_wandb
+from spd.wandb_utils import init_wandb
 
 wandb.require("core")
 
@@ -286,7 +287,7 @@ def main(
 
     if config.wandb_project:
         config = init_wandb(config, config.wandb_project, sweep_config_path)
-        save_config_to_wandb(config)
+
     set_seed(config.seed)
     logger.info(config)
 
@@ -305,6 +306,8 @@ def main(
 
     with open(out_dir / "final_config.yaml", "w") as f:
         yaml.dump(config.model_dump(mode="json"), f, indent=2)
+    if config.wandb_project:
+        wandb.save(str(out_dir / "final_config.yaml"), base_path=out_dir)
 
     save_target_model_info(
         save_to_wandb=config.wandb_project is not None,
@@ -325,16 +328,13 @@ def main(
             device=device,
         )
     elif config.spd_type == "rank_penalty":
-        model = TMSSPDRankPenaltyModel(
-            n_instances=target_model.config.n_instances,
-            n_features=target_model.config.n_features,
-            n_hidden=target_model.config.n_hidden,
-            n_hidden_layers=target_model.config.n_hidden_layers,
+        tms_spd_rank_penalty_model_config = TMSSPDRankPenaltyModelConfig(
+            **target_model.config.model_dump(mode="json"),
             k=task_config.k,
             m=config.m,
             bias_val=task_config.bias_val,
-            device=device,
         )
+        model = TMSSPDRankPenaltyModel(config=tms_spd_rank_penalty_model_config)
     else:
         raise ValueError(f"Unknown spd_type: {config.spd_type}")
 

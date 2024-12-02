@@ -17,6 +17,7 @@ from spd.models.components import (
     InstancesParamComponentsFullRank,
     InstancesParamComponentsRankPenalty,
 )
+from spd.run_spd import Config, TMSTaskConfig
 from spd.types import WANDB_PATH_PREFIX, ModelPath, RootPath
 from spd.utils import remove_grad_parallel_to_subnetwork_vecs
 from spd.wandb_utils import download_wandb_file, fetch_latest_wandb_checkpoint, fetch_wandb_run_dir
@@ -288,51 +289,69 @@ class TMSSPDFullRankModel(SPDFullRankModel):
                 layer.subnetwork_params.data[:, subnet_idx, :, :] = stored_vals[f"hidden_{i}"]
 
 
+class TMSSPDRankPenaltyPaths(BaseModel):
+    """Paths to output files from a TMSSPDRankPenaltyModel training run."""
+
+    final_config: Path
+    tms_train_config: Path
+    checkpoint: Path
+
+
+class TMSSPDRankPenaltyModelConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    n_instances: PositiveInt
+    n_features: PositiveInt
+    n_hidden: PositiveInt
+    n_hidden_layers: NonNegativeInt
+    k: PositiveInt | None = None
+    bias_val: float
+    device: str
+    m: PositiveInt | None = None
+
+
 class TMSSPDRankPenaltyModel(SPDRankPenaltyModel):
-    def __init__(
-        self,
-        n_instances: int,
-        n_features: int,
-        n_hidden: int,
-        n_hidden_layers: int,
-        k: int | None,
-        bias_val: float,
-        m: int | None = None,
-        device: str = "cuda",
-    ):
+    def __init__(self, config: TMSSPDRankPenaltyModelConfig):
         super().__init__()
-        self.n_instances = n_instances
-        self.n_features = n_features
-        self.n_hidden = n_hidden
-        self.n_hidden_layers = n_hidden_layers
-        self.k = k if k is not None else n_features
-        self.bias_val = bias_val
+        self.config = config
+        self.n_instances = config.n_instances  # Required for backwards compatibility
+        self.n_features = config.n_features  # Required for backwards compatibility
+        self.k = config.k if config.k is not None else config.n_features
+        self.bias_val = config.bias_val
 
-        self.m = min(n_features, n_hidden) + 1 if m is None else m
+        self.m = min(config.n_features, config.n_hidden) + 1 if config.m is None else config.m
 
-        self.A = nn.Parameter(torch.empty((n_instances, self.k, n_features, self.m), device=device))
-        self.B = nn.Parameter(torch.empty((n_instances, self.k, self.m, n_hidden), device=device))
+        self.A = nn.Parameter(
+            torch.empty(
+                (config.n_instances, self.k, config.n_features, self.m), device=config.device
+            )
+        )
+        self.B = nn.Parameter(
+            torch.empty((config.n_instances, self.k, self.m, config.n_hidden), device=config.device)
+        )
 
-        bias_data = torch.zeros((n_instances, n_features), device=device) + bias_val
+        bias_data = (
+            torch.zeros((config.n_instances, config.n_features), device=config.device)
+            + config.bias_val
+        )
         self.b_final = nn.Parameter(bias_data)
 
         nn.init.xavier_normal_(self.A)
         nn.init.xavier_normal_(self.B)
 
         self.hidden_layers = None
-        if n_hidden_layers > 0:
+        if config.n_hidden_layers > 0:
             self.hidden_layers = nn.ModuleList(
                 [
                     InstancesParamComponentsRankPenalty(
-                        n_instances=n_instances,
-                        in_dim=n_hidden,
-                        out_dim=n_hidden,
+                        n_instances=config.n_instances,
+                        in_dim=config.n_hidden,
+                        out_dim=config.n_hidden,
                         k=self.k,
                         bias=False,
                         init_scale=1.0,
                         m=self.m,
                     )
-                    for _ in range(n_hidden_layers)
+                    for _ in range(config.n_hidden_layers)
                 ]
             )
 
@@ -438,10 +457,6 @@ class TMSSPDRankPenaltyModel(SPDRankPenaltyModel):
                 layer.A.data[:, subnet_idx, :, :] = stored_vals[f"hidden_{i}_A"]
                 layer.B.data[:, subnet_idx, :, :] = stored_vals[f"hidden_{i}_B"]
 
-    @classmethod
-    def from_pretrained(cls, path: str | RootPath) -> "TMSSPDRankPenaltyModel":  # type: ignore
-        pass
-
     def all_As_and_Bs(
         self,
     ) -> dict[
@@ -481,3 +496,64 @@ class TMSSPDRankPenaltyModel(SPDRankPenaltyModel):
                 assert isinstance(layer, InstancesParamComponentsRankPenalty)
                 assert layer.A.grad is not None
                 remove_grad_parallel_to_subnetwork_vecs(layer.A.data, layer.A.grad)
+
+    @staticmethod
+    def _download_wandb_files(wandb_project_run_id: str) -> TMSSPDRankPenaltyPaths:
+        """Download the relevant files from a wandb run."""
+        api = wandb.Api()
+        run: Run = api.run(wandb_project_run_id)
+
+        checkpoint = fetch_latest_wandb_checkpoint(run)
+
+        run_dir = fetch_wandb_run_dir(run.id)
+
+        final_config_path = download_wandb_file(run, run_dir, "final_config.yaml")
+        tms_train_config_path = download_wandb_file(run, run_dir, "tms_train_config.yaml")
+        checkpoint_path = download_wandb_file(run, run_dir, checkpoint.name)
+        return TMSSPDRankPenaltyPaths(
+            final_config=final_config_path,
+            tms_train_config=tms_train_config_path,
+            checkpoint=checkpoint_path,
+        )
+
+    @classmethod
+    def from_pretrained(cls, path: ModelPath) -> tuple["TMSSPDRankPenaltyModel", Config]:
+        """Fetch a pretrained model from wandb or a local path to a checkpoint.
+
+        Args:
+            path: The path to local checkpoint or wandb project. If a wandb project, the format
+                must be `wandb:entity/project/run_id`. If `api.entity` is set (e.g. via setting
+                WANDB_ENTITY in .env), this can be in the form `wandb:project/run_id` and if
+                form `wandb:project/run_id` and if `api.project` is set this can just be
+                `wandb:run_id`. If local path, assumes that `resid_mlp_train_config.yaml` and
+                `label_coeffs.json` are in the same directory as the checkpoint.
+        """
+        if isinstance(path, str) and path.startswith(WANDB_PATH_PREFIX):
+            wandb_path = path.removeprefix(WANDB_PATH_PREFIX)
+            paths = cls._download_wandb_files(wandb_path)
+        else:
+            paths = TMSSPDRankPenaltyPaths(
+                final_config=Path(path).parent / "final_config.yaml",
+                tms_train_config=Path(path).parent / "tms_train_config.yaml",
+                checkpoint=Path(path),
+            )
+
+        with open(paths.final_config) as f:
+            final_config_dict = yaml.safe_load(f)
+        config = Config(**final_config_dict)
+
+        with open(paths.tms_train_config) as f:
+            tms_train_config_dict = yaml.safe_load(f)
+
+        assert isinstance(config.task_config, TMSTaskConfig)
+        tms_spd_rank_penalty_config = TMSSPDRankPenaltyModelConfig(
+            **tms_train_config_dict,
+            k=config.task_config.k,
+            m=config.m,
+            bias_val=config.task_config.bias_val,
+            device=tms_train_config_dict["tms_model_config"]["device"],
+        )
+        model = cls(config=tms_spd_rank_penalty_config)
+        params = torch.load(paths.checkpoint, weights_only=True, map_location="cpu")
+        model.load_state_dict(params)
+        return model, config

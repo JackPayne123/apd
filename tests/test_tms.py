@@ -10,6 +10,7 @@ from spd.experiments.tms.models import (
     TMSModelConfig,
     TMSSPDFullRankModel,
     TMSSPDRankPenaltyModel,
+    TMSSPDRankPenaltyModelConfig,
 )
 from spd.experiments.tms.train_tms import TMSTrainConfig, get_model_and_dataloader, train
 from spd.run_spd import Config, TMSTaskConfig, optimize
@@ -41,15 +42,12 @@ def tms_spd_rank_penalty_happy_path(config: Config, n_hidden_layers: int = 0):
     )
     target_model = TMSModel(config=tms_model_config)
 
-    model = TMSSPDRankPenaltyModel(
-        n_instances=target_model.config.n_instances,
-        n_features=target_model.config.n_features,
-        n_hidden=target_model.config.n_hidden,
-        n_hidden_layers=target_model.config.n_hidden_layers,
+    tms_spd_rank_penalty_model_config = TMSSPDRankPenaltyModelConfig(
+        **tms_model_config.model_dump(mode="json"),
         k=config.task_config.k,
         bias_val=config.task_config.bias_val,
-        device=device,
     )
+    model = TMSSPDRankPenaltyModel(config=tms_spd_rank_penalty_model_config)
     # Randomly initialize the bias for the pretrained model
     target_model.b_final.data = torch.randn_like(target_model.b_final.data)
     # Manually set the bias for the SPD model from the bias in the pretrained model
@@ -393,17 +391,17 @@ def test_tms_spd_rank_penalty_full_rank_equivalence() -> None:
     nn.init.xavier_normal_(full_rank_model.subnetwork_params)
     full_rank_model.b_final.data = torch.randn_like(full_rank_model.b_final.data)
 
-    # Create the rank penalty model
-    rank_penalty_model = TMSSPDRankPenaltyModel(
+    rank_penalty_model_config = TMSSPDRankPenaltyModelConfig(
         n_instances=n_instances,
         n_features=n_features,
         n_hidden=n_hidden,
         n_hidden_layers=n_hidden_layers,
         k=k,
+        m=min(n_features, n_hidden) + 1,
         bias_val=0.0,
         device=device,
     )
-
+    rank_penalty_model = TMSSPDRankPenaltyModel(config=rank_penalty_model_config)
     # Copy bias
     rank_penalty_model.b_final.data = full_rank_model.b_final.data.clone()
 
