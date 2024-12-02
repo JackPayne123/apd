@@ -61,10 +61,12 @@ def plot_matrix(
     xlabel: str,
     ylabel: str,
     colorbar_format: str = "%.0f",
+    norm: plt.Normalize | None = None,
 ) -> None:
     # Useful to have bigger text for small matrices
     fontsize = 8 if matrix.numel() < 50 else 4
-    im = ax.matshow(matrix.detach().cpu().numpy(), cmap="coolwarm", norm=CenteredNorm())
+    norm = norm if norm is not None else CenteredNorm()
+    im = ax.matshow(matrix.detach().cpu().numpy(), cmap="coolwarm", norm=norm)
     # If less than 500 elements, show the values
     if matrix.numel() < 500:
         for (j, i), label in np.ndenumerate(matrix.detach().cpu().numpy()):

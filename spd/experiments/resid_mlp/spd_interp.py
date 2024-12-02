@@ -1,95 +1,156 @@
-# %%
+# %% Imports
 
+import matplotlib.pyplot as plt
+import numpy as np
+import torch
+from jaxtyping import Float
+from matplotlib.colors import Normalize
+from torch import Tensor
 
 from spd.experiments.resid_mlp.models import ResidualMLPModel, ResidualMLPSPDRankPenaltyModel
+from spd.experiments.resid_mlp.plotting import (
+    plot_individual_feature_response,
+    plot_virtual_weights,
+    relu_contribution_plot,
+    spd_calculate_virtual_weights,
+)
 from spd.experiments.resid_mlp.resid_mlp_dataset import ResidualMLPDataset
 from spd.run_spd import ResidualMLPConfig, calc_recon_mse
 from spd.utils import run_spd_forward_pass, set_seed
 
-# %%
-
-if __name__ == "__main__":
-    # Set up device and seed
-    device = "cpu"
-    print(f"Using device: {device}")
-    set_seed(0)  # You can change this seed if needed
-
-    wandb_path = (
-        "spd-resid-linear/runs/dr4jw84y"  # Solves it for 5 features but only topk_recon=0.01
-    )
-    # local_path = "spd/experiments/resid_mlp/out/fr_seed0_topk1.10e+00_topkrecon1.00e+00_topkl2_1.00e-02_lr1.00e-02_bs1024_ft5_lay1_resid5_mlp5/model_10000.pth"
-
-    # Load the pretrained SPD model
-    model, config, label_coeffs = ResidualMLPSPDRankPenaltyModel.from_wandb(wandb_path)
-
-    assert isinstance(config.task_config, ResidualMLPConfig)
-    # Path must be local
-    target_model, target_config_dict, target_label_coeffs = ResidualMLPModel.from_pretrained(
-        config.task_config.pretrained_model_path
-    )
-    assert target_label_coeffs == label_coeffs
-
-    dataset = ResidualMLPDataset(
-        n_instances=model.n_instances,
-        n_features=model.n_features,
-        feature_probability=config.task_config.feature_probability,
-        device=device,
-        calc_labels=False,  # Our labels will be the output of the target model
-        data_generation_type=config.task_config.data_generation_type,
-    )
-    batch, labels = dataset.generate_batch(config.batch_size)
-    # Print some basic information about the model
-    # print(f"Model structure:\n{model}")
-    print(f"Number of features: {model.n_features}")
-    print(f"Embedding dimension: {model.d_embed}")
-    print(f"MLP dimension: {model.d_mlp}")
-    print(f"Number of layers: {model.n_layers}")
-    print(f"Number of subnetworks (k): {model.k}")
-
-    assert config.topk is not None
-    spd_outputs = run_spd_forward_pass(
-        spd_model=model,
-        target_model=target_model,
-        input_array=batch,
-        attribution_type=config.attribution_type,
-        spd_type=config.spd_type,
-        batch_topk=config.batch_topk,
-        topk=config.topk,
-        distil_from_target=config.distil_from_target,
-    )
-    # Topk recon (Note that we're using true labels not the target model output)
-    topk_recon_loss = calc_recon_mse(spd_outputs.spd_topk_model_output, labels)
-    print(f"Topk recon loss: {topk_recon_loss}")
-    print(f"batch:\n{batch[:10]}")
-    print(f"labels:\n{labels[:10]}")
-    print(f"spd_outputs.spd_topk_model_output:\n{spd_outputs.spd_topk_model_output[:10]}")
-
-    in_matrix = model.W_E @ target_model.layers[0].input_layer.weight.T
-    print(f"target in_matrix:\n{in_matrix}")
-    for k in range(model.k):
-        in_matrix_subnet_k = model.W_E @ model.layers[0].linear1.subnetwork_params[k]
-        print(f"in_matrix_subnet{k}:\n{in_matrix_subnet_k}")
-
-    out_matrix = target_model.layers[0].output_layer.weight.T
-    print(f"target out_matrix:\n{out_matrix}")
-    for k in range(model.k):
-        out_matrix_subnet_k = model.layers[0].linear2.subnetwork_params[k]
-        print(f"out_matrix_subnet{k}:\n{out_matrix_subnet_k}")
-
-# %%
-import torch
-
-from spd.utils import REPO_ROOT
-
-# path = REPO_ROOT / "spd/experiments/resid_mlp/out/resid_mlp_identity_n-features5_d-resid5_d-mlp4_n-layers2_seed0/target_model.pth"
-path = (
-    REPO_ROOT
-    # / "spd/experiments/resid_mlp/out/resid_mlp_identity_n-features5_d-resid5_d-mlp4_n-layers2_seed0_wd0.05/target_model.pth"
-    # / "spd/experiments/resid_mlp/out/resid_mlp_identity_n-features5_d-resid5_d-mlp4_n-layers2_seed0_wd0.5/target_model.pth"
-    # / "spd/experiments/resid_mlp/out/resid_mlp_identity_n-features5_d-resid5_d-mlp4_n-layers2_seed0_l2-0.001/target_model.pth"
-    / "spd/experiments/resid_mlp/out/resid_mlp_identity_n-features5_d-resid5_d-mlp5_n-layers2_seed0_l2-0.001/target_model.pth"
+# %% Loading
+device = "cpu"
+print(f"Using device: {device}")
+set_seed(0)  # You can change this seed if needed
+wandb_path = "spd-resid-mlp/runs/001hfecp"
+# Load the pretrained SPD model
+model, config, label_coeffs = ResidualMLPSPDRankPenaltyModel.from_wandb(wandb_path)
+assert isinstance(config.task_config, ResidualMLPConfig)
+# Path must be local
+target_model, target_config_dict, target_label_coeffs = ResidualMLPModel.from_pretrained(
+    config.task_config.pretrained_model_path
 )
-with open(path, "rb") as f:
-    params = torch.load(f)
+assert torch.allclose(target_label_coeffs, torch.tensor(label_coeffs))
+dataset = ResidualMLPDataset(
+    n_instances=model.n_instances,
+    n_features=model.n_features,
+    feature_probability=config.task_config.feature_probability,
+    device=device,
+    calc_labels=False,  # Our labels will be the output of the target model
+    data_generation_type=config.task_config.data_generation_type,
+)
+batch, labels = dataset.generate_batch(config.batch_size)
+# Print some basic information about the model
+print(f"Number of features: {model.n_features}")
+print(f"Embedding dimension: {model.d_embed}")
+print(f"MLP dimension: {model.d_mlp}")
+print(f"Number of layers: {model.n_layers}")
+print(f"Number of subnetworks (k): {model.k}")
+
+target_model_output, _, _ = target_model(batch)
+
+assert config.topk is not None
+spd_outputs = run_spd_forward_pass(
+    spd_model=model,
+    target_model=target_model,
+    input_array=batch,
+    attribution_type=config.attribution_type,
+    spd_type=config.spd_type,
+    batch_topk=config.batch_topk,
+    topk=config.topk,
+    distil_from_target=config.distil_from_target,
+)
+# Topk recon (Note that we're using true labels not the target model output)
+topk_recon_loss = calc_recon_mse(
+    spd_outputs.spd_topk_model_output, target_model_output, has_instance_dim=True
+)
+print(f"Topk recon loss: {np.array(topk_recon_loss.detach())}")
+# print(f"batch:\n{batch[:10]}")
+# print(f"labels:\n{labels[:10]}")
+# print(f"spd_outputs.spd_topk_model_output:\n{spd_outputs.spd_topk_model_output[:10]}")
+
+# model.W_E @ target_model.layers[0].input_layer.weight.T
+# in_matrix = einops.einsum(
+#     model.W_E,
+#     target_model.layers[0].input_layer.weight.T,
+#     "n_instances n_features d_embed, n_instances d_embed n_features1 -> n_instances n_features n_features1",
+# )
+
+# Print param shapes for model
+for name, param in model.named_parameters():
+    print(f"{name}: {param.shape}")
+
+# %% Do usual interp plots
+
+
+class spd_dummy(ResidualMLPModel):
+    def __init__(self):
+        self.n_features = model.n_features
+        self.n_instances = model.n_instances
+
+    def __call__(self, batch: Float[Tensor, "batch n_instances"]):
+        assert config.topk is not None
+        return (
+            run_spd_forward_pass(
+                spd_model=model,
+                target_model=target_model,
+                input_array=batch,
+                attribution_type=config.attribution_type,
+                spd_type=config.spd_type,
+                batch_topk=config.batch_topk,
+                topk=config.topk,
+                distil_from_target=config.distil_from_target,
+            ).spd_topk_model_output,
+            None,
+            None,
+        )
+
+
+target_config_dict = dict(config.task_config)
+target_config_dict["n_features"] = model.n_features
+target_config_dict["d_embed"] = model.d_embed
+target_config_dict["d_mlp"] = model.d_mlp
+target_config_dict["act_fn_name"] = target_model.act_fn_name
+
+plot_individual_feature_response(spd_dummy(), device, target_config_dict)
+plot_individual_feature_response(spd_dummy(), device, target_config_dict, sweep=True)
+
+
+# %%
+
+fig = plt.figure(constrained_layout=True, figsize=(10, 50))
+gs = fig.add_gridspec(ncols=2, nrows=20 + 1 + 2)
+ax_ID = fig.add_subplot(gs[:2, :])
+ax1 = fig.add_subplot(gs[2, 0])
+ax2 = fig.add_subplot(gs[2, 1])
+virtual_weights = spd_calculate_virtual_weights(model, device, k_select="sum")
+plot_virtual_weights(virtual_weights, device, ax1=ax1, ax2=ax2, ax3=ax_ID)
+ax1.set_ylabel("sum over k")
+
+norm = Normalize(vmin=-1, vmax=1)
+for ki in range(model.k):
+    ax1 = fig.add_subplot(gs[3 + ki, 0])
+    ax2 = fig.add_subplot(gs[3 + ki, 1])
+    virtual_weights = spd_calculate_virtual_weights(model, device, k_select=ki)
+    plot_virtual_weights(virtual_weights, device, ax1=ax1, ax2=ax2, norm=norm)
+    ax1.set_ylabel(f"k={ki}")
+plt.show()
+# %%
+fig, axes1 = plt.subplots(21, 1, figsize=(10, 30), constrained_layout=True)
+axes1 = np.atleast_1d(axes1)  # type: ignore
+fig, axes2 = plt.subplots(21, 1, figsize=(5, 30), constrained_layout=True)
+axes2 = np.atleast_1d(axes2)  # type: ignore
+virtual_weights = spd_calculate_virtual_weights(model, device, k_select="sum")
+relu_contribution_plot(axes1[0], axes2[0], virtual_weights, model, device)
+for k in range(model.k):
+    virtual_weights = spd_calculate_virtual_weights(model, device, k_select=k)
+    relu_contribution_plot(axes1[k + 1], axes2[k + 1], virtual_weights, model, device)
+    axes1[k + 1].set_ylabel(f"k={k}")
+    axes2[k + 1].set_ylabel(f"k={k}")
+    if k < model.k - 1:
+        axes1[k + 1].set_xlabel("")
+        axes2[k + 1].set_xlabel("")
+plt.show()
+
 
 # %%

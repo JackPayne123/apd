@@ -51,8 +51,10 @@ plt.show()
 
 # %% Show connection strength between ReLUs and features
 virtual_weights = calculate_virtual_weights(model=model, device=device)
-fig = relu_contribution_plot(
-    virtual_weights=virtual_weights, model=model, device=device, instance_idx=0
+fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 5), constrained_layout=True)  # type: ignore
+
+relu_contribution_plot(
+    ax1=ax1, ax2=ax2, virtual_weights=virtual_weights, model=model, device=device, instance_idx=0
 )
 plt.show()
 

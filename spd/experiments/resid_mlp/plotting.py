@@ -1,4 +1,4 @@
-from typing import Any
+from typing import Any, Literal
 
 import einops
 import matplotlib.pyplot as plt
@@ -203,7 +203,9 @@ def calculate_virtual_weights(model: ResidualMLPModel, device: str) -> dict[str,
 
 
 def relu_contribution_plot(
-    virtual_weights: dict[str, Tensor],
+    ax1: plt.Axes,
+    ax2: plt.Axes,
+    virtual_weights: dict[str, Float[Tensor, "i j"]],
     model: ResidualMLPModel | ResidualMLPSPDRankPenaltyModel,
     device: str,
     instance_idx: int = 0,
@@ -215,16 +217,17 @@ def relu_contribution_plot(
     n_layers = model.n_layers
     n_features = model.n_features
 
-    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 5), constrained_layout=True)  # type: ignore
     ax1.set_title("How much does each ReLU contribute to each feature?")
     ax1.axvline(-0.5, color="k", linestyle="--", alpha=0.3, lw=0.5)
     for i in range(n_features):
         ax1.scatter([i] * d_mlp * n_layers, diag_relu_conns[i, :], alpha=0.3, marker=".", c="k")
         ax1.axvline(i + 0.5, color="k", linestyle="--", alpha=0.3, lw=0.5)
         for j in range(d_mlp * n_layers):
-            if diag_relu_conns[i, j] > 0.1:
+            if diag_relu_conns[i, j].item() > 0.1:
                 cmap_label = plt.get_cmap("hsv")
-                ax1.text(i, diag_relu_conns[i, j], str(j), color=cmap_label(j / d_mlp / n_layers))
+                ax1.text(
+                    i, diag_relu_conns[i, j].item(), str(j), color=cmap_label(j / d_mlp / n_layers)
+                )
     ax1.axhline(0, color="k", linestyle="--", alpha=0.3)
     ax1.set_xlabel("Features")
     ax1.set_ylabel("Weights to ReLUs")
@@ -236,14 +239,13 @@ def relu_contribution_plot(
         ax2.scatter([i] * n_features, diag_relu_conns[:, i], alpha=0.3, marker=".", c="k")
         ax2.axvline(i + 0.5, color="k", linestyle="--", alpha=0.3, lw=0.5)
         for j in range(n_features):
-            if diag_relu_conns[j, i] > 0.2:
+            if diag_relu_conns[j, i].item() > 0.2:
                 cmap_label = plt.get_cmap("hsv")
-                ax2.text(i, diag_relu_conns[j, i], str(j), color=cmap_label(j / n_features))
+                ax2.text(i, diag_relu_conns[j, i].item(), str(j), color=cmap_label(j / n_features))
     ax2.axhline(0, color="k", linestyle="--", alpha=0.3)
     ax2.set_xlabel("ReLUs (consecutively enumerated throughout layers)")
     ax2.set_ylabel("Weights to features")
     ax2.set_xlim(-0.5, d_mlp * n_layers - 0.5)
-    return fig
 
 
 def plot_virtual_weights(
@@ -253,6 +255,7 @@ def plot_virtual_weights(
     ax2: plt.Axes,
     ax3: plt.Axes | None = None,
     instance_idx: int = 0,
+    norm: plt.Normalize | None = None,
 ):
     in_conns = virtual_weights["in_conns"][instance_idx].cpu().detach()
     out_conns = virtual_weights["out_conns"][instance_idx].cpu().detach()
@@ -261,8 +264,121 @@ def plot_virtual_weights(
         virtual_weights["W_U"][instance_idx],
         "n_features1 d_embed, d_embed n_features2 -> n_features1 n_features2",
     )
-    plot_matrix(ax1, in_conns.T, "Virtual input weights $(W_E W_{in})^T$", "Features", "Neurons")
-    plot_matrix(ax2, out_conns, "Virtual output weights $W_{out} W_U$", "Features", "Neurons")
+    plot_matrix(
+        ax1,
+        in_conns.T,
+        "Virtual input weights $(W_E W_{in})^T$",
+        "Features",
+        "Neurons",
+        colorbar_format="%.2f",
+        norm=norm,
+    )
+    plot_matrix(
+        ax2,
+        out_conns,
+        "Virtual output weights $W_{out} W_U$",
+        "Features",
+        "Neurons",
+        colorbar_format="%.2f",
+        norm=norm,
+    )
     ax2.xaxis.set_label_position("top")
     if ax3 is not None:
-        plot_matrix(ax3, W_E_W_U, "Virtual weights $W_E W_U$", "Features", "Features")
+        plot_matrix(
+            ax3,
+            W_E_W_U,
+            "Virtual weights $W_E W_U$",
+            "Features",
+            "Features",
+            colorbar_format="%.2f",
+            norm=norm,
+        )
+
+
+def spd_calculate_virtual_weights(
+    model: ResidualMLPSPDRankPenaltyModel, device: str, k_select: int | Literal["sum"] = 0
+) -> dict[str, Tensor]:
+    """Currently ignoring interactions between layers. Just flattening (n_layers, d_mlp)"""
+    n_instances = model.n_instances
+    n_features = model.n_features
+    d_embed = model.d_embed
+    d_mlp = model.d_mlp
+    k_max = model.k
+    has_bias1 = model.layers[0].linear1.bias is not None
+    has_bias2 = model.layers[0].linear2.bias is not None
+    n_layers = model.n_layers
+    # Get weights
+    W_E: Float[Tensor, "n_instances n_features d_embed"] = model.W_E
+    W_U: Float[Tensor, "n_instances d_embed n_features"] = model.W_U
+    W_in: Float[Tensor, "n_instances k d_embed d_mlp_eff"] = torch.cat(
+        [model.layers[i].linear1.subnetwork_params for i in range(n_layers)], dim=-1
+    )
+    W_out: Float[Tensor, "n_instances k d_mlp_eff d_embed"] = torch.cat(
+        [model.layers[i].linear2.subnetwork_params for i in range(n_layers)],
+        dim=-2,
+    )
+    b_in: Float[Tensor, "n_instances k d_mlp_eff"] | None = (
+        torch.cat([model.layers[i].linear1.bias for i in range(n_layers)], dim=-1)
+        if has_bias1
+        else None
+    )
+    b_out: Float[Tensor, "n_instances k d_embed"] | None = (
+        torch.stack([model.layers[i].linear2.bias for i in range(n_layers)]).sum(dim=0)
+        if has_bias2
+        else None
+    )
+    # model.layers[0].linear1.subnetwork_params()
+    assert W_E.shape == (n_instances, n_features, d_embed)
+    assert W_U.shape == (n_instances, d_embed, n_features)
+    assert W_in.shape == (n_instances, k_max, d_embed, n_layers * d_mlp)
+    assert W_out.shape == (n_instances, k_max, n_layers * d_mlp, d_embed)
+    assert b_in.shape == (n_instances, k_max, n_layers * d_mlp) if b_in is not None else True
+    assert b_out.shape == (n_instances, k_max, d_embed) if b_out is not None else True
+    # Calculate connection strengths / virtual weights
+    in_conns: Float[Tensor, "n_instances k, n_features d_mlp"] = einops.einsum(
+        W_E,
+        W_in,
+        "n_instances n_features d_embed, n_instances k d_embed d_mlp -> n_instances k n_features d_mlp",
+    )
+    out_conns: Float[Tensor, "n_instances k, d_mlp n_features"] = einops.einsum(
+        W_out,
+        W_E,
+        "n_instances k d_mlp d_embed, n_instances n_features d_embed -> n_instances k d_mlp n_features",
+    )
+    diag_relu_conns: Float[Tensor, "n_instances k, n_features d_mlp"] = einops.einsum(
+        in_conns,
+        out_conns,
+        "n_instances k n_features d_mlp, n_instances k d_mlp n_features -> n_instances k n_features d_mlp",
+    )
+    assert in_conns.shape == (n_instances, k_max, n_features, n_layers * d_mlp)
+    assert out_conns.shape == (n_instances, k_max, n_layers * d_mlp, n_features)
+    assert diag_relu_conns.shape == (n_instances, k_max, n_features, n_layers * d_mlp)
+    if k_select == "sum":
+        virtual_weights = {
+            "W_E": W_E,
+            "W_U": W_U,
+            "W_in": W_in.sum(dim=1),
+            "W_out": W_out.sum(dim=1),
+            "in_conns": in_conns.sum(dim=1),
+            "out_conns": out_conns.sum(dim=1),
+            "diag_relu_conns": diag_relu_conns.sum(dim=1),
+        }
+        if b_in is not None:
+            virtual_weights["b_in"] = b_in.sum(dim=1)
+        if b_out is not None:
+            virtual_weights["b_out"] = b_out.sum(dim=1)
+    else:
+        virtual_weights = {
+            "W_E": W_E,
+            "W_U": W_U,
+            "W_in": W_in[:, k_select],
+            "W_out": W_out[:, k_select],
+            "in_conns": in_conns[:, k_select],
+            "out_conns": out_conns[:, k_select],
+            "diag_relu_conns": diag_relu_conns[:, k_select],
+        }
+        if b_in is not None:
+            virtual_weights["b_in"] = b_in[:, k_select]
+        if b_out is not None:
+            virtual_weights["b_out"] = b_out[:, k_select]
+    return virtual_weights
