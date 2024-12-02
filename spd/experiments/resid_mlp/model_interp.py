@@ -58,7 +58,7 @@ plt.show()
 
 
 # %% Plot virtual weights
-fig = plot_virtual_weights(model, device)
+fig = plot_virtual_weights(model, device, figsize=(20, 20))
 plt.show()
 
 # %%

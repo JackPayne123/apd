@@ -154,6 +154,8 @@ def run_train(config: Config, device: str) -> Float[Tensor, " n_instances"]:
         f"resid_mlp_identity_{config.label_type}_n-instances{config.n_instances}_"
         f"n-features{config.n_features}_d-resid{config.d_embed}_"
         f"d-mlp{config.d_mlp}_n-layers{config.n_layers}_seed{config.seed}"
+        f"_p{config.feature_probability}_random_embedding_{config.fixed_random_embedding}_"
+        f"identity_embedding_{config.fixed_identity_embedding}_bias_{config.in_bias}_{config.out_bias}"
     )
     out_dir = Path(__file__).parent / "out" / run_name
 

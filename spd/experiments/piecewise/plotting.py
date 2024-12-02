@@ -65,8 +65,10 @@ def plot_matrix(
     # Useful to have bigger text for small matrices
     fontsize = 8 if matrix.numel() < 50 else 4
     im = ax.matshow(matrix.detach().cpu().numpy(), cmap="coolwarm", norm=CenteredNorm())
-    for (j, i), label in np.ndenumerate(matrix.detach().cpu().numpy()):
-        ax.text(i, j, f"{label:.2f}", ha="center", va="center", fontsize=fontsize)
+    # If less than 500 elements, show the values
+    if matrix.numel() < 500:
+        for (j, i), label in np.ndenumerate(matrix.detach().cpu().numpy()):
+            ax.text(i, j, f"{label:.2f}", ha="center", va="center", fontsize=fontsize)
     ax.set_xlabel(xlabel)
     if ylabel != "":
         ax.set_ylabel(ylabel)

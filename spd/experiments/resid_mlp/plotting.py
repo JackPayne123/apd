@@ -5,10 +5,10 @@ import matplotlib.pyplot as plt
 import torch
 import torch.nn.functional as F
 from jaxtyping import Float
-from matplotlib.colors import CenteredNorm
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 from torch import Tensor
 
+from spd.experiments.piecewise.plotting import plot_matrix
 from spd.experiments.resid_mlp.models import ResidualMLPModel
 
 
@@ -241,19 +241,24 @@ def relu_contribution_plot(model: ResidualMLPModel, device: str, instance_idx: i
     return fig
 
 
-def plot_virtual_weights(model: ResidualMLPModel, device: str, instance_idx: int = 0):
+def plot_virtual_weights(
+    model: ResidualMLPModel, device: str, instance_idx: int = 0, figsize: tuple[int, int] = (10, 10)
+):
     virtual_weights = _calculate_virtual_weights(model, device)
     in_conns = virtual_weights["in_conns"][instance_idx].cpu().detach()
     out_conns = virtual_weights["out_conns"][instance_idx].cpu().detach()
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(8, 20), constrained_layout=True)  # type: ignore
-    ax1.matshow(in_conns.T, norm=CenteredNorm(), cmap="RdBu")
-    ax1.set_title("Virtual input weights $(W_E W_{in})^T$")
-    ax1.xaxis.set_label_position("top")
-    ax1.set_xlabel("Features")
-    ax1.set_ylabel("Neurons")
-    ax2.matshow(out_conns, norm=CenteredNorm(), cmap="RdBu")
-    ax2.set_title("Virtual output weights $W_{out} W_U$")
+    W_E_W_U = einops.einsum(
+        virtual_weights["W_E"][instance_idx],
+        virtual_weights["W_U"][instance_idx],
+        "n_features1 d_embed, d_embed n_features2 -> n_features1 n_features2",
+    )
+    fig = plt.figure(constrained_layout=True, figsize=figsize)
+    gs = fig.add_gridspec(ncols=2, nrows=3)
+    ax1 = fig.add_subplot(gs[0, 0])
+    plot_matrix(ax1, in_conns.T, "Virtual input weights $(W_E W_{in})^T$", "Features", "Neurons")
+    ax2 = fig.add_subplot(gs[0, 1])
+    plot_matrix(ax2, out_conns, "Virtual output weights $W_{out} W_U$", "Features", "Neurons")
     ax2.xaxis.set_label_position("top")
-    ax2.set_xlabel("Features")
-    ax2.set_ylabel("Neurons")
+    ax3 = fig.add_subplot(gs[1:, :])
+    plot_matrix(ax3, W_E_W_U, "Virtual weights $W_E W_U$", "Features", "Features")
     return fig

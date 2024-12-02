@@ -51,8 +51,7 @@ def test_train(
 
     set_seed(config.seed)
     loss = run_train(config, device)
-    loss_as_previously_computed = loss * config.n_features
-    loss_dict = {i: loss_as_previously_computed[i].item() for i in range(n_instances)}
+    loss_dict = {i: loss[i].item() for i in range(n_instances)}
     return loss_dict
 
 
@@ -138,6 +137,7 @@ if __name__ == "__main__":
     plt.show()
 
     # Scale p
+    d_embed = 10 * n_features
     fig, axes = plt.subplots(nrows=2, ncols=2, figsize=(10, 10), constrained_layout=True)
     fig.suptitle(f"Loss scaling with p. Using {n_instances} instances")
     ps = np.array([0.01, 0.1, 0.5, 1.0])
