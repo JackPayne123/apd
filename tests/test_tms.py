@@ -7,6 +7,7 @@ from jaxtyping import Float
 
 from spd.experiments.tms.models import (
     TMSModel,
+    TMSModelConfig,
     TMSSPDFullRankModel,
     TMSSPDRankPenaltyModel,
 )
@@ -43,13 +44,14 @@ def tms_spd_rank_penalty_happy_path(config: Config, n_hidden_layers: int = 0):
         device=device,
     )
     # For our pretrained model, just use a randomly initialized TMS model
-    pretrained_model = TMSModel(
+    tms_model_config = TMSModelConfig(
         n_instances=config.task_config.n_instances,
         n_features=config.task_config.n_features,
         n_hidden=config.task_config.n_hidden,
         n_hidden_layers=n_hidden_layers,
         device=device,
     )
+    pretrained_model = TMSModel(config=tms_model_config)
     # Randomly initialize the bias for the pretrained model
     pretrained_model.b_final.data = torch.randn_like(pretrained_model.b_final.data)
     # Manually set the bias for the SPD model from the bias in the pretrained model
@@ -188,10 +190,13 @@ def test_train_tms_happy_path():
     set_seed(0)
     # Set up a small configuration
     config = TMSTrainConfig(
-        n_features=3,
-        n_hidden=2,
-        n_instances=2,
-        n_hidden_layers=0,
+        tms_model_config=TMSModelConfig(
+            n_features=3,
+            n_hidden=2,
+            n_instances=2,
+            n_hidden_layers=0,
+            device=device,
+        ),
         feature_probability=0.1,
         batch_size=32,
         steps=5,
@@ -208,7 +213,7 @@ def test_train_tms_happy_path():
     initial_out, _, _ = model(batch)
     initial_loss = torch.mean((labels.abs() - initial_out) ** 2)
 
-    train(model, dataloader, steps=config.steps, print_freq=1000)
+    train(model, dataloader, steps=config.steps, print_freq=1000, log_wandb=False)
 
     # Calculate final loss
     final_out, _, _ = model(batch)
@@ -225,10 +230,13 @@ def test_tms_train_fixed_identity():
     device = "cpu"
     set_seed(0)
     config = TMSTrainConfig(
-        n_features=3,
-        n_hidden=2,
-        n_instances=2,
-        n_hidden_layers=2,
+        tms_model_config=TMSModelConfig(
+            n_features=3,
+            n_hidden=2,
+            n_instances=2,
+            n_hidden_layers=2,
+            device=device,
+        ),
         feature_probability=0.1,
         batch_size=32,
         steps=2,
@@ -240,14 +248,16 @@ def test_tms_train_fixed_identity():
 
     model, dataloader = get_model_and_dataloader(config, device)
 
-    eye = torch.eye(config.n_hidden, device=device).expand(config.n_instances, -1, -1)
+    eye = torch.eye(config.tms_model_config.n_hidden, device=device).expand(
+        config.tms_model_config.n_instances, -1, -1
+    )
 
     assert model.hidden_layers is not None
     # Assert that this is an identity matrix
     initial_hidden = model.hidden_layers[0].data.clone()
     assert torch.allclose(initial_hidden, eye), "Initial hidden layer is not identity"
 
-    train(model, dataloader, steps=config.steps, print_freq=1000)
+    train(model, dataloader, steps=config.steps, print_freq=1000, log_wandb=False)
 
     # Assert that the hidden layers remains identity
     assert torch.allclose(model.hidden_layers[0].data, eye), "Hidden layer changed"
@@ -258,10 +268,13 @@ def test_tms_train_fixed_random():
     device = "cpu"
     set_seed(0)
     config = TMSTrainConfig(
-        n_features=3,
-        n_hidden=2,
-        n_instances=2,
-        n_hidden_layers=2,
+        tms_model_config=TMSModelConfig(
+            n_features=3,
+            n_hidden=2,
+            n_instances=2,
+            n_hidden_layers=2,
+            device=device,
+        ),
         feature_probability=0.1,
         batch_size=32,
         steps=2,
@@ -276,7 +289,7 @@ def test_tms_train_fixed_random():
     assert model.hidden_layers is not None
     initial_hidden = model.hidden_layers[0].data.clone()
 
-    train(model, dataloader, steps=config.steps, print_freq=1000)
+    train(model, dataloader, steps=config.steps, print_freq=1000, log_wandb=False)
 
     # Assert that the hidden layers are unchanged
     assert torch.allclose(model.hidden_layers[0].data, initial_hidden), "Hidden layer changed"
@@ -289,31 +302,29 @@ def test_tms_spd_full_rank_equivalence(n_hidden_layers: int) -> None:
     set_seed(0)
 
     batch_size = 4
-    n_features = 3
-    n_hidden = 2
-    n_instances = 1
     k = 1  # Single subnetwork
 
     device = "cpu"
 
     # Create a target TMSModel
-    target_model = TMSModel(
-        n_instances=n_instances,
-        n_features=n_features,
-        n_hidden=n_hidden,
+    tms_model_config = TMSModelConfig(
+        n_instances=1,
+        n_features=3,
+        n_hidden=2,
         n_hidden_layers=n_hidden_layers,
         device=device,
     )
+    target_model = TMSModel(config=tms_model_config)
 
     # Make the biases non-zero
     target_model.b_final.data = torch.randn_like(target_model.b_final.data)
 
     # Create the SPD model with k=1
     spd_model = TMSSPDFullRankModel(
-        n_instances=n_instances,
-        n_features=n_features,
-        n_hidden=n_hidden,
-        n_hidden_layers=n_hidden_layers,
+        n_instances=target_model.config.n_instances,
+        n_features=target_model.config.n_features,
+        n_hidden=target_model.config.n_hidden,
+        n_hidden_layers=target_model.config.n_hidden_layers,
         k=k,
         bias_val=0.0,
         device=device,
@@ -331,7 +342,7 @@ def test_tms_spd_full_rank_equivalence(n_hidden_layers: int) -> None:
 
     # Create a random input
     input_data: Float[torch.Tensor, "batch n_instances n_features"] = torch.rand(
-        batch_size, n_instances, n_features, device=device
+        batch_size, target_model.config.n_instances, target_model.config.n_features, device=device
     )
 
     # Forward pass through both models

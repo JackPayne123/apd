@@ -296,20 +296,20 @@ def main(
     if config.spd_type == "full_rank":
         # Note that we don't currently support n_hidden_layers for full rank
         model = TMSSPDFullRankModel(
-            n_instances=target_model.n_instances,
-            n_features=target_model.n_features,
-            n_hidden=target_model.n_hidden,
-            n_hidden_layers=target_model.n_hidden_layers,
+            n_instances=target_model.config.n_instances,
+            n_features=target_model.config.n_features,
+            n_hidden=target_model.config.n_hidden,
+            n_hidden_layers=target_model.config.n_hidden_layers,
             k=task_config.k,
             bias_val=task_config.bias_val,
             device=device,
         )
     elif config.spd_type == "rank_penalty":
         model = TMSSPDRankPenaltyModel(
-            n_instances=target_model.n_instances,
-            n_features=target_model.n_features,
-            n_hidden=target_model.n_hidden,
-            n_hidden_layers=target_model.n_hidden_layers,
+            n_instances=target_model.config.n_instances,
+            n_features=target_model.config.n_features,
+            n_hidden=target_model.config.n_hidden,
+            n_hidden_layers=target_model.config.n_hidden_layers,
             k=task_config.k,
             m=config.m,
             bias_val=task_config.bias_val,
