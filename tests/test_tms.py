@@ -12,11 +12,11 @@ from spd.experiments.tms.models import (
     TMSSPDRankPenaltyModel,
 )
 from spd.experiments.tms.train_tms import TMSTrainConfig, get_model_and_dataloader, train
-from spd.run_spd import Config, TMSConfig, optimize
+from spd.run_spd import Config, TMSTaskConfig, optimize
 from spd.utils import DatasetGeneratedDataLoader, SparseFeatureDataset, set_seed
 
 # Create a simple TMS config that we can use in multiple tests
-TMS_TASK_CONFIG = TMSConfig(
+TMS_TASK_CONFIG = TMSTaskConfig(
     task_name="tms",
     n_features=5,
     n_hidden=2,
@@ -32,7 +32,7 @@ TMS_TASK_CONFIG = TMSConfig(
 def tms_spd_rank_penalty_happy_path(config: Config, n_hidden_layers: int = 0):
     set_seed(0)
     device = "cpu"
-    assert isinstance(config.task_config, TMSConfig)
+    assert isinstance(config.task_config, TMSTaskConfig)
 
     model = TMSSPDRankPenaltyModel(
         n_instances=config.task_config.n_instances,

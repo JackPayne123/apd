@@ -24,7 +24,7 @@ from spd.experiments.tms.models import (
     TMSSPDRankPenaltyModel,
 )
 from spd.log import logger
-from spd.run_spd import Config, TMSConfig, get_common_run_name_suffix, optimize
+from spd.run_spd import Config, TMSTaskConfig, get_common_run_name_suffix, optimize
 from spd.utils import (
     DatasetGeneratedDataLoader,
     SparseFeatureDataset,
@@ -37,7 +37,7 @@ from spd.wandb_utils import init_wandb, save_config_to_wandb
 wandb.require("core")
 
 
-def get_run_name(config: Config, task_config: TMSConfig) -> str:
+def get_run_name(config: Config, task_config: TMSTaskConfig) -> str:
     """Generate a run name based on the config."""
     if config.wandb_run_name:
         run_suffix = config.wandb_run_name
@@ -242,7 +242,7 @@ def make_plots(
 
     if config.topk is not None:
         assert topk_mask is not None
-        assert isinstance(config.task_config, TMSConfig)
+        assert isinstance(config.task_config, TMSTaskConfig)
         attribution_scores = collect_subnetwork_attributions(
             model, device, spd_type=config.spd_type, n_instances=config.task_config.n_instances
         )
@@ -262,7 +262,7 @@ def main(
 ) -> None:
     config = load_config(config_path_or_obj, config_model=Config)
     task_config = config.task_config
-    assert isinstance(task_config, TMSConfig)
+    assert isinstance(task_config, TMSTaskConfig)
 
     if config.wandb_project:
         config = init_wandb(config, config.wandb_project, sweep_config_path)

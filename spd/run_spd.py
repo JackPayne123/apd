@@ -30,7 +30,7 @@ from spd.types import ModelPath, Probability, RootPath
 from spd.utils import calc_topk_mask, calculate_attributions
 
 
-class TMSConfig(BaseModel):
+class TMSTaskConfig(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
     task_name: Literal["tms"] = "tms"
     n_features: PositiveInt
@@ -41,10 +41,10 @@ class TMSConfig(BaseModel):
     feature_probability: Probability
     train_bias: bool
     bias_val: float
-    pretrained_model_path: RootPath
     data_generation_type: Literal["exactly_one_active", "at_least_zero_active"] = (
         "at_least_zero_active"
     )
+    pretrained_model_path: ModelPath  # e.g. wandb:spd-tms/runs/si0zbfxf
 
 
 class DeepLinearConfig(BaseModel):
@@ -138,7 +138,7 @@ class Config(BaseModel):
     task_config: (
         DeepLinearConfig
         | PiecewiseConfig
-        | TMSConfig
+        | TMSTaskConfig
         | ResidualLinearConfig
         | ResidualMLPTaskConfig
     ) = Field(..., discriminator="task_name")
