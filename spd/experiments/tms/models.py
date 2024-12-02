@@ -72,7 +72,7 @@ class TMSModel(Model):
 
     def all_decomposable_params(self) -> dict[str, Float[Tensor, "n_instances d_in d_out"]]:
         """Dictionary of all parameters which will be decomposed with SPD."""
-        params = {"W": self.W, "W_T": rearrange(self.W, "i f h -> i h f")}
+        params: dict[str, torch.Tensor] = {"W": self.W, "W_T": rearrange(self.W, "i f h -> i h f")}
         if self.hidden_layers is not None:
             for i, layer in enumerate(self.hidden_layers):
                 params[f"hidden_{i}"] = layer
@@ -110,17 +110,22 @@ class TMSSPDFullRankModel(SPDFullRankModel):
     def all_subnetwork_params(
         self,
     ) -> dict[str, Float[Tensor, "n_instances k d_layer_in d_layer_out"]]:
-        return {
+        params: dict[str, Float[Tensor, "n_instances k d_layer_in d_layer_out"]] = {
             "W": self.subnetwork_params,
             "W_T": rearrange(self.subnetwork_params, "i k f h -> i k h f"),
         }
+        return params
 
     def all_subnetwork_params_summed(
         self,
     ) -> dict[str, Float[Tensor, "n_instances d_layer_in d_layer_out"]]:
         """All subnetwork params summed over the subnetwork dimension."""
-        summed_params = self.subnetwork_params.sum(dim=-3)
-        return {"W": summed_params, "W_T": rearrange(summed_params, "i f h -> i h f")}
+        summed_subnet_params = self.subnetwork_params.sum(dim=-3)
+        summed_params: dict[str, Float[Tensor, "n_instances d_layer_in d_layer_out"]] = {
+            "W": summed_subnet_params,
+            "W_T": rearrange(summed_subnet_params, "i f h -> i h f"),
+        }
+        return summed_params
 
     def forward(
         self,
@@ -239,7 +244,7 @@ class TMSSPDRankPenaltyModel(SPDRankPenaltyModel):
         W_T = einops.rearrange(
             W, "n_instances k n_features n_hidden -> n_instances k n_hidden n_features"
         )
-        params = {"W": W, "W_T": W_T}
+        params: dict[str, Float[Tensor, "n_instances k d_in d_out"]] = {"W": W, "W_T": W_T}
         if self.hidden_layers is not None:
             for i, layer in enumerate(self.hidden_layers):
                 assert isinstance(layer, InstancesParamComponentsRankPenalty)
@@ -252,7 +257,10 @@ class TMSSPDRankPenaltyModel(SPDRankPenaltyModel):
 
     def all_subnetwork_params_summed(self) -> dict[str, Float[Tensor, "n_instances d_in d_out"]]:
         """All subnetwork params summed over the subnetwork dimension."""
-        return {p_name: p.sum(dim=1) for p_name, p in self.all_subnetwork_params().items()}
+        summed_params: dict[str, Float[Tensor, "n_instances d_in d_out"]] = {
+            p_name: p.sum(dim=1) for p_name, p in self.all_subnetwork_params().items()
+        }
+        return summed_params
 
     def forward(
         self,
@@ -338,7 +346,10 @@ class TMSSPDRankPenaltyModel(SPDRankPenaltyModel):
         str, tuple[Float[Tensor, "n_instances k d_in m"], Float[Tensor, "n_instances k m d_out"]]
     ]:
         """Get all A and B matrices. Note that this won't return bias components."""
-        params = {
+        params: dict[
+            str,
+            tuple[Float[Tensor, "n_instances k d_in m"], Float[Tensor, "n_instances k m d_out"]],
+        ] = {
             "W": (self.A, self.B),
             "W_T": (
                 rearrange(self.B, "i k m h -> i k h m"),
