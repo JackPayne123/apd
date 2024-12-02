@@ -60,7 +60,6 @@ fig = plot_2d_snr(model, device)
 plt.show()
 
 # %% Show connection strength between ReLUs and features
-# Only valid for n_layers=1
 fig = relu_contribution_plot(model, device)
 plt.show()
 
