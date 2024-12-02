@@ -55,16 +55,15 @@ fig = plot_individual_feature_response(
 )
 plt.show()
 
-# %% Calculate S/N ratio for 1 and 2 active features.
-fig = plot_2d_snr(model, device)
-plt.show()
-
 # %% Show connection strength between ReLUs and features
 fig = relu_contribution_plot(model, device)
 plt.show()
 
-# %%
+# %% Calculate S/N ratio for 1 and 2 active features.
+fig = plot_2d_snr(model, device)
+plt.show()
 
+# %% Plot virtual weights
 fig = plot_virtual_weights(model, device)
 plt.show()
 
