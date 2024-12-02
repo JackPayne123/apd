@@ -197,7 +197,7 @@ if __name__ == "__main__":
     config = TMSTrainConfig(
         n_features=5,
         n_hidden=2,
-        n_hidden_layers=1,
+        n_hidden_layers=2,
         n_instances=12,
         feature_probability=0.05,
         batch_size=1024,

@@ -233,6 +233,8 @@ def make_plots(
     **_,
 ) -> dict[str, plt.Figure]:
     plots = {}
+    if model.hidden_layers is not None:
+        logger.warning("Only plotting the W matrix params and not the hidden layers.")
     plots["subnetwork_params"] = plot_subnetwork_params(model, step, out_dir)
 
     if config.topk is not None:
@@ -276,22 +278,33 @@ def main(
         yaml.dump(config.model_dump(mode="json"), f, indent=2)
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
+
+    target_model = TMSModel(
+        n_instances=task_config.n_instances,
+        n_features=task_config.n_features,
+        n_hidden=task_config.n_hidden,
+        n_hidden_layers=task_config.n_hidden_layers,
+        device=device,
+    )
+    target_model.load_state_dict(torch.load(task_config.pretrained_model_path, map_location=device))
+    target_model.eval()
+
     if config.spd_type == "full_rank":
         # Note that we don't currently support n_hidden_layers for full rank
         model = TMSSPDFullRankModel(
-            n_instances=task_config.n_instances,
-            n_features=task_config.n_features,
-            n_hidden=task_config.n_hidden,
+            n_instances=target_model.n_instances,
+            n_features=target_model.n_features,
+            n_hidden=target_model.n_hidden,
             k=task_config.k,
             bias_val=task_config.bias_val,
             device=device,
         )
     elif config.spd_type == "rank_penalty":
         model = TMSSPDRankPenaltyModel(
-            n_instances=task_config.n_instances,
-            n_features=task_config.n_features,
-            n_hidden=task_config.n_hidden,
-            n_hidden_layers=task_config.n_hidden_layers,
+            n_instances=target_model.n_instances,
+            n_features=target_model.n_features,
+            n_hidden=target_model.n_hidden,
+            n_hidden_layers=target_model.n_hidden_layers,
             k=task_config.k,
             m=config.m,
             bias_val=task_config.bias_val,
@@ -300,22 +313,11 @@ def main(
     else:
         raise ValueError(f"Unknown spd_type: {config.spd_type}")
 
-    pretrained_model = TMSModel(
-        n_instances=task_config.n_instances,
-        n_features=task_config.n_features,
-        n_hidden=task_config.n_hidden,
-        n_hidden_layers=task_config.n_hidden_layers,
-        device=device,
-    )
-    pretrained_model.load_state_dict(
-        torch.load(task_config.pretrained_model_path, map_location=device)
-    )
-    pretrained_model.eval()
     if task_config.handcoded:
-        model.set_handcoded_spd_params(pretrained_model)
+        model.set_handcoded_spd_params(target_model)
 
     # Manually set the bias for the SPD model from the bias in the pretrained model
-    model.b_final.data[:] = pretrained_model.b_final.data.clone()
+    model.b_final.data[:] = target_model.b_final.data.clone()
 
     if not task_config.train_bias:
         model.b_final.requires_grad = False
@@ -345,7 +347,7 @@ def main(
         out_dir=out_dir,
         device=device,
         dataloader=dataloader,
-        pretrained_model=pretrained_model,
+        pretrained_model=target_model,
         param_map=param_map,
         plot_results_fn=make_plots,
     )
