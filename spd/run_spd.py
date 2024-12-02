@@ -299,6 +299,7 @@ def calc_recon_mse(
     labels: Float[Tensor, "batch n_features"] | Float[Tensor, "batch n_instances n_features"],
     has_instance_dim: bool = False,
 ) -> Float[Tensor, ""] | Float[Tensor, " n_instances"]:
+    n_features = output.shape[-1]
     recon_loss = (output - labels) ** 2
     if recon_loss.ndim == 3:
         assert has_instance_dim
@@ -307,7 +308,7 @@ def calc_recon_mse(
         recon_loss = recon_loss.mean()
     else:
         raise ValueError(f"Expected 2 or 3 dims in recon_loss, got {recon_loss.ndim}")
-    return recon_loss
+    return recon_loss  # * n_features
 
 
 def calc_topk_l2_rank_one(
@@ -908,7 +909,8 @@ def optimize(
         if config.topk is not None:
             # We always assume the final subnetwork is the one we want to distil
             topk_attrs = attributions[..., :-1] if config.distil_from_target else attributions
-            topk_mask = calc_topk_mask(topk_attrs, config.topk, batch_topk=config.batch_topk)
+            topk_mask = (batch.abs() > 0).float()
+            # topk_mask = calc_topk_mask(topk_attrs, config.topk, batch_topk=config.batch_topk)
             if config.distil_from_target:
                 # Add back the final subnetwork index to the topk mask and set it to True
                 last_subnet_mask = torch.ones(
@@ -1077,6 +1079,7 @@ def optimize(
             plot_results_fn is not None
             and config.image_freq is not None
             and step % config.image_freq == 0
+            and step > 0
         ):
             fig_dict = plot_results_fn(
                 model=model,
