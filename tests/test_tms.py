@@ -1,5 +1,6 @@
 from pathlib import Path
 
+import pytest
 import torch
 import torch.nn as nn
 from jaxtyping import Float
@@ -27,7 +28,7 @@ TMS_TASK_CONFIG = TMSConfig(
 )
 
 
-def tms_spd_rank_penalty_happy_path(config: Config):
+def tms_spd_rank_penalty_happy_path(config: Config, n_hidden_layers: int = 0):
     set_seed(0)
     device = "cpu"
     assert isinstance(config.task_config, TMSConfig)
@@ -36,7 +37,7 @@ def tms_spd_rank_penalty_happy_path(config: Config):
         n_instances=config.task_config.n_instances,
         n_features=config.task_config.n_features,
         n_hidden=config.task_config.n_hidden,
-        n_hidden_layers=0,
+        n_hidden_layers=n_hidden_layers,
         k=config.task_config.k,
         bias_val=config.task_config.bias_val,
         device=device,
@@ -46,7 +47,7 @@ def tms_spd_rank_penalty_happy_path(config: Config):
         n_instances=config.task_config.n_instances,
         n_features=config.task_config.n_features,
         n_hidden=config.task_config.n_hidden,
-        n_hidden_layers=0,
+        n_hidden_layers=n_hidden_layers,
         device=device,
     )
     # Randomly initialize the bias for the pretrained model
@@ -70,6 +71,11 @@ def tms_spd_rank_penalty_happy_path(config: Config):
     # Pick an arbitrary parameter to check that it changes
     initial_param = model.A.clone().detach()
 
+    param_map = {"W": "W", "W_T": "W_T"}
+    if model.hidden_layers is not None:
+        for i in range(len(model.hidden_layers)):
+            param_map[f"hidden_{i}"] = f"hidden_{i}"
+
     optimize(
         model=model,
         config=config,
@@ -77,7 +83,7 @@ def tms_spd_rank_penalty_happy_path(config: Config):
         device=device,
         dataloader=dataloader,
         pretrained_model=pretrained_model,
-        param_map={"W": "W", "W_T": "W_T"},
+        param_map=param_map,
         plot_results_fn=None,
     )
 
@@ -104,7 +110,8 @@ def test_tms_batch_topk_no_schatten():
     tms_spd_rank_penalty_happy_path(config)
 
 
-def test_tms_batch_topk_and_schatten():
+@pytest.mark.parametrize("n_hidden_layers", [0, 2])
+def test_tms_batch_topk_and_schatten(n_hidden_layers: int):
     config = Config(
         spd_type="rank_penalty",
         topk=2,
@@ -119,7 +126,7 @@ def test_tms_batch_topk_and_schatten():
         schatten_coeff=1e-1,
         task_config=TMS_TASK_CONFIG,
     )
-    tms_spd_rank_penalty_happy_path(config)
+    tms_spd_rank_penalty_happy_path(config, n_hidden_layers)
 
 
 def test_tms_topk_and_l2():
@@ -157,7 +164,8 @@ def test_tms_lp():
     tms_spd_rank_penalty_happy_path(config)
 
 
-def test_tms_topk_and_lp():
+@pytest.mark.parametrize("n_hidden_layers", [0, 2])
+def test_tms_topk_and_lp(n_hidden_layers: int):
     config = Config(
         spd_type="rank_penalty",
         topk=2,
@@ -172,7 +180,7 @@ def test_tms_topk_and_lp():
         lp_sparsity_coeff=1,
         task_config=TMS_TASK_CONFIG,
     )
-    tms_spd_rank_penalty_happy_path(config)
+    tms_spd_rank_penalty_happy_path(config, n_hidden_layers)
 
 
 def test_train_tms_happy_path():

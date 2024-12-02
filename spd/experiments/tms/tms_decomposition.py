@@ -325,6 +325,9 @@ def main(
         # Map from pretrained model's `all_decomposable_params` to the SPD models'
         # `all_subnetwork_params_summed`.
         param_map = {"W": "W", "W_T": "W_T"}
+        if model.hidden_layers is not None:
+            for i in range(len(model.hidden_layers)):
+                param_map[f"hidden_{i}"] = f"hidden_{i}"
 
     dataset = SparseFeatureDataset(
         n_instances=task_config.n_instances,
