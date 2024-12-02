@@ -45,7 +45,6 @@ class TMSConfig(BaseModel):
     data_generation_type: Literal["exactly_one_active", "at_least_zero_active"] = (
         "at_least_zero_active"
     )
-    handcoded: bool = False
 
 
 class DeepLinearConfig(BaseModel):

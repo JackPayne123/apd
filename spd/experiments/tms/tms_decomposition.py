@@ -41,8 +41,6 @@ def get_run_name(config: Config, task_config: TMSConfig) -> str:
         run_suffix += f"ft{task_config.n_features}_"
         run_suffix += f"hid{task_config.n_hidden}"
         run_suffix += f"hid-layers{task_config.n_hidden_layers}"
-        if task_config.handcoded:
-            run_suffix += "_handcoded"
     return config.wandb_run_name_prefix + run_suffix
 
 
@@ -295,6 +293,7 @@ def main(
             n_instances=target_model.n_instances,
             n_features=target_model.n_features,
             n_hidden=target_model.n_hidden,
+            n_hidden_layers=target_model.n_hidden_layers,
             k=task_config.k,
             bias_val=task_config.bias_val,
             device=device,
@@ -312,9 +311,6 @@ def main(
         )
     else:
         raise ValueError(f"Unknown spd_type: {config.spd_type}")
-
-    if task_config.handcoded:
-        model.set_handcoded_spd_params(target_model)
 
     # Manually set the bias for the SPD model from the bias in the pretrained model
     model.b_final.data[:] = target_model.b_final.data.clone()

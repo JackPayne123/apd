@@ -99,6 +99,42 @@ class InstancesParamComponentsRankPenalty(nn.Module):
         return out, inner_acts
 
 
+class InstancesParamComponentsFullRank(nn.Module):
+    def __init__(
+        self, n_instances: int, in_dim: int, out_dim: int, k: int, bias: bool, init_scale: float
+    ):
+        super().__init__()
+        self.subnetwork_params = nn.Parameter(torch.empty(n_instances, k, in_dim, out_dim))
+        init_param_(self.subnetwork_params, init_scale)
+
+        self.bias = nn.Parameter(torch.zeros(n_instances, out_dim)) if bias else None
+
+    def forward(
+        self,
+        x: Float[Tensor, "batch n_instances d_in"],
+        topk_mask: Bool[Tensor, "batch n_instances k"] | None = None,
+    ) -> tuple[
+        Float[Tensor, "batch n_instances d_out"], Float[Tensor, "batch n_instances k d_out"]
+    ]:
+        inner_acts = einops.einsum(
+            x,
+            self.subnetwork_params,
+            "batch n_instances d_in, n_instances k d_in d_out -> batch n_instances k d_out",
+        )
+        if self.bias is not None:
+            inner_acts += self.bias
+
+        if topk_mask is not None:
+            inner_acts = einops.einsum(
+                inner_acts,
+                topk_mask,
+                "batch n_instances k d_out, batch n_instances k -> batch n_instances k d_out",
+            )
+
+        out = einops.einsum(inner_acts, "batch n_instances k d_out -> batch n_instances d_out")
+        return out, inner_acts
+
+
 class ParamComponents(nn.Module):
     def __init__(
         self,

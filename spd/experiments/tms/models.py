@@ -6,7 +6,10 @@ from torch import Tensor, nn
 from torch.nn import functional as F
 
 from spd.models.base import Model, SPDFullRankModel, SPDRankPenaltyModel
-from spd.models.components import InstancesParamComponentsRankPenalty
+from spd.models.components import (
+    InstancesParamComponentsFullRank,
+    InstancesParamComponentsRankPenalty,
+)
 from spd.types import RootPath
 from spd.utils import remove_grad_parallel_to_subnetwork_vecs
 
@@ -85,6 +88,7 @@ class TMSSPDFullRankModel(SPDFullRankModel):
         n_instances: int,
         n_features: int,
         n_hidden: int,
+        n_hidden_layers: int,
         k: int | None,
         bias_val: float,
         device: str = "cuda",
@@ -93,6 +97,7 @@ class TMSSPDFullRankModel(SPDFullRankModel):
         self.n_instances = n_instances
         self.n_features = n_features
         self.n_hidden = n_hidden
+        self.n_hidden_layers = n_hidden_layers
         self.k = k if k is not None else n_features
         self.bias_val = bias_val
 
@@ -105,7 +110,21 @@ class TMSSPDFullRankModel(SPDFullRankModel):
 
         nn.init.xavier_normal_(self.subnetwork_params)
 
-        self.n_param_matrices = 2  # Two W matrices (even though they're tied)
+        self.hidden_layers = None
+        if n_hidden_layers > 0:
+            self.hidden_layers = nn.ModuleList(
+                [
+                    InstancesParamComponentsFullRank(
+                        n_instances=n_instances,
+                        in_dim=n_hidden,
+                        out_dim=n_hidden,
+                        k=self.k,
+                        bias=False,
+                        init_scale=1.0,
+                    )
+                    for _ in range(n_hidden_layers)
+                ]
+            )
 
     def all_subnetwork_params(
         self,
@@ -114,16 +133,18 @@ class TMSSPDFullRankModel(SPDFullRankModel):
             "W": self.subnetwork_params,
             "W_T": rearrange(self.subnetwork_params, "i k f h -> i k h f"),
         }
+        if self.hidden_layers is not None:
+            for i, layer in enumerate(self.hidden_layers):
+                assert isinstance(layer, InstancesParamComponentsFullRank)
+                params[f"hidden_{i}"] = layer.subnetwork_params
         return params
 
     def all_subnetwork_params_summed(
         self,
     ) -> dict[str, Float[Tensor, "n_instances d_layer_in d_layer_out"]]:
         """All subnetwork params summed over the subnetwork dimension."""
-        summed_subnet_params = self.subnetwork_params.sum(dim=-3)
         summed_params: dict[str, Float[Tensor, "n_instances d_layer_in d_layer_out"]] = {
-            "W": summed_subnet_params,
-            "W_T": rearrange(summed_subnet_params, "i f h -> i h f"),
+            p_name: p.sum(dim=-3) for p_name, p in self.all_subnetwork_params().items()
         }
         return summed_params
 
@@ -136,45 +157,47 @@ class TMSSPDFullRankModel(SPDFullRankModel):
         dict[str, Float[Tensor, "batch n_instances n_features"]],
         dict[str, Float[Tensor, "batch n_instances k n_features"]],
     ]:
-        inner_act_0 = torch.einsum("...if,ikfh->...ikh", x, self.subnetwork_params)
-        if topk_mask is not None:
-            assert topk_mask.shape == inner_act_0.shape[:-1]
-            inner_act_0 = torch.einsum("...ikh,...ik->...ikh", inner_act_0, topk_mask)
-        layer_act_0 = torch.einsum("...ikh->...ih", inner_act_0)
+        inner_acts = {}
+        layer_acts = {}
 
-        inner_act_1 = torch.einsum("...ih,ikfh->...ikf", layer_act_0, self.subnetwork_params)
+        inner_acts["W"] = torch.einsum("...if,ikfh->...ikh", x, self.subnetwork_params)
         if topk_mask is not None:
-            assert topk_mask.shape == inner_act_1.shape[:-1]
-            inner_act_1 = torch.einsum("...ikf,...ik->...ikf", inner_act_1, topk_mask)
-        layer_act_1 = torch.einsum("...ikf->...if", inner_act_1) + self.b_final
+            assert topk_mask.shape == inner_acts["W"].shape[:-1]
+            inner_acts["W"] = torch.einsum("...ikh,...ik->...ikh", inner_acts["W"], topk_mask)
+        layer_acts["W"] = torch.einsum("...ikh->...ih", inner_acts["W"])
+        x = layer_acts["W"]
 
-        out = F.relu(layer_act_1)
-        layer_acts = {"W": layer_act_0, "W_T": layer_act_1}
-        inner_acts = {"W": inner_act_0, "W_T": inner_act_1}
+        # Hidden layers
+        if self.hidden_layers is not None:
+            for i, layer in enumerate(self.hidden_layers):
+                assert isinstance(layer, InstancesParamComponentsFullRank)
+                x, inner_acts[f"hidden_{i}"] = layer(x, topk_mask)
+                layer_acts[f"hidden_{i}"] = x
+
+        inner_acts["W_T"] = torch.einsum("...ih,ikfh->...ikf", x, self.subnetwork_params)
+        if topk_mask is not None:
+            assert topk_mask.shape == inner_acts["W_T"].shape[:-1]
+            inner_acts["W_T"] = torch.einsum("...ikf,...ik->...ikf", inner_acts["W_T"], topk_mask)
+        layer_acts["W_T"] = torch.einsum("...ikf->...if", inner_acts["W_T"]) + self.b_final
+
+        out = F.relu(layer_acts["W_T"])
         return out, layer_acts, inner_acts
 
     @classmethod
     def from_pretrained(cls, path: str | RootPath) -> "TMSSPDFullRankModel":  # type: ignore
         pass
 
-    def set_handcoded_spd_params(self, target_model: TMSModel):
-        # Initialize the subnetwork params such that the kth subnetwork contains a single row of W
-        # and the rest of the rows are zero
-        assert self.n_features == self.k
-        self.subnetwork_params.data = torch.zeros_like(self.subnetwork_params.data)
-        for subnet_idx in range(self.k):
-            feature_idx = subnet_idx
-            self.subnetwork_params.data[:, subnet_idx, feature_idx, :] = target_model.W.data[
-                :, feature_idx, :
-            ]
-        self.b_final.data = target_model.b_final.data
-
     def set_subnet_to_zero(
         self, subnet_idx: int
     ) -> dict[str, Float[Tensor, "n_instances n_features n_hidden"]]:
-        stored_vals = {
-            "subnetwork_params": self.subnetwork_params.data[:, subnet_idx, :, :].detach().clone()
-        }
+        stored_vals = {"W": self.subnetwork_params.data[:, subnet_idx, :, :].detach().clone()}
+        if self.hidden_layers is not None:
+            for i, layer in enumerate(self.hidden_layers):
+                assert isinstance(layer, InstancesParamComponentsFullRank)
+                stored_vals[f"hidden_{i}"] = (
+                    layer.subnetwork_params.data[:, subnet_idx, :, :].detach().clone()
+                )
+                layer.subnetwork_params.data[:, subnet_idx, :, :] = 0.0
         self.subnetwork_params.data[:, subnet_idx, :, :] = 0.0
         return stored_vals
 
@@ -183,7 +206,11 @@ class TMSSPDFullRankModel(SPDFullRankModel):
         subnet_idx: int,
         stored_vals: dict[str, Float[Tensor, "n_instances n_features n_hidden"]],
     ) -> None:
-        self.subnetwork_params.data[:, subnet_idx, :, :] = stored_vals["subnetwork_params"]
+        self.subnetwork_params.data[:, subnet_idx, :, :] = stored_vals["W"]
+        if self.hidden_layers is not None:
+            for i, layer in enumerate(self.hidden_layers):
+                assert isinstance(layer, InstancesParamComponentsFullRank)
+                layer.subnetwork_params.data[:, subnet_idx, :, :] = stored_vals[f"hidden_{i}"]
 
 
 class TMSSPDRankPenaltyModel(SPDRankPenaltyModel):

@@ -282,7 +282,8 @@ def test_tms_train_fixed_random():
     assert torch.allclose(model.hidden_layers[0].data, initial_hidden), "Hidden layer changed"
 
 
-def test_tms_spd_full_rank_equivalence() -> None:
+@pytest.mark.parametrize("n_hidden_layers", [0, 2])
+def test_tms_spd_full_rank_equivalence(n_hidden_layers: int) -> None:
     """The full_rank SPD model with a single instance should have the same output and internal acts
     as the target model."""
     set_seed(0)
@@ -300,7 +301,7 @@ def test_tms_spd_full_rank_equivalence() -> None:
         n_instances=n_instances,
         n_features=n_features,
         n_hidden=n_hidden,
-        n_hidden_layers=0,
+        n_hidden_layers=n_hidden_layers,
         device=device,
     )
 
@@ -312,6 +313,7 @@ def test_tms_spd_full_rank_equivalence() -> None:
         n_instances=n_instances,
         n_features=n_features,
         n_hidden=n_hidden,
+        n_hidden_layers=n_hidden_layers,
         k=k,
         bias_val=0.0,
         device=device,
@@ -320,6 +322,12 @@ def test_tms_spd_full_rank_equivalence() -> None:
     # Copy parameters from target model to SPD model
     spd_model.subnetwork_params.data[:, 0, :, :] = target_model.W.data
     spd_model.b_final.data[:, :] = target_model.b_final.data
+    if spd_model.hidden_layers is not None:
+        for i in range(n_hidden_layers):
+            assert target_model.hidden_layers is not None
+            spd_model.hidden_layers[i].subnetwork_params.data[:, 0, :, :] = (
+                target_model.hidden_layers[i].data
+            )
 
     # Create a random input
     input_data: Float[torch.Tensor, "batch n_instances n_features"] = torch.rand(
@@ -339,80 +347,6 @@ def test_tms_spd_full_rank_equivalence() -> None:
         assert torch.allclose(
             target_act, spd_act, atol=1e-6
         ), f"Activations do not match for layer {layer_name}"
-
-
-def test_set_full_rank_handcoded_spd_params():
-    """Test that the full rank handcoded SPD model has the properties we'd expect.
-
-    The properties we expect are:
-    - The same output as the target model
-    - The same internal acts as the target model
-    - The subnetwork params are set such that only one row is non-zero for each subnetwork
-
-    Note that the bias is currently not folded into the params.
-    """
-    set_seed(0)
-    device = "cpu"
-    n_instances = 2
-    n_features = 5
-    k = 5
-    n_hidden = 3
-    batch_size = 10
-
-    # Create a target TMSModel
-    target_model = TMSModel(
-        n_instances=n_instances,
-        n_features=n_features,
-        n_hidden=n_hidden,
-        n_hidden_layers=0,
-        device=device,
-    )
-
-    # Create the SPD model with k=n_features
-    spd_model = TMSSPDFullRankModel(
-        n_instances=n_instances,
-        n_features=n_features,
-        n_hidden=n_hidden,
-        k=k,
-        bias_val=0.0,
-        device=device,
-    )
-
-    # Set handcoded SPD params
-    spd_model.set_handcoded_spd_params(target_model)
-
-    # Create a random input
-    input_data: Float[torch.Tensor, "batch n_instances n_features"] = torch.rand(
-        batch_size, n_instances, n_features, device=device
-    )
-
-    # Forward pass through both models
-    target_output, _, target_post_acts = target_model(input_data)
-    spd_output, spd_layer_acts, _ = spd_model(input_data)
-
-    # Assert outputs are the same
-    assert torch.allclose(target_output, spd_output, atol=1e-6), "Outputs do not match"
-
-    # Assert activations are the same for all layers
-    for layer_name, target_act in target_post_acts.items():
-        spd_act = spd_layer_acts[layer_name]
-        assert torch.allclose(
-            target_act, spd_act, atol=1e-6
-        ), f"Activations do not match for layer {layer_name}"
-
-    # Check that the subnetwork params are set correctly
-    for subnet_idx in range(k):
-        # subnetwork_params is shape (n_instances, k, n_features, n_hidden) == (2, 5, 5, 3)
-        # Check that only one row is non-zero for each subnetwork
-        rows_not_zero = torch.any(spd_model.subnetwork_params.data[:, subnet_idx] != 0, dim=-1)
-        assert torch.equal(
-            torch.sum(rows_not_zero, dim=-1), torch.tensor([1, 1])
-        ), f"Subnetwork {subnet_idx} should have only one non-zero row"
-
-    # Check that the biases are the same (NOTE: currently not decomposing the biases)
-    assert torch.allclose(
-        spd_model.b_final.data, target_model.b_final.data, atol=1e-6
-    ), "Biases do not match"
 
 
 def test_tms_spd_rank_penalty_full_rank_equivalence() -> None:
@@ -429,6 +363,7 @@ def test_tms_spd_rank_penalty_full_rank_equivalence() -> None:
     batch_size = 4
     n_features = 3
     n_hidden = 2
+    n_hidden_layers = 0  # This test will only work for 0 hidden layers
     n_instances = 2
     k = 2
 
@@ -439,6 +374,7 @@ def test_tms_spd_rank_penalty_full_rank_equivalence() -> None:
         n_instances=n_instances,
         n_features=n_features,
         n_hidden=n_hidden,
+        n_hidden_layers=n_hidden_layers,
         k=k,
         bias_val=0.0,
         device=device,
@@ -453,7 +389,7 @@ def test_tms_spd_rank_penalty_full_rank_equivalence() -> None:
         n_instances=n_instances,
         n_features=n_features,
         n_hidden=n_hidden,
-        n_hidden_layers=0,
+        n_hidden_layers=n_hidden_layers,
         k=k,
         bias_val=0.0,
         device=device,
