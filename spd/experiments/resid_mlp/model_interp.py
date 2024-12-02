@@ -31,6 +31,7 @@ dataset = ResidualMLPDataset(
     n_features=task_config.resid_mlp_config.n_features,
     feature_probability=task_config.feature_probability,
     device=device,
+    calc_labels=False,
     label_type=task_config.label_type,
     act_fn_name=task_config.resid_mlp_config.act_fn_name,
     label_fn_seed=task_config.label_fn_seed,
