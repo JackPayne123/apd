@@ -9,7 +9,7 @@ from spd.experiments.tms.models import (
     TMSSPDFullRankModel,
     TMSSPDRankPenaltyModel,
 )
-from spd.experiments.tms.train_tms import TMSTrainConfig, train
+from spd.experiments.tms.train_tms import TMSTrainConfig, get_model_and_dataloader, train
 from spd.run_spd import Config, TMSConfig, optimize
 from spd.utils import DatasetGeneratedDataLoader, SparseFeatureDataset, set_seed
 
@@ -176,6 +176,7 @@ def test_tms_topk_and_lp():
 
 
 def test_train_tms_happy_path():
+    device = "cpu"
     set_seed(0)
     # Set up a small configuration
     config = TMSTrainConfig(
@@ -188,31 +189,17 @@ def test_train_tms_happy_path():
         steps=5,
         lr=5e-3,
         data_generation_type="at_least_zero_active",
+        fixed_identity_hidden_layers=False,
+        fixed_random_hidden_layers=False,
     )
 
-    # Initialize model, dataset, and dataloader
-    device = "cpu"
-    model = TMSModel(
-        n_instances=config.n_instances,
-        n_features=config.n_features,
-        n_hidden=config.n_hidden,
-        n_hidden_layers=config.n_hidden_layers,
-        device=device,
-    )
-    dataset = SparseFeatureDataset(
-        n_instances=config.n_instances,
-        n_features=config.n_features,
-        feature_probability=config.feature_probability,
-        device=device,
-    )
-    dataloader = DatasetGeneratedDataLoader(dataset, batch_size=config.batch_size)
+    model, dataloader = get_model_and_dataloader(config, device)
 
     # Calculate initial loss
     batch, labels = next(iter(dataloader))
     initial_out, _, _ = model(batch)
     initial_loss = torch.mean((labels.abs() - initial_out) ** 2)
 
-    # Run optimize function
     train(model, dataloader, steps=config.steps, print_freq=1000)
 
     # Calculate final loss
@@ -223,6 +210,68 @@ def test_train_tms_happy_path():
     assert (
         final_loss < initial_loss
     ), f"Final loss ({final_loss:.2e}) is not lower than initial loss ({initial_loss:.2e})"
+
+
+def test_tms_train_fixed_identity():
+    """Check that hidden layer is identity before and after training."""
+    device = "cpu"
+    set_seed(0)
+    config = TMSTrainConfig(
+        n_features=3,
+        n_hidden=2,
+        n_instances=2,
+        n_hidden_layers=2,
+        feature_probability=0.1,
+        batch_size=32,
+        steps=2,
+        lr=5e-3,
+        data_generation_type="at_least_zero_active",
+        fixed_identity_hidden_layers=True,
+        fixed_random_hidden_layers=False,
+    )
+
+    model, dataloader = get_model_and_dataloader(config, device)
+
+    eye = torch.eye(config.n_hidden, device=device).expand(config.n_instances, -1, -1)
+
+    assert model.hidden_layers is not None
+    # Assert that this is an identity matrix
+    initial_hidden = model.hidden_layers[0].data.clone()
+    assert torch.allclose(initial_hidden, eye), "Initial hidden layer is not identity"
+
+    train(model, dataloader, steps=config.steps, print_freq=1000)
+
+    # Assert that the hidden layers remains identity
+    assert torch.allclose(model.hidden_layers[0].data, eye), "Hidden layer changed"
+
+
+def test_tms_train_fixed_random():
+    """Check that hidden layer is random before and after training."""
+    device = "cpu"
+    set_seed(0)
+    config = TMSTrainConfig(
+        n_features=3,
+        n_hidden=2,
+        n_instances=2,
+        n_hidden_layers=2,
+        feature_probability=0.1,
+        batch_size=32,
+        steps=2,
+        lr=5e-3,
+        data_generation_type="at_least_zero_active",
+        fixed_identity_hidden_layers=False,
+        fixed_random_hidden_layers=True,
+    )
+
+    model, dataloader = get_model_and_dataloader(config, device)
+
+    assert model.hidden_layers is not None
+    initial_hidden = model.hidden_layers[0].data.clone()
+
+    train(model, dataloader, steps=config.steps, print_freq=1000)
+
+    # Assert that the hidden layers are unchanged
+    assert torch.allclose(model.hidden_layers[0].data, initial_hidden), "Hidden layer changed"
 
 
 def test_tms_spd_full_rank_equivalence() -> None:
