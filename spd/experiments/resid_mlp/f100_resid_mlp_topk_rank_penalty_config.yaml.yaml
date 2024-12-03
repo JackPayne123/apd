@@ -25,4 +25,4 @@ task_config:
   k: 100
   feature_probability: 0.01
   data_generation_type: "at_least_zero_active"
-  pretrained_model_path: spd/experiments/resid_mlp/out/resid_mlp_identity_act_plus_resid_n-instances3_n-features100_d-resid1000_d-mlp50_n-layers1_seed0_p0.01_random_embedding_True_identity_embedding_False_bias_False_False/target_model.pth
+  pretrained_model_path: wandb:spd-train-resid-mlp/runs/njgvwytn

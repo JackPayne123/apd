@@ -15,25 +15,25 @@ from spd.experiments.resid_mlp.plotting import (
     spd_calculate_virtual_weights,
 )
 from spd.experiments.resid_mlp.resid_mlp_dataset import ResidualMLPDataset
-from spd.run_spd import ResidualMLPConfig, calc_recon_mse
+from spd.run_spd import ResidualMLPTaskConfig, calc_recon_mse
 from spd.utils import run_spd_forward_pass, set_seed
 
 # %% Loading
 device = "cpu"
 print(f"Using device: {device}")
 set_seed(0)  # You can change this seed if needed
-wandb_path = "spd-resid-mlp/runs/001hfecp"
+wandb_path = "wandb:spd-resid-mlp/runs/001hfecp"
 # Load the pretrained SPD model
-model, config, label_coeffs = ResidualMLPSPDRankPenaltyModel.from_wandb(wandb_path)
-assert isinstance(config.task_config, ResidualMLPConfig)
+model, config, label_coeffs = ResidualMLPSPDRankPenaltyModel.from_pretrained(wandb_path)
+assert isinstance(config.task_config, ResidualMLPTaskConfig)
 # Path must be local
-target_model, target_config_dict, target_label_coeffs = ResidualMLPModel.from_pretrained(
+target_model, target_train_config_dict, target_label_coeffs = ResidualMLPModel.from_pretrained(
     config.task_config.pretrained_model_path
 )
 assert torch.allclose(target_label_coeffs, torch.tensor(label_coeffs))
 dataset = ResidualMLPDataset(
-    n_instances=model.n_instances,
-    n_features=model.n_features,
+    n_instances=model.config.n_instances,
+    n_features=model.config.n_features,
     feature_probability=config.task_config.feature_probability,
     device=device,
     calc_labels=False,  # Our labels will be the output of the target model
@@ -41,11 +41,11 @@ dataset = ResidualMLPDataset(
 )
 batch, labels = dataset.generate_batch(config.batch_size)
 # Print some basic information about the model
-print(f"Number of features: {model.n_features}")
-print(f"Embedding dimension: {model.d_embed}")
-print(f"MLP dimension: {model.d_mlp}")
-print(f"Number of layers: {model.n_layers}")
-print(f"Number of subnetworks (k): {model.k}")
+print(f"Number of features: {model.config.n_features}")
+print(f"Embedding dimension: {model.config.d_embed}")
+print(f"MLP dimension: {model.config.d_mlp}")
+print(f"Number of layers: {model.config.n_layers}")
+print(f"Number of subnetworks (k): {model.config.k}")
 
 target_model_output, _, _ = target_model(batch)
 
@@ -106,14 +106,14 @@ class spd_dummy(ResidualMLPModel):
         )
 
 
-target_config_dict = dict(config.task_config)
-target_config_dict["n_features"] = model.n_features
-target_config_dict["d_embed"] = model.d_embed
-target_config_dict["d_mlp"] = model.d_mlp
-target_config_dict["act_fn_name"] = target_model.act_fn_name
+# target_config_dict = dict(config.task_config)
+# target_config_dict["n_features"] = model.n_features
+# target_config_dict["d_embed"] = model.d_embed
+# target_config_dict["d_mlp"] = model.d_mlp
+# target_config_dict["act_fn_name"] = target_model.act_fn_name
 
-plot_individual_feature_response(spd_dummy(), device, target_config_dict)
-plot_individual_feature_response(spd_dummy(), device, target_config_dict, sweep=True)
+plot_individual_feature_response(spd_dummy(), device, target_train_config_dict)
+plot_individual_feature_response(spd_dummy(), device, target_train_config_dict, sweep=True)
 
 
 # %%
@@ -151,6 +151,3 @@ for k in range(model.k):
         axes1[k + 1].set_xlabel("")
         axes2[k + 1].set_xlabel("")
 plt.show()
-
-
-# %%

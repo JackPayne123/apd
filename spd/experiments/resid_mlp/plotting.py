@@ -15,7 +15,7 @@ from spd.experiments.resid_mlp.models import ResidualMLPModel, ResidualMLPSPDRan
 def plot_individual_feature_response(
     model: ResidualMLPModel,
     device: str,
-    task_config: dict[str, Any],
+    train_config: dict[str, Any],
     sweep: bool = False,
     subtract_inputs: bool = False,
     instance_idx: int = 0,
@@ -26,9 +26,9 @@ def plot_individual_feature_response(
     If sweep is True then the amplitude of the active feature is swept from -1 to 1. This is an
     arbitrary choice (choosing feature 0 to be the one where we test x=-1 etc) made for convenience.
     """
-    n_instances = model.n_instances
-    n_features = model.n_features
-    batch_size = model.n_features
+    n_instances = model.config.n_instances
+    n_features = model.config.n_features
+    batch_size = model.config.n_features
     batch = torch.zeros(batch_size, n_instances, n_features, device=device)
     inputs = torch.ones(n_features) if not sweep else torch.linspace(-1, 1, n_features)
     batch[torch.arange(n_features), instance_idx, torch.arange(n_features)] = inputs.to(device)
@@ -40,10 +40,10 @@ def plot_individual_feature_response(
     sweep_str = "set to 1" if not sweep else "between -1 and 1"
     title = (
         f"Feature response with one active feature {sweep_str}\n"
-        f"Trained with p={task_config['feature_probability']}, "
-        f"n_features={task_config['n_features']}, "
-        f"d_embed={task_config['d_embed']}, "
-        f"d_mlp={task_config['d_mlp']}"
+        f"Trained with p={train_config['feature_probability']}, "
+        f"n_features={train_config['resid_mlp_config']['n_features']}, "
+        f"d_embed={train_config['resid_mlp_config']['d_embed']}, "
+        f"d_mlp={train_config['resid_mlp_config']['d_mlp']}"
     )
     fig.suptitle(title)
     inputs = batch[torch.arange(n_features), instance_idx, torch.arange(n_features)].detach().cpu()
@@ -54,7 +54,7 @@ def plot_individual_feature_response(
             y = y - inputs
         ax.plot(x, y, color=cmap_viridis(f / n_features))
     # Plot labels
-    label_fn = F.relu if task_config["act_fn_name"] == "relu" else F.gelu
+    label_fn = F.relu if train_config["resid_mlp_config"]["act_fn_name"] == "relu" else F.gelu
     targets = label_fn(inputs) if subtract_inputs else inputs + label_fn(inputs)
     ax.plot(torch.arange(n_features), targets.cpu().detach(), color="red", label="Target")
     baseline = torch.zeros(n_features) if subtract_inputs else inputs
@@ -74,8 +74,8 @@ def plot_individual_feature_response(
 def _calculate_snr(
     model: ResidualMLPModel, device: str, input_values: tuple[float, float]
 ) -> Tensor:
-    n_features = model.n_features
-    n_instances = model.n_instances
+    n_features = model.config.n_features
+    n_instances = model.config.n_instances
     batch_size = n_features**2
     batch = torch.zeros(batch_size, n_instances, n_features, device=device)
     instance_idx = 0
@@ -140,13 +140,13 @@ def plot_2d_snr(model: ResidualMLPModel, device: str):
 
 def calculate_virtual_weights(model: ResidualMLPModel, device: str) -> dict[str, Tensor]:
     """Currently ignoring interactions between layers. Just flattening (n_layers, d_mlp)"""
-    n_instances = model.n_instances
-    n_features = model.n_features
-    d_embed = model.d_embed
-    d_mlp = model.d_mlp
+    n_instances = model.config.n_instances
+    n_features = model.config.n_features
+    d_embed = model.config.d_embed
+    d_mlp = model.config.d_mlp
     has_bias1 = model.layers[0].bias1 is not None
     has_bias2 = model.layers[0].bias2 is not None
-    n_layers = model.n_layers
+    n_layers = model.config.n_layers
     # Get weights
     W_E: Float[Tensor, "n_instances n_features d_embed"] = model.W_E
     W_U: Float[Tensor, "n_instances d_embed n_features"] = model.W_U
@@ -220,13 +220,13 @@ def relu_contribution_plot(
     diag_relu_conns: Float[Tensor, "n_features d_mlp"] = (
         virtual_weights["diag_relu_conns"][instance_idx].cpu().detach()
     )
-    d_mlp = model.d_mlp
-    n_layers = model.n_layers
-    n_features = model.n_features
+    d_mlp = model.config.d_mlp
+    n_layers = model.config.n_layers
+    n_features = model.config.n_features
 
     ax1.set_title("How much does each ReLU contribute to each feature?")
     ax1.axvline(-0.5, color="k", linestyle="--", alpha=0.3, lw=0.5)
-    for i in range(n_features):
+    for i in range(model.config.n_features):
         ax1.scatter([i] * d_mlp * n_layers, diag_relu_conns[i, :], alpha=0.3, marker=".", c="k")
         ax1.axvline(i + 0.5, color="k", linestyle="--", alpha=0.3, lw=0.5)
         for j in range(d_mlp * n_layers):
@@ -238,7 +238,7 @@ def relu_contribution_plot(
     ax1.axhline(0, color="k", linestyle="--", alpha=0.3)
     ax1.set_xlabel("Features")
     ax1.set_ylabel("Weights to ReLUs")
-    ax1.set_xlim(-0.5, n_features - 0.5)
+    ax1.set_xlim(-0.5, model.config.n_features - 0.5)
 
     ax2.set_title("How much does each feature route through each ReLU?")
     ax2.axvline(-0.5, color="k", linestyle="--", alpha=0.3, lw=0.5)
