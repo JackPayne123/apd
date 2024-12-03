@@ -16,7 +16,7 @@ from spd.types import ModelPath
 from spd.utils import set_seed
 
 # %% Load model and config
-path: ModelPath = "wandb:spd-train-resid-mlp/runs/c67365j6"
+path: ModelPath = "wandb:spd-train-resid-mlp/runs/lkg96w24"
 set_seed(0)
 device = "cuda" if torch.cuda.is_available() else "cpu"
 model, task_config_dict, label_coeffs = ResidualMLPModel.from_pretrained(path)

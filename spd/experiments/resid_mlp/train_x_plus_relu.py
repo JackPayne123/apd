@@ -18,7 +18,7 @@ if __name__ == "__main__":
         wandb_project="spd-train-resid-mlp",
         seed=0,
         resid_mlp_config=ResidualMLPConfig(
-            n_instances=3,
+            n_instances=1,
             n_features=100,
             d_embed=100,
             d_mlp=50,

@@ -69,7 +69,7 @@ def plot_subnetwork_attributions(
     fig, ax = plt.subplots(
         nrows=1, ncols=n_instances, figsize=(5 * n_instances, 5), constrained_layout=True
     )
-    axs = np.array(ax)
+    axs = np.array([ax]) if n_instances == 1 else np.array(ax)
     im = None
     for i in range(n_instances):
         im = axs[i].matshow(
