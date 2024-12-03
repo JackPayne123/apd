@@ -909,8 +909,10 @@ def optimize(
         if config.topk is not None:
             # We always assume the final subnetwork is the one we want to distil
             topk_attrs = attributions[..., :-1] if config.distil_from_target else attributions
-            topk_mask = (batch.abs() > 0).float()
-            # topk_mask = calc_topk_mask(topk_attrs, config.topk, batch_topk=config.batch_topk)
+            if step < 5001:
+                topk_mask = (batch.abs() > 0).float()
+            else:
+                topk_mask = calc_topk_mask(topk_attrs, config.topk, batch_topk=config.batch_topk)
             if config.distil_from_target:
                 # Add back the final subnetwork index to the topk mask and set it to True
                 last_subnet_mask = torch.ones(
