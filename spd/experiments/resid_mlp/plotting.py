@@ -306,14 +306,14 @@ def spd_calculate_virtual_weights(
     model: ResidualMLPSPDRankPenaltyModel, device: str, k_select: int | Literal["sum"] = 0
 ) -> dict[str, Tensor]:
     """Currently ignoring interactions between layers. Just flattening (n_layers, d_mlp)"""
-    n_instances = model.n_instances
-    n_features = model.n_features
-    d_embed = model.d_embed
-    d_mlp = model.d_mlp
-    k_max = model.k
+    n_instances = model.config.n_instances
+    n_features = model.config.n_features
+    d_embed = model.config.d_embed
+    d_mlp = model.config.d_mlp
+    k_max = model.config.k
     has_bias1 = model.layers[0].linear1.bias is not None
     has_bias2 = model.layers[0].linear2.bias is not None
-    n_layers = model.n_layers
+    n_layers = model.config.n_layers
     # Get weights
     W_E: Float[Tensor, "n_instances n_features d_embed"] = model.W_E
     W_U: Float[Tensor, "n_instances d_embed n_features"] = model.W_U

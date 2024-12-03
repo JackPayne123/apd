@@ -22,7 +22,7 @@ from spd.utils import run_spd_forward_pass, set_seed
 device = "cpu"
 print(f"Using device: {device}")
 set_seed(0)  # You can change this seed if needed
-wandb_path = "wandb:spd-resid-mlp/runs/001hfecp"
+wandb_path = "wandb:spd-resid-mlp/runs/svih4aik"
 # Load the pretrained SPD model
 model, config, label_coeffs = ResidualMLPSPDRankPenaltyModel.from_pretrained(wandb_path)
 assert isinstance(config.task_config, ResidualMLPTaskConfig)
@@ -105,12 +105,6 @@ class spd_dummy(ResidualMLPModel):
             None,
         )
 
-
-# target_config_dict = dict(config.task_config)
-# target_config_dict["n_features"] = model.n_features
-# target_config_dict["d_embed"] = model.d_embed
-# target_config_dict["d_mlp"] = model.d_mlp
-# target_config_dict["act_fn_name"] = target_model.act_fn_name
 
 plot_individual_feature_response(spd_dummy(), device, target_train_config_dict)
 plot_individual_feature_response(spd_dummy(), device, target_train_config_dict, sweep=True)

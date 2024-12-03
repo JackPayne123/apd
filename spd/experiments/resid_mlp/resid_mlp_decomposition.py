@@ -21,6 +21,10 @@ from spd.experiments.resid_mlp.models import (
     ResidualMLPSPDRankPenaltyConfig,
     ResidualMLPSPDRankPenaltyModel,
 )
+from spd.experiments.resid_mlp.plotting import (
+    relu_contribution_plot,
+    spd_calculate_virtual_weights,
+)
 from spd.experiments.resid_mlp.resid_mlp_dataset import (
     ResidualMLPDataset,
 )
@@ -188,10 +192,32 @@ def resid_mlp_plot_results_fn(
         tuple[Float[Tensor, "batch n_features"], Float[Tensor, "batch d_embed"]]
     ]
     | None = None,
+    target_model: ResidualMLPModel | None = None,
     **_,
 ) -> dict[str, plt.Figure]:
     assert isinstance(config.task_config, ResidualMLPTaskConfig)
     fig_dict = {}
+
+    fig1, axes1 = plt.subplots(
+        model.config.k + 1, 1, figsize=(20, 3 + 2 * model.config.k), constrained_layout=True
+    )
+    axes1 = np.atleast_1d(axes1)  # type: ignore
+    fig2, axes2 = plt.subplots(
+        model.config.k + 1, 1, figsize=(10, 3 + 2 * model.config.k), constrained_layout=True
+    )
+    axes2 = np.atleast_1d(axes2)  # type: ignore
+    virtual_weights = spd_calculate_virtual_weights(model, device, k_select="sum")
+    relu_contribution_plot(axes1[0], axes2[0], virtual_weights, model, device)
+    for k in range(model.config.k):
+        virtual_weights = spd_calculate_virtual_weights(model, device, k_select=k)
+        relu_contribution_plot(axes1[k + 1], axes2[k + 1], virtual_weights, model, device)
+        axes1[k + 1].set_ylabel(f"k={k}")
+        axes2[k + 1].set_ylabel(f"k={k}")
+        if k < model.config.k - 1:
+            axes1[k + 1].set_xlabel("")
+            axes2[k + 1].set_xlabel("")
+    fig_dict["feature_contributions"] = fig1
+    fig_dict["relu_contributions"] = fig2
 
     assert config.spd_type in ("full_rank", "rank_penalty")
     attribution_scores = collect_subnetwork_attributions(
@@ -219,11 +245,37 @@ def resid_mlp_plot_results_fn(
         model=model, out_dir=out_dir, step=step
     )
 
+    # class spd_dummy(ResidualMLPModel):
+    #     def __init__(self):
+    #         self.n_features = model.n_features
+    #         self.n_instances = model.n_instances
+
+    #     def __call__(self, batch: Float[Tensor, "batch n_instances"]):
+    #         assert config.topk is not None
+    #         return (
+    #             run_spd_forward_pass(
+    #                 spd_model=model,
+    #                 target_model=target_model,
+    #                 input_array=batch,
+    #                 attribution_type=config.attribution_type,
+    #                 spd_type=config.spd_type,
+    #                 batch_topk=config.batch_topk,
+    #                 topk=config.topk,
+    #                 distil_from_target=config.distil_from_target,
+    #             ).spd_topk_model_output,
+    #             None,
+    #             None,
+    #         )
+    # fig1 = plot_individual_feature_response(spd_dummy(), device, target_train_config_dict)
+    # fig2 = plot_individual_feature_response(
+    #     spd_dummy(), device, target_train_config_dict, sweep=True
+    # )
+
     # Save plots to files
     if out_dir:
         for k, v in fig_dict.items():
             out_file = out_dir / f"{k}_s{step}.png"
-            v.savefig(out_file, dpi=200)
+            v.savefig(out_file, dpi=100)
             tqdm.write(f"Saved plot to {out_file}")
     return fig_dict
 
