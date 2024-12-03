@@ -13,15 +13,14 @@ from spd.experiments.resid_mlp.plotting import (
 from spd.experiments.resid_mlp.resid_mlp_dataset import ResidualMLPDataset
 from spd.experiments.resid_mlp.train_resid_mlp import ResidMLPTrainConfig
 from spd.types import ModelPath
-from spd.utils import set_seed
+from spd.utils import REPO_ROOT, set_seed
 
 # %% Load model and config
-# path = (
-#     REPO_ROOT
-#     / "spd/experiments/resid_mlp/out/resid_mlp_identity_act_plus_resid_n-instances2_n-features100_d-resid1000_d-mlp50_n-layers1_seed0/target_model.pth"
-# )
-path: ModelPath = "wandb:spd-train-resid-mlp/runs/njgvwytn"
-
+# path: ModelPath = "wandb:spd-train-resid-mlp/runs/njgvwytn"
+path: ModelPath = (
+    REPO_ROOT
+    / "spd/experiments/resid_mlp/out/resid_mlp_identity_act_plus_resid_n-instances3_n-features100_d-resid100_d-mlp50_n-layers1_seed0_p0.01_random_embedding_True_identity_embedding_False_bias_False_False/resid_mlp.pth"
+)
 set_seed(0)
 device = "cuda" if torch.cuda.is_available() else "cpu"
 model, task_config_dict, label_coeffs = ResidualMLPModel.from_pretrained(path)
