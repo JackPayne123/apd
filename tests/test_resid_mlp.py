@@ -16,11 +16,11 @@ from spd.utils import DatasetGeneratedDataLoader, set_seed
 # Create a simple ResidualMLP config that we can use in multiple tests
 RESID_MLP_TASK_CONFIG = ResidualMLPTaskConfig(
     task_name="residual_mlp",
-    init_scale=1.0,
     k=3,
     feature_probability=0.333,
-    pretrained_model_path=Path(),  # We'll create this later
+    init_scale=1.0,
     data_generation_type="at_least_zero_active",
+    pretrained_model_path=Path(),  # We'll create this later
 )
 
 
@@ -98,6 +98,11 @@ def test_resid_mlp_rank_penalty_decomposition_happy_path() -> None:
         feature_probability=config.task_config.feature_probability,
         device=device,
         calc_labels=False,
+        label_type=None,
+        act_fn_name=None,
+        label_fn_seed=None,
+        label_coeffs=None,
+        data_generation_type="at_least_zero_active",
     )
     dataloader = DatasetGeneratedDataLoader(dataset, batch_size=config.batch_size, shuffle=False)
 

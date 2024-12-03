@@ -15,6 +15,7 @@ wandb.require("core")
 if __name__ == "__main__":
     device = "cuda" if torch.cuda.is_available() else "cpu"
     config = ResidMLPTrainConfig(
+        wandb_project=None,
         seed=0,
         resid_mlp_config=ResidualMLPConfig(
             n_instances=20,
@@ -27,8 +28,12 @@ if __name__ == "__main__":
             in_bias=False,
             out_bias=False,
         ),
+        label_fn_seed=0,
+        label_type="act_plus_resid",
+        use_trivial_label_coeffs=True,
         feature_probability=0.01,
         importance_val=1,
+        data_generation_type="at_least_zero_active",
         batch_size=2048,
         steps=1000,
         print_freq=100,
@@ -36,6 +41,7 @@ if __name__ == "__main__":
         lr_schedule="cosine",
         fixed_random_embedding=True,
         fixed_identity_embedding=False,
+        n_batches_final_losses=1,
     )
 
     set_seed(config.seed)
