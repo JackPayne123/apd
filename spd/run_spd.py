@@ -1106,15 +1106,13 @@ def optimize(
                 )
 
         if (
-            config.save_freq is not None
-            and step % config.save_freq == 0
-            and step > 0
-            and out_dir is not None
-        ):
-            torch.save(model.state_dict(), out_dir / f"model_{step}.pth")
-            tqdm.write(f"Saved model to {out_dir / f'model_{step}.pth'}")
+            (config.save_freq is not None and step % config.save_freq == 0 and step > 0)
+            or step == config.steps
+        ) and out_dir is not None:
+            torch.save(model.state_dict(), out_dir / f"spd_model_{step}.pth")
+            tqdm.write(f"Saved model to {out_dir / f'spd_model_{step}.pth'}")
             if config.wandb_project:
-                wandb.save(str(out_dir / f"model_{step}.pth"), base_path=out_dir)
+                wandb.save(str(out_dir / f"spd_model_{step}.pth"), base_path=out_dir)
 
         # Skip gradient step if we are at the last step (last step just for plotting and logging)
         if step != config.steps:
