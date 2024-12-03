@@ -230,7 +230,6 @@ if __name__ == "__main__":
     config = ResidMLPTrainConfig(
         wandb_project="spd-train-resid-mlp",
         seed=0,
-        label_fn_seed=0,
         resid_mlp_config=ResidualMLPConfig(
             n_instances=5,
             n_features=10,
@@ -242,16 +241,20 @@ if __name__ == "__main__":
             in_bias=False,
             out_bias=False,
         ),
+        label_fn_seed=0,
         label_type="abs",
-        data_generation_type="at_least_zero_active",
         use_trivial_label_coeffs=True,
         feature_probability=0.5,
         importance_val=0.97,
+        data_generation_type="at_least_zero_active",
         batch_size=256,
         steps=1_000,
         print_freq=100,
         lr=5e-3,
         lr_schedule="cosine",
+        fixed_random_embedding=False,
+        fixed_identity_embedding=False,
+        n_batches_final_losses=1,
     )
 
     set_seed(config.seed)

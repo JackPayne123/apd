@@ -27,6 +27,7 @@ def train_on_test_data(
 ) -> dict[int, float]:
     device = "cuda" if torch.cuda.is_available() else "cpu"
     config = ResidMLPTrainConfig(
+        wandb_project=None,
         seed=0,
         resid_mlp_config=ResidualMLPConfig(
             n_instances=n_instances,

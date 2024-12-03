@@ -123,6 +123,7 @@ if __name__ == "__main__":
         label_type=config.label_type,
         act_fn_name=config.resid_mlp_config.act_fn_name,
         label_fn_seed=config.label_fn_seed,
+        label_coeffs=None,  # TODO Is this intended?
         data_generation_type=config.data_generation_type,
     )
     dataloader = DatasetGeneratedDataLoader(dataset, batch_size=config.batch_size, shuffle=False)

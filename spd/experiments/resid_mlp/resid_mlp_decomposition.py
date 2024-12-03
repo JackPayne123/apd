@@ -336,6 +336,10 @@ def main(
         feature_probability=config.task_config.feature_probability,
         device=device,
         calc_labels=False,  # Our labels will be the output of the target model
+        label_type=None,
+        act_fn_name=None,
+        label_fn_seed=None,
+        label_coeffs=None,
         data_generation_type=config.task_config.data_generation_type,
     )
 
