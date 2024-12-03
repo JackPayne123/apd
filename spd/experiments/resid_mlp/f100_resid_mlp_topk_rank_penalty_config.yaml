@@ -1,10 +1,11 @@
 wandb_project: spd-resid-mlp
 wandb_run_name: null
-wandb_run_name_prefix: "rp_fixedattrib_"
+wandb_run_name_prefix: "rp_fixedattrib5k_"
 spd_type: rank_penalty
 unit_norm_matrices: false
 seed: 0
 topk: 1.15
+hardcode_topk_mask_step: 5000
 pnorm: 1.0
 batch_topk: true
 param_match_coeff: 1.0
@@ -25,4 +26,4 @@ task_config:
   k: 100
   feature_probability: 0.01
   data_generation_type: "at_least_zero_active"
-  pretrained_model_path: wandb:spd-train-resid-mlp/runs/njgvwytn
+  pretrained_model_path: wandb:spd-train-resid-mlp/runs/c67365j6
