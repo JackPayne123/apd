@@ -265,6 +265,7 @@ class ResidualMLPModel(Model):
         )
         if self.config.apply_output_act_fn:
             out = self.act_fn(out)
+        layer_post_acts["final_residual"] = residual
         return out, layer_pre_acts, layer_post_acts
 
     @staticmethod

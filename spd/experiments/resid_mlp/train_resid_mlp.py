@@ -32,6 +32,7 @@ class ResidMLPTrainConfig(BaseModel):
     resid_mlp_config: ResidualMLPConfig
     label_fn_seed: int = 0
     label_type: Literal["act_plus_resid", "abs"] = "act_plus_resid"
+    loss_type: Literal["readoff", "resid"] = "readoff"
     use_trivial_label_coeffs: bool = False
     feature_probability: PositiveFloat
     importance_val: float | None = None
@@ -57,6 +58,33 @@ class ResidMLPTrainConfig(BaseModel):
                 self.resid_mlp_config.n_features == self.resid_mlp_config.d_embed
             ), "n_features must equal d_embed if we are using an identity embedding matrix"
         return self
+
+
+def loss_function(
+    out: Float[Tensor, "batch n_instances d_model"],
+    labels: Float[Tensor, "batch n_instances d_model"],
+    feature_importances: Float[Tensor, "batch n_instances d_model"],
+    post_acts: dict[str, Float[Tensor, "batch n_instances d_model"]],
+    model: ResidualMLPModel,
+    config: ResidMLPTrainConfig,
+) -> Float[Tensor, "batch n_instances d_embed"] | Float[Tensor, "batch n_instances d_resid"]:
+    if config.loss_type == "readoff":
+        loss = ((out - labels) ** 2) * feature_importances
+    elif config.loss_type == "resid":
+        assert torch.allclose(
+            feature_importances, torch.ones_like(feature_importances)
+        ), "feature_importances incompatible with loss_type resid"
+        resid_out: Float[Tensor, "batch n_instances d_resid"] = post_acts["final_residual"]
+        resid_labels: Float[Tensor, "batch n_instances d_resid"] = einops.einsum(
+            labels,
+            model.W_E,
+            "batch n_instances n_features, n_instances n_features d_embed "
+            "-> batch n_instances d_embed",
+        )
+        loss = (resid_out - resid_labels) ** 2
+    else:
+        raise ValueError(f"Invalid loss_type: {config.loss_type}")
+    return loss
 
 
 def train(
@@ -117,10 +145,10 @@ def train(
         optimizer.zero_grad()
         batch: Float[Tensor, "batch n_instances n_features"] = batch.to(device)
         labels: Float[Tensor, "batch n_instances n_features"] = labels.to(device)
-        out, _, _ = model(batch)
-        # Scale by feature importance as in Anthropic paper
-
-        loss = ((out - labels) ** 2) * feature_importances
+        out, pre_acts, post_acts = model(batch)
+        loss: (
+            Float[Tensor, "batch n_instances d_embed"] | Float[Tensor, "batch n_instances d_resid"]
+        ) = loss_function(out, labels, feature_importances, post_acts, model, config)
         loss = loss.mean(dim=(0, 2))
         current_losses = loss.detach()
         loss = loss.mean(dim=0)
@@ -141,8 +169,8 @@ def train(
         batch, labels = next(iter(dataloader))
         batch = batch.to(device)
         labels = labels.to(device)
-        out, _, _ = model(batch)
-        loss = ((out - labels) ** 2) * feature_importances
+        out, _, post_acts = model(batch)
+        loss = loss_function(out, labels, feature_importances, post_acts, model, config)
         loss = loss.mean(dim=(0, 2))
         final_losses.append(loss)
     final_losses = torch.stack(final_losses).mean(dim=0).cpu().detach()
