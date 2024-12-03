@@ -503,7 +503,7 @@ class TMSSPDRankPenaltyModel(SPDRankPenaltyModel):
         api = wandb.Api()
         run: Run = api.run(wandb_project_run_id)
 
-        checkpoint = fetch_latest_wandb_checkpoint(run)
+        checkpoint = fetch_latest_wandb_checkpoint(run, prefix="spd_model")
 
         run_dir = fetch_wandb_run_dir(run.id)
 
@@ -540,20 +540,19 @@ class TMSSPDRankPenaltyModel(SPDRankPenaltyModel):
 
         with open(paths.final_config) as f:
             final_config_dict = yaml.safe_load(f)
-        config = Config(**final_config_dict)
+        spd_config = Config(**final_config_dict)
 
         with open(paths.tms_train_config) as f:
             tms_train_config_dict = yaml.safe_load(f)
 
-        assert isinstance(config.task_config, TMSTaskConfig)
+        assert isinstance(spd_config.task_config, TMSTaskConfig)
         tms_spd_rank_penalty_config = TMSSPDRankPenaltyModelConfig(
-            **tms_train_config_dict,
-            k=config.task_config.k,
-            m=config.m,
-            bias_val=config.task_config.bias_val,
-            device=tms_train_config_dict["tms_model_config"]["device"],
+            **tms_train_config_dict["tms_model_config"],
+            k=spd_config.task_config.k,
+            m=spd_config.m,
+            bias_val=spd_config.task_config.bias_val,
         )
         model = cls(config=tms_spd_rank_penalty_config)
         params = torch.load(paths.checkpoint, weights_only=True, map_location="cpu")
         model.load_state_dict(params)
-        return model, config
+        return model, spd_config

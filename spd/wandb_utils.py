@@ -14,13 +14,15 @@ from spd.utils import replace_pydantic_model
 T = TypeVar("T", bound=BaseModel)
 
 
-def fetch_latest_wandb_checkpoint(run: Run) -> File:
+def fetch_latest_wandb_checkpoint(run: Run, prefix: str | None = None) -> File:
     """Fetch the latest checkpoint from a wandb run.
 
     NOTE: Assumes that the only files that end in `.pth` are checkpoints.
     """
     # Get the latest checkpoint. Assume format is <name>_<step>.pth or <name>.pth
     checkpoints = [file for file in run.files() if file.name.endswith(".pth")]
+    if prefix:
+        checkpoints = [file for file in checkpoints if file.name.startswith(prefix)]
     if not checkpoints:
         raise ValueError(f"No checkpoint files found in run {run.name}")
 
