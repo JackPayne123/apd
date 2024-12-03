@@ -202,8 +202,12 @@ def run_train(config: TMSTrainConfig, device: str) -> None:
     run_name = (
         f"tms_n-features{model_cfg.n_features}_n-hidden{model_cfg.n_hidden}_"
         f"n-hidden-layers{model_cfg.n_hidden_layers}_n-instances{model_cfg.n_instances}_"
-        f"seed{config.seed}.pth"
+        f"seed{config.seed}"
     )
+    if config.fixed_identity_hidden_layers:
+        run_name += "_fixed-identity"
+    elif config.fixed_random_hidden_layers:
+        run_name += "_fixed-random"
     out_dir = Path(__file__).parent / "out" / run_name
     out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -232,8 +236,8 @@ def run_train(config: TMSTrainConfig, device: str) -> None:
     logger.info(f"Saved model to {model_path}")
 
     if model_cfg.n_hidden == 2:
-        plot_intro_diagram(model, filepath=out_dir / run_name.replace(".pth", ".png"))
-        logger.info(f"Saved diagram to {out_dir / run_name.replace('.pth', '.png')}")
+        plot_intro_diagram(model, filepath=out_dir / "polygon.png")
+        logger.info(f"Saved diagram to {out_dir / 'polygon.png'}")
 
     maxs = calculate_feature_cosine_similarities(model)
     logger.info(f"Cosine sims max: {maxs.tolist()}")
@@ -247,7 +251,7 @@ if __name__ == "__main__":
         tms_model_config=TMSModelConfig(
             n_features=5,
             n_hidden=2,
-            n_hidden_layers=0,
+            n_hidden_layers=1,
             n_instances=12,
             device=device,
         ),
@@ -257,8 +261,8 @@ if __name__ == "__main__":
         seed=0,
         lr=5e-3,
         data_generation_type="at_least_zero_active",
-        fixed_identity_hidden_layers=False,
-        fixed_random_hidden_layers=True,
+        fixed_identity_hidden_layers=True,
+        fixed_random_hidden_layers=False,
     )
 
     set_seed(config.seed)
