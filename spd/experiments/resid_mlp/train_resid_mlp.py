@@ -187,7 +187,8 @@ def run_train(config: ResidMLPTrainConfig, device: str) -> Float[Tensor, " n_ins
         f"n-features{model_cfg.n_features}_d-resid{model_cfg.d_embed}_"
         f"d-mlp{model_cfg.d_mlp}_n-layers{model_cfg.n_layers}_seed{config.seed}"
         f"_p{config.feature_probability}_random_embedding_{config.fixed_random_embedding}_"
-        f"identity_embedding_{config.fixed_identity_embedding}_bias_{model_cfg.in_bias}_{model_cfg.out_bias}"
+        f"identity_embedding_{config.fixed_identity_embedding}_bias_{model_cfg.in_bias}_"
+        f"{model_cfg.out_bias}_loss{config.loss_type}"
     )
     out_dir = Path(__file__).parent / "out" / run_name
 
