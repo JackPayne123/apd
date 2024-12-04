@@ -919,10 +919,15 @@ def optimize(
             topk_act_recon_loss,
         ) = None, None, None, None, None, None, None
         if config.topk is not None:
+            final_subnet_active = True
             # We always assume the final subnetwork is the one we want to distil
-            topk_attrs = attributions[..., :-1] if config.distil_from_target else attributions
+            topk_attrs = (
+                attributions[..., :-1]
+                if config.distil_from_target or final_subnet_active
+                else attributions
+            )
             topk_mask = calc_topk_mask(topk_attrs, config.topk, batch_topk=config.batch_topk)
-            if config.distil_from_target:
+            if config.distil_from_target or final_subnet_active:
                 # Add back the final subnetwork index to the topk mask and set it to True
                 last_subnet_mask = torch.ones(
                     (*topk_mask.shape[:-1], 1), dtype=torch.bool, device=device
@@ -981,6 +986,11 @@ def optimize(
             mask = topk_mask if topk_mask is not None else lp_sparsity_loss_per_k
             assert mask is not None
             schatten_pnorm = config.schatten_pnorm if config.schatten_pnorm is not None else 1.0
+
+            # Set the mask for the final (identity) subnet to 0 for schatten loss
+            mask = mask.clone()
+            mask[:, :, -1] = 0
+
             # Use the attributions as the mask in the lp case, and topk_mask otherwise
             schatten_loss = calc_schatten_loss(
                 As_and_Bs_vals=list(model.all_As_and_Bs().values()),
@@ -1117,6 +1127,13 @@ def optimize(
         # Skip gradient step if we are at the last step (last step just for plotting and logging)
         if step != config.steps:
             loss.backward()
+
+            # # Don't update the parameters for the final subnetwork
+            # model.A.grad[..., -1, :, :].zero_()
+            # model.B.grad[..., -1, :, :].zero_()
+            # for i in range(len(model.hidden_layers)):
+            #     model.hidden_layers[i].A.grad[..., -1, :, :].zero_()
+            #     model.hidden_layers[i].B.grad[..., -1, :, :].zero_()
 
             if step % config.print_freq == 0 and config.wandb_project:
                 # Calculate gradient norm

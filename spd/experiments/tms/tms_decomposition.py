@@ -45,7 +45,7 @@ def get_run_name(config: Config, tms_model_config: TMSModelConfig) -> str:
     else:
         run_suffix = get_common_run_name_suffix(config)
         run_suffix += f"ft{tms_model_config.n_features}_"
-        run_suffix += f"hid{tms_model_config.n_hidden}"
+        run_suffix += f"hid{tms_model_config.n_hidden}_"
         run_suffix += f"hid-layers{tms_model_config.n_hidden_layers}"
     return config.wandb_run_name_prefix + run_suffix
 
@@ -340,9 +340,32 @@ def main(
 
     # Manually set the bias for the SPD model from the bias in the pretrained model
     model.b_final.data[:] = target_model.b_final.data.clone()
-
     if not task_config.train_bias:
         model.b_final.requires_grad = False
+
+    # Fix the final subnet to be zeros everywhere and an identity matrix in the hidden layers
+    # A: [n_instances, k, n_features, m]
+    model.A.data[:, -1, :, :] = torch.zeros_like(model.A.data[:, -1, :, :])
+    # B: [n_instances, k, m, n_hidden]
+    model.B.data[:, -1, :, :] = torch.zeros_like(model.B.data[:, -1, :, :])
+
+    if model.hidden_layers is not None:
+        for i in range(len(model.hidden_layers)):
+            for x_shape in [model.hidden_layers[i].A.shape, model.hidden_layers[i].B.shape]:
+                assert x_shape == (
+                    model.n_instances,
+                    model.k,
+                    model.config.n_hidden,
+                    model.config.n_hidden,
+                )
+            # Hidden layer A: [n_instances, k, n_hidden, n_hidden]
+            model.hidden_layers[i].A.data[:, -1, :, :] = torch.eye(
+                model.config.n_hidden, device=device
+            )
+            # Hidden layer B: [n_instances, k, n_hidden, n_hidden]
+            model.hidden_layers[i].B.data[:, -1, :, :] = torch.eye(
+                model.config.n_hidden, device=device
+            )
 
     # Map from pretrained model's `all_decomposable_params` to the SPD models'
     # `all_subnetwork_params_summed`.
