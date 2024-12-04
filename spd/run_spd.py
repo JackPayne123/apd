@@ -278,6 +278,25 @@ def get_lr_schedule_fn(
         gamma = 0.5 ** (1 / halflife)
         logger.info(f"Using exponential LR schedule with halflife {halflife} steps (gamma {gamma})")
         return lambda step, steps: gamma**step
+    elif lr_schedule == "cosine_steps":
+
+        def lr_schedule_fn(step: int, steps: int) -> float:
+            if step < steps * 0.5:
+                return np.cos(0.5 * np.pi * step / (steps - 1))
+            elif step < steps * 0.6:
+                return 0.1 + np.cos(0.5 * np.pi * step / (steps * 0.6 - 1))
+            elif step < steps * 0.7:
+                return 0.01 + np.cos(0.5 * np.pi * step / (steps * 0.7 - 1))
+            elif step < steps * 0.8:
+                return 0.001 + np.cos(0.5 * np.pi * step / (steps * 0.8 - 1))
+            elif step < steps * 0.9:
+                return 0.0001 + np.cos(0.5 * np.pi * step / (steps * 0.9 - 1))
+            elif step < steps:
+                return 0.00001 + np.cos(0.5 * np.pi * step / (steps - 1))
+            else:
+                return 0.000001
+
+        return lr_schedule_fn
     else:
         raise ValueError(f"Unknown lr_schedule: {lr_schedule}")
 
