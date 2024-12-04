@@ -212,13 +212,13 @@ def calculate_virtual_weights(model: ResidualMLPModel, device: str) -> dict[str,
 def relu_contribution_plot(
     ax1: plt.Axes,
     ax2: plt.Axes,
-    virtual_weights: dict[str, Float[Tensor, "i j"]],
+    all_diag_relu_conns: Float[Tensor, "n_instances n_features d_mlp"],
     model: ResidualMLPModel | ResidualMLPSPDRankPenaltyModel,
     device: str,
     instance_idx: int = 0,
 ):
     diag_relu_conns: Float[Tensor, "n_features d_mlp"] = (
-        virtual_weights["diag_relu_conns"][instance_idx].cpu().detach()
+        all_diag_relu_conns[instance_idx].cpu().detach()
     )
     d_mlp = model.config.d_mlp
     n_layers = model.config.n_layers
@@ -303,7 +303,7 @@ def plot_virtual_weights(
 
 
 def spd_calculate_virtual_weights(
-    model: ResidualMLPSPDRankPenaltyModel, device: str, k_select: int | Literal["sum"] = 0
+    model: ResidualMLPSPDRankPenaltyModel, device: str
 ) -> dict[str, Tensor]:
     """Currently ignoring interactions between layers. Just flattening (n_layers, d_mlp)"""
     n_instances = model.config.n_instances
@@ -342,17 +342,17 @@ def spd_calculate_virtual_weights(
     assert b_in.shape == (n_instances, k_max, n_layers * d_mlp) if b_in is not None else True
     assert b_out.shape == (n_instances, k_max, d_embed) if b_out is not None else True
     # Calculate connection strengths / virtual weights
-    in_conns: Float[Tensor, "n_instances k, n_features d_mlp"] = einops.einsum(
+    in_conns: Float[Tensor, "n_instances k n_features d_mlp"] = einops.einsum(
         W_E,
         W_in,
         "n_instances n_features d_embed, n_instances k d_embed d_mlp -> n_instances k n_features d_mlp",
     )
-    out_conns: Float[Tensor, "n_instances k, d_mlp n_features"] = einops.einsum(
+    out_conns: Float[Tensor, "n_instances k d_mlp n_features"] = einops.einsum(
         W_out,
         W_E,
         "n_instances k d_mlp d_embed, n_instances n_features d_embed -> n_instances k d_mlp n_features",
     )
-    diag_relu_conns: Float[Tensor, "n_instances k, n_features d_mlp"] = einops.einsum(
+    diag_relu_conns: Float[Tensor, "n_instances k n_features d_mlp"] = einops.einsum(
         in_conns,
         out_conns,
         "n_instances k n_features d_mlp, n_instances k d_mlp n_features -> n_instances k n_features d_mlp",
@@ -360,32 +360,53 @@ def spd_calculate_virtual_weights(
     assert in_conns.shape == (n_instances, k_max, n_features, n_layers * d_mlp)
     assert out_conns.shape == (n_instances, k_max, n_layers * d_mlp, n_features)
     assert diag_relu_conns.shape == (n_instances, k_max, n_features, n_layers * d_mlp)
-    if k_select == "sum":
-        virtual_weights = {
-            "W_E": W_E,
-            "W_U": W_U,
-            "W_in": W_in.sum(dim=1),
-            "W_out": W_out.sum(dim=1),
-            "in_conns": in_conns.sum(dim=1),
-            "out_conns": out_conns.sum(dim=1),
-            "diag_relu_conns": diag_relu_conns.sum(dim=1),
-        }
-        if b_in is not None:
-            virtual_weights["b_in"] = b_in.sum(dim=1)
-        if b_out is not None:
-            virtual_weights["b_out"] = b_out.sum(dim=1)
-    else:
-        virtual_weights = {
-            "W_E": W_E,
-            "W_U": W_U,
-            "W_in": W_in[:, k_select],
-            "W_out": W_out[:, k_select],
-            "in_conns": in_conns[:, k_select],
-            "out_conns": out_conns[:, k_select],
-            "diag_relu_conns": diag_relu_conns[:, k_select],
-        }
-        if b_in is not None:
-            virtual_weights["b_in"] = b_in[:, k_select]
-        if b_out is not None:
-            virtual_weights["b_out"] = b_out[:, k_select]
+    virtual_weights = {
+        "W_E": W_E,
+        "W_U": W_U,
+        "W_in": W_in,
+        "W_out": W_out,
+        "in_conns": in_conns,
+        "out_conns": out_conns,
+        "diag_relu_conns": diag_relu_conns,
+    }
+    if b_in is not None:
+        virtual_weights["b_in"] = b_in
+    if b_out is not None:
+        virtual_weights["b_out"] = b_out
     return virtual_weights
+
+
+def spd_calculate_diag_relu_conns(
+    model: ResidualMLPSPDRankPenaltyModel,
+    device: str,
+    k_select: int | Literal["sum_before", "sum_nocrossterms", "sum_onlycrossterms"] = 0,
+) -> Float[Tensor, "n_instances n_features d_mlp"]:
+    virtual_weights = spd_calculate_virtual_weights(model, device)
+    if isinstance(k_select, int):
+        return virtual_weights["diag_relu_conns"][:, k_select]
+    elif k_select == "sum_nocrossterms":
+        return virtual_weights["diag_relu_conns"].sum(dim=1)
+    else:
+        in_conns: Float[Tensor, "n_instances k n_features d_mlp"] = virtual_weights["in_conns"]
+        out_conns: Float[Tensor, "n_instances k d_mlp n_features"] = virtual_weights["out_conns"]
+        if k_select == "sum_onlycrossterms":
+            nocross_diag_relu_conns: Float[Tensor, "n_instances n_features d_mlp"] = (
+                virtual_weights["diag_relu_conns"].sum(dim=1)
+            )
+            all_diag_relu_conns: Float[Tensor, "n_instances k1 k2 n_features d_mlp"] = (
+                einops.einsum(
+                    in_conns,
+                    out_conns,
+                    "n_instances k1 n_features d_mlp, n_instance k2 d_mlp n_features -> n_instances k1 k2 n_features d_mlp",
+                )
+            )
+            return all_diag_relu_conns.sum(dim=(-2, -3)) - nocross_diag_relu_conns
+        elif k_select == "sum_before":
+            sum_diag_relu_conns: Float[Tensor, "n_instances n_features d_mlp"] = einops.einsum(
+                in_conns.sum(dim=1),
+                out_conns.sum(dim=1),
+                "n_instances n_features d_mlp, n_instance d_mlp n_features -> n_instances n_features d_mlp",
+            )
+            return sum_diag_relu_conns
+        else:
+            raise ValueError(f"Invalid k_select: {k_select}")

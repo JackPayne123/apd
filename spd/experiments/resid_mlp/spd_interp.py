@@ -4,15 +4,13 @@ import matplotlib.pyplot as plt
 import numpy as np
 import torch
 from jaxtyping import Float
-from matplotlib.colors import Normalize
 from torch import Tensor
 
 from spd.experiments.resid_mlp.models import ResidualMLPModel, ResidualMLPSPDRankPenaltyModel
 from spd.experiments.resid_mlp.plotting import (
     plot_individual_feature_response,
-    plot_virtual_weights,
     relu_contribution_plot,
-    spd_calculate_virtual_weights,
+    spd_calculate_diag_relu_conns,
 )
 from spd.experiments.resid_mlp.resid_mlp_dataset import ResidualMLPDataset
 from spd.run_spd import ResidualMLPTaskConfig, calc_recon_mse
@@ -22,7 +20,7 @@ from spd.utils import run_spd_forward_pass, set_seed
 device = "cpu"
 print(f"Using device: {device}")
 set_seed(0)  # You can change this seed if needed
-wandb_path = "wandb:spd-resid-mlp/runs/svih4aik"
+wandb_path = "wandb:spd-resid-mlp/runs/cbayicx6"
 # Load the pretrained SPD model
 model, config, label_coeffs = ResidualMLPSPDRankPenaltyModel.from_pretrained(wandb_path)
 assert isinstance(config.task_config, ResidualMLPTaskConfig)
@@ -112,33 +110,34 @@ plot_individual_feature_response(spd_dummy(), device, target_train_config_dict, 
 
 # %%
 
-fig = plt.figure(constrained_layout=True, figsize=(10, 50))
-gs = fig.add_gridspec(ncols=2, nrows=20 + 1 + 2)
-ax_ID = fig.add_subplot(gs[:2, :])
-ax1 = fig.add_subplot(gs[2, 0])
-ax2 = fig.add_subplot(gs[2, 1])
-virtual_weights = spd_calculate_virtual_weights(model, device, k_select="sum")
-plot_virtual_weights(virtual_weights, device, ax1=ax1, ax2=ax2, ax3=ax_ID)
-ax1.set_ylabel("sum over k")
+# fig = plt.figure(constrained_layout=True, figsize=(10, 50))
+# gs = fig.add_gridspec(ncols=2, nrows=20 + 1 + 2)
+# ax_ID = fig.add_subplot(gs[:2, :])
+# ax1 = fig.add_subplot(gs[2, 0])
+# ax2 = fig.add_subplot(gs[2, 1])
+# virtual_weights = spd_calculate_virtual_weights(model, device)
+# plot_virtual_weights(virtual_weights, device, ax1=ax1, ax2=ax2, ax3=ax_ID)
+# ax1.set_ylabel("sum over k")
 
-norm = Normalize(vmin=-1, vmax=1)
-for ki in range(model.k):
-    ax1 = fig.add_subplot(gs[3 + ki, 0])
-    ax2 = fig.add_subplot(gs[3 + ki, 1])
-    virtual_weights = spd_calculate_virtual_weights(model, device, k_select=ki)
-    plot_virtual_weights(virtual_weights, device, ax1=ax1, ax2=ax2, norm=norm)
-    ax1.set_ylabel(f"k={ki}")
-plt.show()
+# norm = Normalize(vmin=-1, vmax=1)
+# for ki in range(model.k):
+#     ax1 = fig.add_subplot(gs[3 + ki, 0])
+#     ax2 = fig.add_subplot(gs[3 + ki, 1])
+#     virtual_weights = spd_calculate_virtual_weights(model, device)
+#     plot_virtual_weights(virtual_weights, device, ax1=ax1, ax2=ax2, norm=norm)
+#     ax1.set_ylabel(f"k={ki}")
+# plt.show()
 # %%
 fig, axes1 = plt.subplots(21, 1, figsize=(10, 30), constrained_layout=True)
 axes1 = np.atleast_1d(axes1)  # type: ignore
 fig, axes2 = plt.subplots(21, 1, figsize=(5, 30), constrained_layout=True)
 axes2 = np.atleast_1d(axes2)  # type: ignore
-virtual_weights = spd_calculate_virtual_weights(model, device, k_select="sum")
-relu_contribution_plot(axes1[0], axes2[0], virtual_weights, model, device)
+relu_conns = spd_calculate_diag_relu_conns(model, device, k_select="sum_before")
+# TODO More sums
+relu_contribution_plot(axes1[0], axes2[0], relu_conns, model, device)
 for k in range(model.k):
-    virtual_weights = spd_calculate_virtual_weights(model, device, k_select=k)
-    relu_contribution_plot(axes1[k + 1], axes2[k + 1], virtual_weights, model, device)
+    relu_conns = spd_calculate_diag_relu_conns(model, device, k_select=k)
+    relu_contribution_plot(axes1[k + 1], axes2[k + 1], relu_conns, model, device)
     axes1[k + 1].set_ylabel(f"k={k}")
     axes2[k + 1].set_ylabel(f"k={k}")
     if k < model.k - 1:

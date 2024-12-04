@@ -23,7 +23,7 @@ from spd.experiments.resid_mlp.models import (
 )
 from spd.experiments.resid_mlp.plotting import (
     relu_contribution_plot,
-    spd_calculate_virtual_weights,
+    spd_calculate_diag_relu_conns,
 )
 from spd.experiments.resid_mlp.resid_mlp_dataset import (
     ResidualMLPDataset,
@@ -199,23 +199,27 @@ def resid_mlp_plot_results_fn(
     fig_dict = {}
 
     fig1, axes1 = plt.subplots(
-        model.config.k + 1, 1, figsize=(20, 3 + 2 * model.config.k), constrained_layout=True
+        model.config.k + 3, 1, figsize=(20, 3 + 2 * model.config.k), constrained_layout=True
     )
     axes1 = np.atleast_1d(axes1)  # type: ignore
     fig2, axes2 = plt.subplots(
-        model.config.k + 1, 1, figsize=(10, 3 + 2 * model.config.k), constrained_layout=True
+        model.config.k + 3, 1, figsize=(10, 3 + 2 * model.config.k), constrained_layout=True
     )
     axes2 = np.atleast_1d(axes2)  # type: ignore
-    virtual_weights = spd_calculate_virtual_weights(model, device, k_select="sum")
-    relu_contribution_plot(axes1[0], axes2[0], virtual_weights, model, device)
+    relu_conns = spd_calculate_diag_relu_conns(model, device, k_select="sum_before")
+    relu_contribution_plot(axes1[0], axes2[0], relu_conns, model, device)
+    relu_conns = spd_calculate_diag_relu_conns(model, device, k_select="sum_nocrossterms")
+    relu_contribution_plot(axes1[1], axes2[1], relu_conns, model, device)
+    relu_conns = spd_calculate_diag_relu_conns(model, device, k_select="sum_onlycrossterms")
+    relu_contribution_plot(axes1[2], axes2[2], relu_conns, model, device)
     for k in range(model.config.k):
-        virtual_weights = spd_calculate_virtual_weights(model, device, k_select=k)
-        relu_contribution_plot(axes1[k + 1], axes2[k + 1], virtual_weights, model, device)
-        axes1[k + 1].set_ylabel(f"k={k}")
-        axes2[k + 1].set_ylabel(f"k={k}")
+        relu_conns = spd_calculate_diag_relu_conns(model, device, k_select=k)
+        relu_contribution_plot(axes1[k + 3], axes2[k + 3], relu_conns, model, device)
+        axes1[k + 3].set_ylabel(f"k={k}")
+        axes2[k + 3].set_ylabel(f"k={k}")
         if k < model.config.k - 1:
-            axes1[k + 1].set_xlabel("")
-            axes2[k + 1].set_xlabel("")
+            axes1[k + 3].set_xlabel("")
+            axes2[k + 3].set_xlabel("")
     fig_dict["feature_contributions"] = fig1
     fig_dict["relu_contributions"] = fig2
 
