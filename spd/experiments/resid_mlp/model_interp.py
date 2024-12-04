@@ -1,13 +1,17 @@
 # %% Imports
+
+import einops
 import matplotlib.pyplot as plt
 import torch
 
-from spd.experiments.resid_mlp.models import ResidualMLPModel
+from spd.experiments.piecewise.plotting import plot_matrix
+from spd.experiments.resid_mlp.models import (
+    ResidualMLPModel,
+)
 from spd.experiments.resid_mlp.plotting import (
     calculate_virtual_weights,
     plot_2d_snr,
     plot_individual_feature_response,
-    plot_virtual_weights,
     relu_contribution_plot,
 )
 from spd.experiments.resid_mlp.resid_mlp_dataset import ResidualMLPDataset
@@ -41,14 +45,12 @@ fig = plot_individual_feature_response(
     lambda batch: model(batch)[0],
     model_config=train_config.resid_mlp_config,
     device=device,
-    train_config=train_config_dict,
     sweep=False,
 )
 fig = plot_individual_feature_response(
     lambda batch: model(batch)[0],
     model_config=train_config.resid_mlp_config,
     device=device,
-    train_config=train_config_dict,
     sweep=True,
 )
 plt.show()
@@ -79,8 +81,38 @@ ax1 = fig.add_subplot(gs[0, 0])
 ax2 = fig.add_subplot(gs[0, 1])
 ax3 = fig.add_subplot(gs[1:, :])
 virtual_weights = calculate_virtual_weights(model=model, device=device)
-fig = plot_virtual_weights(
-    virtual_weights=virtual_weights, device=device, ax1=ax1, ax2=ax2, ax3=ax3, instance_idx=0
+instance_idx = 0
+in_conns = virtual_weights["in_conns"][instance_idx].cpu().detach()
+out_conns = virtual_weights["out_conns"][instance_idx].cpu().detach()
+W_E_W_U = einops.einsum(
+    virtual_weights["W_E"][instance_idx],
+    virtual_weights["W_U"][instance_idx],
+    "n_features1 d_embed, d_embed n_features2 -> n_features1 n_features2",
+)
+plot_matrix(
+    ax1,
+    in_conns.T,
+    "Virtual input weights $(W_E W_{in})^T$",
+    "Features",
+    "Neurons",
+    colorbar_format="%.2f",
+)
+plot_matrix(
+    ax2,
+    out_conns,
+    "Virtual output weights $W_{out} W_U$",
+    "Features",
+    "Neurons",
+    colorbar_format="%.2f",
+)
+ax2.xaxis.set_label_position("top")
+plot_matrix(
+    ax3,
+    W_E_W_U,
+    "Virtual weights $W_E W_U$",
+    "Features",
+    "Features",
+    colorbar_format="%.2f",
 )
 plt.show()
 

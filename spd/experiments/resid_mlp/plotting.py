@@ -1,11 +1,13 @@
 from collections.abc import Callable
-from typing import Any, Literal
+from typing import Literal
 
 import einops
 import matplotlib.pyplot as plt
+import numpy as np
 import torch
 import torch.nn.functional as F
 from jaxtyping import Float
+from matplotlib.colors import Normalize
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 from torch import Tensor
 
@@ -22,10 +24,10 @@ def plot_individual_feature_response(
     model_fn: Callable[[Tensor], Tensor],
     device: str,
     model_config: ResidualMLPConfig | ResidualMLPSPDRankPenaltyConfig,
-    train_config: dict[str, Any],
     sweep: bool = False,
     subtract_inputs: bool = False,
     instance_idx: int = 0,
+    ax: plt.Axes | None = None,
 ):
     """Plot the response of the model to a single feature being active.
 
@@ -43,16 +45,15 @@ def plot_individual_feature_response(
 
     out = out[:, instance_idx, :]
     cmap_viridis = plt.get_cmap("viridis")
-    fig, ax = plt.subplots(constrained_layout=True)
+    fig, ax = plt.subplots(constrained_layout=True) if ax is None else (ax.figure, ax)
     sweep_str = "set to 1" if not sweep else "between -1 and 1"
     title = (
         f"Feature response with one active feature {sweep_str}\n"
-        f"Trained with p={train_config['feature_probability']}, "
-        f"n_features={train_config['resid_mlp_config']['n_features']}, "
-        f"d_embed={train_config['resid_mlp_config']['d_embed']}, "
-        f"d_mlp={train_config['resid_mlp_config']['d_mlp']}"
+        f"n_features={model_config.n_features}, "
+        f"d_embed={model_config.d_embed}, "
+        f"d_mlp={model_config.d_mlp}"
     )
-    fig.suptitle(title)
+    ax.set_title(title)
     inputs = batch[torch.arange(n_features), instance_idx, torch.arange(n_features)].detach().cpu()
     for f in range(n_features):
         x = torch.arange(n_features)
@@ -61,7 +62,7 @@ def plot_individual_feature_response(
             y = y - inputs
         ax.plot(x, y, color=cmap_viridis(f / n_features))
     # Plot labels
-    label_fn = F.relu if train_config["resid_mlp_config"]["act_fn_name"] == "relu" else F.gelu
+    label_fn = F.relu if model_config.act_fn_name == "relu" else F.gelu
     targets = label_fn(inputs) if subtract_inputs else inputs + label_fn(inputs)
     ax.plot(torch.arange(n_features), targets.cpu().detach(), color="red", label="Target")
     baseline = torch.zeros(n_features) if subtract_inputs else inputs
@@ -71,7 +72,7 @@ def plot_individual_feature_response(
     # Colorbar
     sm = plt.cm.ScalarMappable(cmap=cmap_viridis, norm=plt.Normalize(0, n_features))
     sm.set_array([])
-    cbar = fig.colorbar(sm, ax=ax, orientation="vertical")
+    cbar = plt.colorbar(sm, ax=ax, orientation="vertical")
     cbar.set_label("Active input feature index")
     ax.set_xlabel("Output feature index")
     ax.set_ylabel("Output (all inputs superimposed)")
@@ -160,7 +161,6 @@ def calculate_virtual_weights(model: ResidualMLPModel, device: str) -> dict[str,
     W_in: Float[Tensor, "n_instances d_embed d_mlp_eff"] = torch.cat(
         [model.layers[i].linear1.data for i in range(n_layers)], dim=-1
     )
-    print(W_in.shape)
     W_out: Float[Tensor, "n_instances d_mlp_eff d_embed"] = torch.cat(
         [model.layers[i].linear2.data for i in range(n_layers)],
         dim=-2,
@@ -231,7 +231,6 @@ def relu_contribution_plot(
     n_layers = model.config.n_layers
     n_features = model.config.n_features
 
-    ax1.set_title("How much does each ReLU contribute to each feature?")
     ax1.axvline(-0.5, color="k", linestyle="--", alpha=0.3, lw=0.5)
     for i in range(model.config.n_features):
         ax1.scatter([i] * d_mlp * n_layers, diag_relu_conns[i, :], alpha=0.3, marker=".", c="k")
@@ -243,11 +242,7 @@ def relu_contribution_plot(
                     i, diag_relu_conns[i, j].item(), str(j), color=cmap_label(j / d_mlp / n_layers)
                 )
     ax1.axhline(0, color="k", linestyle="--", alpha=0.3)
-    ax1.set_xlabel("Features")
-    ax1.set_ylabel("Weights to ReLUs")
     ax1.set_xlim(-0.5, model.config.n_features - 0.5)
-
-    ax2.set_title("How much does each feature route through each ReLU?")
     ax2.axvline(-0.5, color="k", linestyle="--", alpha=0.3, lw=0.5)
     for i in range(d_mlp * n_layers):
         ax2.scatter([i] * n_features, diag_relu_conns[:, i], alpha=0.3, marker=".", c="k")
@@ -257,56 +252,9 @@ def relu_contribution_plot(
                 cmap_label = plt.get_cmap("hsv")
                 ax2.text(i, diag_relu_conns[j, i].item(), str(j), color=cmap_label(j / n_features))
     ax2.axhline(0, color="k", linestyle="--", alpha=0.3)
+    ax1.set_xlabel("Features")
     ax2.set_xlabel("ReLUs (consecutively enumerated throughout layers)")
-    ax2.set_ylabel("Weights to features")
     ax2.set_xlim(-0.5, d_mlp * n_layers - 0.5)
-
-
-def plot_virtual_weights(
-    virtual_weights: dict[str, Tensor],
-    device: str,
-    ax1: plt.Axes,
-    ax2: plt.Axes,
-    ax3: plt.Axes | None = None,
-    instance_idx: int = 0,
-    norm: plt.Normalize | None = None,
-):
-    in_conns = virtual_weights["in_conns"][instance_idx].cpu().detach()
-    out_conns = virtual_weights["out_conns"][instance_idx].cpu().detach()
-    W_E_W_U = einops.einsum(
-        virtual_weights["W_E"][instance_idx],
-        virtual_weights["W_U"][instance_idx],
-        "n_features1 d_embed, d_embed n_features2 -> n_features1 n_features2",
-    )
-    plot_matrix(
-        ax1,
-        in_conns.T,
-        "Virtual input weights $(W_E W_{in})^T$",
-        "Features",
-        "Neurons",
-        colorbar_format="%.2f",
-        norm=norm,
-    )
-    plot_matrix(
-        ax2,
-        out_conns,
-        "Virtual output weights $W_{out} W_U$",
-        "Features",
-        "Neurons",
-        colorbar_format="%.2f",
-        norm=norm,
-    )
-    ax2.xaxis.set_label_position("top")
-    if ax3 is not None:
-        plot_matrix(
-            ax3,
-            W_E_W_U,
-            "Virtual weights $W_E W_U$",
-            "Features",
-            "Features",
-            colorbar_format="%.2f",
-            norm=norm,
-        )
 
 
 def spd_calculate_virtual_weights(
@@ -341,7 +289,6 @@ def spd_calculate_virtual_weights(
         if has_bias2
         else None
     )
-    # model.layers[0].linear1.subnetwork_params()
     assert W_E.shape == (n_instances, n_features, d_embed)
     assert W_U.shape == (n_instances, d_embed, n_features)
     assert W_in.shape == (n_instances, k_max, d_embed, n_layers * d_mlp)
@@ -417,3 +364,157 @@ def spd_calculate_diag_relu_conns(
             return sum_diag_relu_conns
         else:
             raise ValueError(f"Invalid k_select: {k_select}")
+
+
+def plot_spd_relu_contribution(
+    spd_model: ResidualMLPSPDRankPenaltyModel,
+    target_model: ResidualMLPModel,
+    device: str = "cuda",
+    k_select: int | Literal["sum_before", "sum_nocrossterms", "sum_onlycrossterms"] = 0,
+    k_plot_limit: int | None = None,
+):
+    offset = 4
+    nrows = (k_plot_limit or spd_model.config.k) + offset
+    fig1, axes1 = plt.subplots(nrows, 1, figsize=(20, 3 + 2 * nrows), constrained_layout=True)
+    axes1 = np.atleast_1d(axes1)  # type: ignore
+    fig2, axes2 = plt.subplots(nrows, 1, figsize=(10, 3 + 2 * nrows), constrained_layout=True)
+    axes2 = np.atleast_1d(axes2)  # type: ignore
+
+    virtual_weights = calculate_virtual_weights(target_model, device)
+    relu_conns = virtual_weights["diag_relu_conns"]
+    relu_contribution_plot(axes1[0], axes2[0], relu_conns, target_model, device)
+    axes1[0].set_ylabel("Target model", fontsize=8)
+    axes2[0].set_ylabel("Target model", fontsize=8)
+    axes1[0].set_xlabel("")
+    axes2[0].set_xlabel("")
+    relu_conns = spd_calculate_diag_relu_conns(spd_model, device, k_select="sum_before")
+    relu_contribution_plot(axes1[1], axes2[1], relu_conns, spd_model, device)
+    axes1[1].set_ylabel("SPD model full sum of all subnets", fontsize=8)
+    axes2[1].set_ylabel("SPD model full sum of all subnets", fontsize=8)
+    axes1[1].set_xlabel("")
+    axes2[1].set_xlabel("")
+    relu_conns = spd_calculate_diag_relu_conns(spd_model, device, k_select="sum_nocrossterms")
+    relu_contribution_plot(axes1[2], axes2[2], relu_conns, spd_model, device)
+    axes1[2].set_ylabel("SPD model sum without cross terms", fontsize=8)
+    axes2[2].set_ylabel("SPD model sum without cross terms", fontsize=8)
+    axes1[2].set_xlabel("")
+    axes2[2].set_xlabel("")
+    relu_conns = spd_calculate_diag_relu_conns(spd_model, device, k_select="sum_onlycrossterms")
+    relu_contribution_plot(axes1[3], axes2[3], relu_conns, spd_model, device)
+    axes1[3].set_ylabel("SPD model sum only cross terms", fontsize=8)
+    axes2[3].set_ylabel("SPD model sum only cross terms", fontsize=8)
+    axes1[3].set_xlabel("")
+    axes2[3].set_xlabel("")
+    for k in range(k_plot_limit or spd_model.config.k):
+        relu_conns = spd_calculate_diag_relu_conns(spd_model, device, k_select=k)
+        relu_contribution_plot(axes1[k + offset], axes2[k + offset], relu_conns, spd_model, device)
+        axes1[k + offset].set_ylabel(f"k={k}")
+        axes2[k + offset].set_ylabel(f"k={k}")
+        if k < (k_plot_limit or spd_model.config.k) - 1:
+            axes1[k + offset].set_xlabel("")
+            axes2[k + offset].set_xlabel("")
+    return fig1, fig2
+
+
+def analyze_per_feature_performance(
+    model_fn: Callable[[Float[Tensor, "batch n_instances"]], Float[Tensor, "batch n_instances"]],
+    model_config: ResidualMLPConfig | ResidualMLPSPDRankPenaltyConfig,
+    device: str,
+    batch_size: int = 128,
+    ax: plt.Axes | None = None,
+    label: str | None = None,
+    sorted_indices: torch.Tensor | None = None,
+) -> torch.Tensor:
+    """For each feature, run a bunch where only that feature varies, then measure loss"""
+    n_features = model_config.n_features
+    n_instances = model_config.n_instances
+    features = torch.arange(model_config.n_features)
+    losses = torch.zeros(model_config.n_features)
+    label_fn = F.relu if model_config.act_fn_name == "relu" else F.gelu
+    for i in range(model_config.n_features):
+        batch_i = torch.zeros((batch_size, n_instances, n_features), device=device)
+        batch_i[:, 0, i] = torch.linspace(-1, 1, batch_size)
+        labels_i = torch.zeros((batch_size, n_instances, n_features), device=device)
+        labels_i[:, 0, i] = batch_i[:, 0, i] + label_fn(batch_i[:, 0, i])
+        model_output = model_fn(batch_i)
+        loss = F.mse_loss(model_output, labels_i)
+        losses[i] = loss.item()
+    losses = losses.detach().cpu()
+    sorted_indices = sorted_indices if sorted_indices is not None else losses.argsort()
+    # Plot the losses as bar chart with x labels corresponding to feature index
+    if ax is None:
+        fig, ax = plt.subplots(figsize=(15, 5))
+    ax.bar(features, losses[sorted_indices], alpha=0.5, label=label)
+    ax.set_xticks(features, features[sorted_indices].numpy(), fontsize=6, rotation=90)
+    ax.set_xlabel("Feature index")
+    ax.set_ylabel("Loss")
+    return sorted_indices
+
+
+def plot_virtual_weights_target_spd(
+    target_model: ResidualMLPModel, model: ResidualMLPSPDRankPenaltyModel, device: str
+):
+    target_virtual_weights = calculate_virtual_weights(target_model, device)
+    spd_virtual_weights = spd_calculate_virtual_weights(model=model, device=device)
+    instance_idx = 0
+    fig = plt.figure(constrained_layout=True, figsize=(10, 2 * model.config.k + 8))
+    gs = fig.add_gridspec(ncols=2, nrows=model.config.k + 1 + 2)
+    ax_ID = fig.add_subplot(gs[:2, :])
+    W_E_W_U = einops.einsum(
+        target_virtual_weights["W_E"][instance_idx],
+        target_virtual_weights["W_U"][instance_idx],
+        "n_features1 d_embed, d_embed n_features2 -> n_features1 n_features2",
+    )
+    plot_matrix(
+        ax_ID,
+        W_E_W_U,
+        "Virtual weights $W_E W_U$",
+        "Features",
+        "Features",
+        colorbar_format="%.2f",
+    )
+    norm = Normalize(vmin=-1, vmax=1)
+    ax1 = fig.add_subplot(gs[2, 0])
+    ax2 = fig.add_subplot(gs[2, 1])
+    in_conns = target_virtual_weights["in_conns"][instance_idx].cpu().detach()
+    out_conns = target_virtual_weights["out_conns"][instance_idx].cpu().detach()
+    plot_matrix(
+        ax1,
+        in_conns.T,
+        "Virtual input weights $(W_E W_{in})^T$",
+        "Features",
+        "(Target Model) Neurons",
+        colorbar_format="%.2f",
+        norm=norm,
+    )
+    plot_matrix(
+        ax2,
+        out_conns,
+        "Virtual output weights $W_{out} W_U$",
+        "Features",
+        "Neurons",
+        colorbar_format="%.2f",
+        norm=norm,
+    )
+    for ki in range(model.config.k):
+        ax1 = fig.add_subplot(gs[3 + ki, 0])
+        ax2 = fig.add_subplot(gs[3 + ki, 1])
+        plot_matrix(
+            ax1,
+            spd_virtual_weights["in_conns"][instance_idx, ki].T,
+            "$(W_E W_{in})^T$",
+            "Features",
+            f"k={ki} Neurons",
+            colorbar_format="%.2f",
+            norm=norm,
+        )
+        plot_matrix(
+            ax2,
+            spd_virtual_weights["out_conns"][instance_idx, ki],
+            "$W_{out} W_U$",
+            "Features",
+            "Neurons",
+            colorbar_format="%.2f",
+            norm=norm,
+        )
+    return fig

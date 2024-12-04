@@ -1,20 +1,18 @@
 # %% Imports
 
-from collections.abc import Callable
 
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
-import torch.nn.functional as F
 from jaxtyping import Float
 from torch import Tensor
-from tqdm import tqdm
 
 from spd.experiments.resid_mlp.models import ResidualMLPModel, ResidualMLPSPDRankPenaltyModel
 from spd.experiments.resid_mlp.plotting import (
+    analyze_per_feature_performance,
     plot_individual_feature_response,
-    relu_contribution_plot,
-    spd_calculate_diag_relu_conns,
+    plot_spd_relu_contribution,
+    plot_virtual_weights_target_spd,
 )
 from spd.experiments.resid_mlp.resid_mlp_dataset import ResidualMLPDataset
 from spd.run_spd import ResidualMLPTaskConfig, calc_recon_mse
@@ -24,13 +22,13 @@ from spd.utils import run_spd_forward_pass, set_seed
 device = "cuda" if torch.cuda.is_available() else "cpu"
 print(f"Using device: {device}")
 set_seed(0)  # You can change this seed if needed
-wandb_path = "wandb:spd-resid-mlp/runs/cbayicx6"
+wandb_path = "wandb:spd-resid-mlp/runs/j97vra9b"
 # Load the pretrained SPD model
 model, config, label_coeffs = ResidualMLPSPDRankPenaltyModel.from_pretrained(wandb_path)
 assert isinstance(config.task_config, ResidualMLPTaskConfig)
 # Path must be local
-target_model, target_train_config_dict, target_label_coeffs = ResidualMLPModel.from_pretrained(
-    config.task_config.pretrained_model_path
+target_model, target_model_train_config_dict, target_label_coeffs = (
+    ResidualMLPModel.from_pretrained(config.task_config.pretrained_model_path)
 )
 model = model.to(device)
 label_coeffs = label_coeffs.to(device)
@@ -68,21 +66,10 @@ spd_outputs = run_spd_forward_pass(
     topk=config.topk,
     distil_from_target=config.distil_from_target,
 )
-# Topk recon (Note that we're using true labels not the target model output)
 topk_recon_loss = calc_recon_mse(
     spd_outputs.spd_topk_model_output, target_model_output, has_instance_dim=True
 )
 print(f"Topk recon loss: {np.array(topk_recon_loss.detach().cpu())}")
-# print(f"batch:\n{batch[:10]}")
-# print(f"labels:\n{labels[:10]}")
-# print(f"spd_outputs.spd_topk_model_output:\n{spd_outputs.spd_topk_model_output[:10]}")
-
-# model.W_E @ target_model.layers[0].input_layer.weight.T
-# in_matrix = einops.einsum(
-#     model.W_E,
-#     target_model.layers[0].input_layer.weight.T,
-#     "n_instances n_features d_embed, n_instances d_embed n_features1 -> n_instances n_features n_features1",
-# )
 
 # Print param shapes for model
 for name, param in model.named_parameters():
@@ -90,6 +77,14 @@ for name, param in model.named_parameters():
 
 
 # %% Do usual interp plots
+
+fig1, fig2 = plot_spd_relu_contribution(model, target_model, device, k_plot_limit=3)
+fig1.suptitle("How much does each ReLU contribute to each feature?")
+fig2.suptitle("How much does each feature route through each ReLU?")
+
+# %%
+
+
 def spd_model_fn(batch: Float[Tensor, "batch n_instances"]):
     assert config.topk is not None
     return run_spd_forward_pass(
@@ -108,102 +103,75 @@ def target_model_fn(batch: Float[Tensor, "batch n_instances"]):
     return target_model(batch)[0]
 
 
+fig, axes = plt.subplots(nrows=2, ncols=2, figsize=(15, 15), constrained_layout=True)
+axes = np.atleast_2d(axes)  # type: ignore
 plot_individual_feature_response(
-    model_fn=spd_model_fn,
+    model_fn=target_model_fn,
     device=device,
-    train_config=target_train_config_dict,
     model_config=model.config,
+    ax=axes[0, 0],
 )
 plot_individual_feature_response(
-    model_fn=spd_model_fn,
+    model_fn=target_model_fn,
     device=device,
-    train_config=target_train_config_dict,
     model_config=model.config,
     sweep=True,
+    ax=axes[1, 0],
 )
 
+plot_individual_feature_response(
+    model_fn=spd_model_fn,
+    device=device,
+    model_config=model.config,
+    ax=axes[0, 1],
+)
+plot_individual_feature_response(
+    model_fn=spd_model_fn,
+    device=device,
+    model_config=model.config,
+    sweep=True,
+    ax=axes[1, 1],
+)
+axes[0, 0].set_ylabel(axes[0, 0].get_title())
+axes[1, 0].set_ylabel(axes[1, 0].get_title())
+axes[0, 1].set_ylabel("")
+axes[1, 1].set_ylabel("")
+axes[0, 0].set_title("Target model")
+axes[0, 1].set_title("SPD model")
+axes[1, 0].set_title("")
+axes[1, 1].set_title("")
+axes[0, 0].set_xlabel("")
+axes[0, 1].set_xlabel("")
+fig.show()
 
 # %%
-def analyze_per_feature_performance(
-    model_fn: Callable[[Float[Tensor, "batch n_instances"]], Float[Tensor, "batch n_instances"]],
-    batch_size: int = 1024,
-    ax: plt.Axes | None = None,
-    label: str | None = None,
-) -> plt.Axes:
-    """For each feature, run a bunch where only that feature varies, then measure loss"""
-    batch, labels = dataset.generate_batch(batch_size)
-    _, n_instance, _ = batch.shape
-    assert n_instance == 1
-    features = torch.arange(model.config.n_features)
-    losses = torch.zeros(model.config.n_features)
-    for i in tqdm(range(model.config.n_features)):
-        batch_i: Float[Tensor, "batch n_instances"] = torch.zeros_like(batch)
-        batch_i[:, 0, i] = torch.linspace(-1, 1, batch_size)
-        labels_i = torch.zeros_like(labels)
-        labels_i[:, 0, i] = batch_i[:, 0, i] + torch.relu(batch_i[:, 0, i])
-        model_output = model_fn(batch_i)
-        loss = F.mse_loss(model_output, labels_i)
-        losses[i] = loss.item()
-    losses = losses.detach().cpu()
-    sorted_indices = losses.argsort()
-    # Plot the losses as bar chart with x labels corresponding to feature index
-    if ax is None:
-        fig, ax = plt.subplots(figsize=(15, 5))
-    ax.bar(features, losses[sorted_indices], alpha=0.5, label=label)
-    ax.set_xticks(features, features[sorted_indices].numpy(), fontsize=6, rotation=90)
-    ax.set_xlabel("Feature index")
-    ax.set_ylabel("Loss")
-    return ax
 
 
-def plot_per_feature_performance(
-    target_model_fn: Callable[
-        [Float[Tensor, "batch n_instances"]], Float[Tensor, "batch n_instances"]
-    ],
-    spd_model_fn: Callable[
-        [Float[Tensor, "batch n_instances"]], Float[Tensor, "batch n_instances"]
-    ],
-):
-    fig, ax = plt.subplots(figsize=(15, 5))
-    analyze_per_feature_performance(target_model_fn, ax=ax, label="Target")
-    analyze_per_feature_performance(spd_model_fn, ax=ax, label="SPD")
-    ax.legend()
-    fig.savefig("feature_losses.png")
+fig, ax = plt.subplots(figsize=(15, 5))
+sorted_indices = analyze_per_feature_performance(
+    model_fn=target_model_fn,
+    model_config=target_model.config,
+    ax=ax,
+    label="Target",
+    device=device,
+    sorted_indices=None,
+)
+analyze_per_feature_performance(
+    model_fn=spd_model_fn,
+    model_config=model.config,
+    ax=ax,
+    label="SPD",
+    device=device,
+    sorted_indices=sorted_indices,
+)
+ax.legend()
+fig.show()
 
 
-plot_per_feature_performance(target_model_fn, spd_model_fn)
-
-# fig = plt.figure(constrained_layout=True, figsize=(10, 50))
-# gs = fig.add_gridspec(ncols=2, nrows=20 + 1 + 2)
-# ax_ID = fig.add_subplot(gs[:2, :])
-# ax1 = fig.add_subplot(gs[2, 0])
-# ax2 = fig.add_subplot(gs[2, 1])
-# virtual_weights = spd_calculate_virtual_weights(model, device)
-# plot_virtual_weights(virtual_weights, device, ax1=ax1, ax2=ax2, ax3=ax_ID)
-# ax1.set_ylabel("sum over k")
-
-# norm = Normalize(vmin=-1, vmax=1)
-# for ki in range(model.k):
-#     ax1 = fig.add_subplot(gs[3 + ki, 0])
-#     ax2 = fig.add_subplot(gs[3 + ki, 1])
-#     virtual_weights = spd_calculate_virtual_weights(model, device)
-#     plot_virtual_weights(virtual_weights, device, ax1=ax1, ax2=ax2, norm=norm)
-#     ax1.set_ylabel(f"k={ki}")
-# plt.show()
 # %%
-fig, axes1 = plt.subplots(21, 1, figsize=(10, 30), constrained_layout=True)
-axes1 = np.atleast_1d(axes1)  # type: ignore
-fig, axes2 = plt.subplots(21, 1, figsize=(5, 30), constrained_layout=True)
-axes2 = np.atleast_1d(axes2)  # type: ignore
-relu_conns = spd_calculate_diag_relu_conns(model, device, k_select="sum_before")
-# TODO More sums
-relu_contribution_plot(axes1[0], axes2[0], relu_conns, model, device)
-for k in range(model.k):
-    relu_conns = spd_calculate_diag_relu_conns(model, device, k_select=k)
-    relu_contribution_plot(axes1[k + 1], axes2[k + 1], relu_conns, model, device)
-    axes1[k + 1].set_ylabel(f"k={k}")
-    axes2[k + 1].set_ylabel(f"k={k}")
-    if k < model.k - 1:
-        axes1[k + 1].set_xlabel("")
-        axes2[k + 1].set_xlabel("")
-plt.show()
+
+
+fig = plot_virtual_weights_target_spd(target_model, model, device)
+fig.show()
+
+# %%

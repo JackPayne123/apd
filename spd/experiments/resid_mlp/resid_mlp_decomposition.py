@@ -22,8 +22,10 @@ from spd.experiments.resid_mlp.models import (
     ResidualMLPSPDRankPenaltyModel,
 )
 from spd.experiments.resid_mlp.plotting import (
-    relu_contribution_plot,
-    spd_calculate_diag_relu_conns,
+    analyze_per_feature_performance,
+    plot_individual_feature_response,
+    plot_spd_relu_contribution,
+    plot_virtual_weights_target_spd,
 )
 from spd.experiments.resid_mlp.resid_mlp_dataset import (
     ResidualMLPDataset,
@@ -43,6 +45,7 @@ from spd.utils import (
     DatasetGeneratedDataLoader,
     collect_subnetwork_attributions,
     load_config,
+    run_spd_forward_pass,
     set_seed,
 )
 from spd.wandb_utils import init_wandb
@@ -83,18 +86,19 @@ def plot_subnetwork_attributions(
         axs[i].set_ylabel("Batch Index")
         axs[i].set_title("Subnetwork Attributions")
 
-        # Annotate each cell with the numeric value
-        for b in range(attribution_scores.shape[0]):
-            for j in range(attribution_scores.shape[-1]):
-                axs[i].text(
-                    j,
-                    b,
-                    f"{attribution_scores[b, i, j]:.2f}",
-                    ha="center",
-                    va="center",
-                    color="black",
-                    fontsize=10,
-                )
+        # Annotate each cell with the numeric value if less than 200 elements
+        if attribution_scores.shape[0] * attribution_scores.shape[-1] < 200:
+            for b in range(attribution_scores.shape[0]):
+                for j in range(attribution_scores.shape[-1]):
+                    axs[i].text(
+                        j,
+                        b,
+                        f"{attribution_scores[b, i, j]:.2f}",
+                        ha="center",
+                        va="center",
+                        color="black",
+                        fontsize=10,
+                    )
     plt.colorbar(im)
     if out_dir:
         filename = (
@@ -183,6 +187,7 @@ def plot_multiple_subnetwork_params(
 
 def resid_mlp_plot_results_fn(
     model: ResidualMLPSPDRankPenaltyModel,
+    target_model: ResidualMLPModel,
     step: int | None,
     out_dir: Path | None,
     device: str,
@@ -192,37 +197,115 @@ def resid_mlp_plot_results_fn(
         tuple[Float[Tensor, "batch n_features"], Float[Tensor, "batch d_embed"]]
     ]
     | None = None,
-    target_model: ResidualMLPModel | None = None,
     **_,
 ) -> dict[str, plt.Figure]:
     assert isinstance(config.task_config, ResidualMLPTaskConfig)
     fig_dict = {}
 
-    fig1, axes1 = plt.subplots(
-        model.config.k + 3, 1, figsize=(20, 3 + 2 * model.config.k), constrained_layout=True
-    )
-    axes1 = np.atleast_1d(axes1)  # type: ignore
-    fig2, axes2 = plt.subplots(
-        model.config.k + 3, 1, figsize=(10, 3 + 2 * model.config.k), constrained_layout=True
-    )
-    axes2 = np.atleast_1d(axes2)  # type: ignore
-    relu_conns = spd_calculate_diag_relu_conns(model, device, k_select="sum_before")
-    relu_contribution_plot(axes1[0], axes2[0], relu_conns, model, device)
-    relu_conns = spd_calculate_diag_relu_conns(model, device, k_select="sum_nocrossterms")
-    relu_contribution_plot(axes1[1], axes2[1], relu_conns, model, device)
-    relu_conns = spd_calculate_diag_relu_conns(model, device, k_select="sum_onlycrossterms")
-    relu_contribution_plot(axes1[2], axes2[2], relu_conns, model, device)
-    for k in range(model.config.k):
-        relu_conns = spd_calculate_diag_relu_conns(model, device, k_select=k)
-        relu_contribution_plot(axes1[k + 3], axes2[k + 3], relu_conns, model, device)
-        axes1[k + 3].set_ylabel(f"k={k}")
-        axes2[k + 3].set_ylabel(f"k={k}")
-        if k < model.config.k - 1:
-            axes1[k + 3].set_xlabel("")
-            axes2[k + 3].set_xlabel("")
+    ############################################################################################
+    # Feature contributions
+    ############################################################################################
+    fig1, fig2 = plot_spd_relu_contribution(model, target_model, device)
+    fig1.suptitle("How much does each ReLU contribute to each feature?")
+    fig2.suptitle("How much does each feature route through each ReLU?")
     fig_dict["feature_contributions"] = fig1
     fig_dict["relu_contributions"] = fig2
 
+    fig1, fig2 = plot_spd_relu_contribution(model, target_model, device, k_plot_limit=3)
+    fig1.suptitle("How much does each ReLU contribute to each feature?")
+    fig2.suptitle("How much does each feature route through each ReLU?")
+    fig_dict["cropped_feature_contributions"] = fig1
+    fig_dict["cropped_relu_contributions"] = fig2
+
+    ############################################################################################
+    # Individual feature responses + per-feature performance
+    ############################################################################################
+    def spd_model_fn(batch: Float[Tensor, "batch n_instances"]):
+        assert config.topk is not None
+        return run_spd_forward_pass(
+            spd_model=model,
+            target_model=target_model,
+            input_array=batch,
+            attribution_type=config.attribution_type,
+            spd_type=config.spd_type,
+            batch_topk=config.batch_topk,
+            topk=config.topk,
+            distil_from_target=config.distil_from_target,
+        ).spd_topk_model_output
+
+    def target_model_fn(batch: Float[Tensor, "batch n_instances"]):
+        return target_model(batch)[0]
+
+    fig, axes = plt.subplots(nrows=2, ncols=2, figsize=(15, 15), constrained_layout=True)
+    axes = np.atleast_2d(axes)  # type: ignore
+    plot_individual_feature_response(
+        model_fn=target_model_fn,
+        device=device,
+        model_config=model.config,
+        ax=axes[0, 0],
+    )
+    plot_individual_feature_response(
+        model_fn=target_model_fn,
+        device=device,
+        model_config=model.config,
+        sweep=True,
+        ax=axes[1, 0],
+    )
+    plot_individual_feature_response(
+        model_fn=spd_model_fn,
+        device=device,
+        model_config=model.config,
+        ax=axes[0, 1],
+    )
+    plot_individual_feature_response(
+        model_fn=spd_model_fn,
+        device=device,
+        model_config=model.config,
+        sweep=True,
+        ax=axes[1, 1],
+    )
+    axes[0, 0].set_ylabel(axes[0, 0].get_title())
+    axes[1, 0].set_ylabel(axes[1, 0].get_title())
+    axes[0, 1].set_ylabel("")
+    axes[1, 1].set_ylabel("")
+    axes[0, 0].set_title("Target model")
+    axes[0, 1].set_title("SPD model")
+    axes[1, 0].set_title("")
+    axes[1, 1].set_title("")
+    axes[0, 0].set_xlabel("")
+    axes[0, 1].set_xlabel("")
+    fig_dict["individual_feature_responses"] = fig
+
+    fig, ax = plt.subplots(figsize=(15, 5))
+    sorted_indices = analyze_per_feature_performance(
+        model_fn=target_model_fn,
+        model_config=target_model.config,
+        ax=ax,
+        label="Target",
+        device=device,
+        sorted_indices=None,
+    )
+    analyze_per_feature_performance(
+        model_fn=spd_model_fn,
+        model_config=model.config,
+        ax=ax,
+        label="SPD",
+        device=device,
+        sorted_indices=sorted_indices,
+    )
+    ax.legend()
+    fig_dict["loss_by_feature"] = fig
+
+    ############################################################################################
+    # Virtual weights
+    ############################################################################################
+
+    fig = plot_virtual_weights_target_spd(target_model, model, device)
+    fig_dict["virtual_weights"] = fig
+
+    ############################################################################################
+    # Subnetwork attributions
+    ############################################################################################
     assert config.spd_type in ("full_rank", "rank_penalty")
     attribution_scores = collect_subnetwork_attributions(
         model, device, spd_type=config.spd_type, n_instances=model.n_instances
@@ -245,35 +328,13 @@ def resid_mlp_plot_results_fn(
         fig_dict_attributions = plot_subnetwork_attributions_statistics(topk_mask=topk_mask)
         fig_dict.update(fig_dict_attributions)
 
+    ############################################################################################
+    # Subnetwork parameters
+    ############################################################################################
+
     fig_dict["subnetwork_params"] = plot_multiple_subnetwork_params(
         model=model, out_dir=out_dir, step=step
     )
-
-    # class spd_dummy(ResidualMLPModel):
-    #     def __init__(self):
-    #         self.n_features = model.n_features
-    #         self.n_instances = model.n_instances
-
-    #     def __call__(self, batch: Float[Tensor, "batch n_instances"]):
-    #         assert config.topk is not None
-    #         return (
-    #             run_spd_forward_pass(
-    #                 spd_model=model,
-    #                 target_model=target_model,
-    #                 input_array=batch,
-    #                 attribution_type=config.attribution_type,
-    #                 spd_type=config.spd_type,
-    #                 batch_topk=config.batch_topk,
-    #                 topk=config.topk,
-    #                 distil_from_target=config.distil_from_target,
-    #             ).spd_topk_model_output,
-    #             None,
-    #             None,
-    #         )
-    # fig1 = plot_individual_feature_response(spd_dummy(), device, target_train_config_dict)
-    # fig2 = plot_individual_feature_response(
-    #     spd_dummy(), device, target_train_config_dict, sweep=True
-    # )
 
     # Save plots to files
     if out_dir:
