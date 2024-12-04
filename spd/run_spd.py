@@ -831,9 +831,6 @@ def optimize(
             data_iter = iter(dataloader)
             batch = next(data_iter)[0]
 
-        pre_acts = None
-        post_acts = None
-
         batch = batch.to(device=device)
         labels, pre_acts, post_acts = pretrained_model(batch)
 
@@ -887,6 +884,7 @@ def optimize(
             model=model,
             batch=batch,
             out=out,
+            pre_acts=pre_acts,
             inner_acts=inner_acts,
             layer_acts=layer_acts,
             attribution_type=config.attribution_type,
@@ -1098,6 +1096,7 @@ def optimize(
                 device=device,
                 config=config,
                 topk_mask=topk_mask,
+                pre_acts=pre_acts,
             )
             if config.wandb_project:
                 wandb.log(
