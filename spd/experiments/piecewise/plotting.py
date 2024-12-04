@@ -320,7 +320,6 @@ def plot_model_functions(
         target_model=target_model,
         input_array=input_array,
         attribution_type=attribution_type,
-        spd_type=spd_type,
         batch_topk=batch_topk,
         topk=topk,
         distil_from_target=distil_from_target,

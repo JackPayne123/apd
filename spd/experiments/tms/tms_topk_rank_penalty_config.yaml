@@ -1,4 +1,4 @@
-wandb_project: spd-tms
+# wandb_project: spd-tms
 wandb_run_name: null
 wandb_run_name_prefix: "rp_"
 spd_type: rank_penalty
@@ -27,4 +27,4 @@ task_config:
   train_bias: false
   feature_probability: 0.05
   data_generation_type: "at_least_zero_active"
-  pretrained_model_path: "wandb:spd-train-tms/runs/lci9o5ie" # Local or wandb path
+  pretrained_model_path: "wandb:spd-train-tms/runs/cv3g3z9d" # Local or wandb path

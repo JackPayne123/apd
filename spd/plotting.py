@@ -84,7 +84,6 @@ def plot_subnetwork_correlations(
             inner_acts=inner_acts,
             layer_acts=layer_acts,
             attribution_type=config.attribution_type,
-            spd_type=config.spd_type,
         )
 
         # We always assume the final subnetwork is the one we want to distil
