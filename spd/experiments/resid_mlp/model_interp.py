@@ -19,34 +19,36 @@ from spd.utils import set_seed
 path: ModelPath = "wandb:spd-train-resid-mlp/runs/lkg96w24"
 set_seed(0)
 device = "cuda" if torch.cuda.is_available() else "cpu"
-model, task_config_dict, label_coeffs = ResidualMLPModel.from_pretrained(path)
+model, train_config_dict, label_coeffs = ResidualMLPModel.from_pretrained(path)
 model = model.to(device)
-task_config = ResidMLPTrainConfig(**task_config_dict)
+train_config = ResidMLPTrainConfig(**train_config_dict)
 dataset = ResidualMLPDataset(
-    n_instances=task_config.resid_mlp_config.n_instances,
-    n_features=task_config.resid_mlp_config.n_features,
-    feature_probability=task_config.feature_probability,
+    n_instances=train_config.resid_mlp_config.n_instances,
+    n_features=train_config.resid_mlp_config.n_features,
+    feature_probability=train_config.feature_probability,
     device=device,
     calc_labels=False,
-    label_type=task_config.label_type,
-    act_fn_name=task_config.resid_mlp_config.act_fn_name,
-    label_fn_seed=task_config.label_fn_seed,
+    label_type=train_config.label_type,
+    act_fn_name=train_config.resid_mlp_config.act_fn_name,
+    label_fn_seed=train_config.label_fn_seed,
     label_coeffs=label_coeffs,
-    data_generation_type=task_config.data_generation_type,
+    data_generation_type=train_config.data_generation_type,
 )
-batch, labels = dataset.generate_batch(task_config.batch_size)
+batch, labels = dataset.generate_batch(train_config.batch_size)
 
 # %% Plot feature response with one active feature
 fig = plot_individual_feature_response(
-    model,
-    device,
-    task_config_dict,
+    lambda batch: model(batch)[0],
+    model_config=train_config.resid_mlp_config,
+    device=device,
+    train_config=train_config_dict,
     sweep=False,
 )
 fig = plot_individual_feature_response(
-    model,
-    device,
-    task_config_dict,
+    lambda batch: model(batch)[0],
+    model_config=train_config.resid_mlp_config,
+    device=device,
+    train_config=train_config_dict,
     sweep=True,
 )
 plt.show()

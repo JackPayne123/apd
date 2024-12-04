@@ -1,10 +1,14 @@
 # %% Imports
 
+from collections.abc import Callable
+
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
+import torch.nn.functional as F
 from jaxtyping import Float
 from torch import Tensor
+from tqdm import tqdm
 
 from spd.experiments.resid_mlp.models import ResidualMLPModel, ResidualMLPSPDRankPenaltyModel
 from spd.experiments.resid_mlp.plotting import (
@@ -17,7 +21,7 @@ from spd.run_spd import ResidualMLPTaskConfig, calc_recon_mse
 from spd.utils import run_spd_forward_pass, set_seed
 
 # %% Loading
-device = "cpu"
+device = "cuda" if torch.cuda.is_available() else "cpu"
 print(f"Using device: {device}")
 set_seed(0)  # You can change this seed if needed
 wandb_path = "wandb:spd-resid-mlp/runs/cbayicx6"
@@ -28,6 +32,10 @@ assert isinstance(config.task_config, ResidualMLPTaskConfig)
 target_model, target_train_config_dict, target_label_coeffs = ResidualMLPModel.from_pretrained(
     config.task_config.pretrained_model_path
 )
+model = model.to(device)
+label_coeffs = label_coeffs.to(device)
+target_model = target_model.to(device)
+target_label_coeffs = target_label_coeffs.to(device)
 assert torch.allclose(target_label_coeffs, torch.tensor(label_coeffs))
 dataset = ResidualMLPDataset(
     n_instances=model.config.n_instances,
@@ -38,6 +46,8 @@ dataset = ResidualMLPDataset(
     data_generation_type=config.task_config.data_generation_type,
 )
 batch, labels = dataset.generate_batch(config.batch_size)
+batch = batch.to(device)
+labels = labels.to(device)
 # Print some basic information about the model
 print(f"Number of features: {model.config.n_features}")
 print(f"Embedding dimension: {model.config.d_embed}")
@@ -62,7 +72,7 @@ spd_outputs = run_spd_forward_pass(
 topk_recon_loss = calc_recon_mse(
     spd_outputs.spd_topk_model_output, target_model_output, has_instance_dim=True
 )
-print(f"Topk recon loss: {np.array(topk_recon_loss.detach())}")
+print(f"Topk recon loss: {np.array(topk_recon_loss.detach().cpu())}")
 # print(f"batch:\n{batch[:10]}")
 # print(f"labels:\n{labels[:10]}")
 # print(f"spd_outputs.spd_topk_model_output:\n{spd_outputs.spd_topk_model_output[:10]}")
@@ -78,37 +88,90 @@ print(f"Topk recon loss: {np.array(topk_recon_loss.detach())}")
 for name, param in model.named_parameters():
     print(f"{name}: {param.shape}")
 
+
 # %% Do usual interp plots
+def spd_model_fn(batch: Float[Tensor, "batch n_instances"]):
+    assert config.topk is not None
+    return run_spd_forward_pass(
+        spd_model=model,
+        target_model=target_model,
+        input_array=batch,
+        attribution_type=config.attribution_type,
+        spd_type=config.spd_type,
+        batch_topk=config.batch_topk,
+        topk=config.topk,
+        distil_from_target=config.distil_from_target,
+    ).spd_topk_model_output
 
 
-class spd_dummy(ResidualMLPModel):
-    def __init__(self):
-        self.n_features = model.n_features
-        self.n_instances = model.n_instances
-
-    def __call__(self, batch: Float[Tensor, "batch n_instances"]):
-        assert config.topk is not None
-        return (
-            run_spd_forward_pass(
-                spd_model=model,
-                target_model=target_model,
-                input_array=batch,
-                attribution_type=config.attribution_type,
-                spd_type=config.spd_type,
-                batch_topk=config.batch_topk,
-                topk=config.topk,
-                distil_from_target=config.distil_from_target,
-            ).spd_topk_model_output,
-            None,
-            None,
-        )
+def target_model_fn(batch: Float[Tensor, "batch n_instances"]):
+    return target_model(batch)[0]
 
 
-plot_individual_feature_response(spd_dummy(), device, target_train_config_dict)
-plot_individual_feature_response(spd_dummy(), device, target_train_config_dict, sweep=True)
+plot_individual_feature_response(
+    model_fn=spd_model_fn,
+    device=device,
+    train_config=target_train_config_dict,
+    model_config=model.config,
+)
+plot_individual_feature_response(
+    model_fn=spd_model_fn,
+    device=device,
+    train_config=target_train_config_dict,
+    model_config=model.config,
+    sweep=True,
+)
 
 
 # %%
+def analyze_per_feature_performance(
+    model_fn: Callable[[Float[Tensor, "batch n_instances"]], Float[Tensor, "batch n_instances"]],
+    batch_size: int = 1024,
+    ax: plt.Axes | None = None,
+    label: str | None = None,
+) -> plt.Axes:
+    """For each feature, run a bunch where only that feature varies, then measure loss"""
+    batch, labels = dataset.generate_batch(batch_size)
+    _, n_instance, _ = batch.shape
+    assert n_instance == 1
+    features = torch.arange(model.config.n_features)
+    losses = torch.zeros(model.config.n_features)
+    for i in tqdm(range(model.config.n_features)):
+        batch_i: Float[Tensor, "batch n_instances"] = torch.zeros_like(batch)
+        batch_i[:, 0, i] = torch.linspace(-1, 1, batch_size)
+        labels_i = torch.zeros_like(labels)
+        labels_i[:, 0, i] = batch_i[:, 0, i] + torch.relu(batch_i[:, 0, i])
+        model_output = model_fn(batch_i)
+        loss = F.mse_loss(model_output, labels_i)
+        losses[i] = loss.item()
+    losses = losses.detach().cpu()
+    sorted_indices = losses.argsort()
+    # Plot the losses as bar chart with x labels corresponding to feature index
+    if ax is None:
+        fig, ax = plt.subplots(figsize=(15, 5))
+    ax.bar(features, losses[sorted_indices], alpha=0.5, label=label)
+    ax.set_xticks(features, features[sorted_indices].numpy(), fontsize=6, rotation=90)
+    ax.set_xlabel("Feature index")
+    ax.set_ylabel("Loss")
+    return ax
+
+
+def plot_per_feature_performance(
+    target_model_fn: Callable[
+        [Float[Tensor, "batch n_instances"]], Float[Tensor, "batch n_instances"]
+    ],
+    spd_model_fn: Callable[
+        [Float[Tensor, "batch n_instances"]], Float[Tensor, "batch n_instances"]
+    ],
+):
+    fig, ax = plt.subplots(figsize=(15, 5))
+    analyze_per_feature_performance(target_model_fn, ax=ax, label="Target")
+    analyze_per_feature_performance(spd_model_fn, ax=ax, label="SPD")
+    ax.legend()
+    fig.savefig("feature_losses.png")
+
+
+plot_per_feature_performance(target_model_fn, spd_model_fn)
 
 # fig = plt.figure(constrained_layout=True, figsize=(10, 50))
 # gs = fig.add_gridspec(ncols=2, nrows=20 + 1 + 2)

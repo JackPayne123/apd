@@ -1,3 +1,4 @@
+from collections.abc import Callable
 from typing import Any, Literal
 
 import einops
@@ -9,12 +10,18 @@ from mpl_toolkits.axes_grid1 import make_axes_locatable
 from torch import Tensor
 
 from spd.experiments.piecewise.plotting import plot_matrix
-from spd.experiments.resid_mlp.models import ResidualMLPModel, ResidualMLPSPDRankPenaltyModel
+from spd.experiments.resid_mlp.models import (
+    ResidualMLPConfig,
+    ResidualMLPModel,
+    ResidualMLPSPDRankPenaltyConfig,
+    ResidualMLPSPDRankPenaltyModel,
+)
 
 
 def plot_individual_feature_response(
-    model: ResidualMLPModel,
+    model_fn: Callable[[Tensor], Tensor],
     device: str,
+    model_config: ResidualMLPConfig | ResidualMLPSPDRankPenaltyConfig,
     train_config: dict[str, Any],
     sweep: bool = False,
     subtract_inputs: bool = False,
@@ -26,13 +33,13 @@ def plot_individual_feature_response(
     If sweep is True then the amplitude of the active feature is swept from -1 to 1. This is an
     arbitrary choice (choosing feature 0 to be the one where we test x=-1 etc) made for convenience.
     """
-    n_instances = model.config.n_instances
-    n_features = model.config.n_features
-    batch_size = model.config.n_features
+    n_instances = model_config.n_instances
+    n_features = model_config.n_features
+    batch_size = model_config.n_features
     batch = torch.zeros(batch_size, n_instances, n_features, device=device)
     inputs = torch.ones(n_features) if not sweep else torch.linspace(-1, 1, n_features)
     batch[torch.arange(n_features), instance_idx, torch.arange(n_features)] = inputs.to(device)
-    out, _, _ = model(batch)
+    out = model_fn(batch)
 
     out = out[:, instance_idx, :]
     cmap_viridis = plt.get_cmap("viridis")
