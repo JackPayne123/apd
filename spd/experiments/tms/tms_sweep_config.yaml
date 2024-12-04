@@ -4,12 +4,29 @@ metric:
   name: final_closeness
   goal: minimize
 parameters:
+  topk:
+    # values: [0.211, 0.4, 0.43722]
+    values: [0.211, 0.43722]
+  # seed:
+  #   values: [0]
+  # pnorm:
+  #   values: [1.0]
   # topk:
-  #   # values: [0.211, 0.239, 0.25, 0.261, 0.289]
-  seed:
-    values: [0, 1, 2, 3, 4]
+  #   values: [0.2, 0.25, 0.47]
+  schatten_coeff:
+    # values: [3, 1, 7e-1, 1e-1, 1e-2]
+    # values: [1e2, 1e1, 1, 1e-1]
+    # values: [1, 1e-1, 1e-2]
+    # values: [3, 7e-1, 3e-1]
+    values: [1e1, 1, 1e-1, 1e-2]
+  topk_recon_coeff:
+    # values: [1e1, 1, 1e-1]
+    values: [1]
+  # lr:
+  #   values: [3e-2]
 command:
 - ${env}
 - ${interpreter}
 - ${program}
 - spd/experiments/tms/tms_topk_rank_penalty_config.yaml
+# - spd/experiments/tms/tms_lp_config.yaml
