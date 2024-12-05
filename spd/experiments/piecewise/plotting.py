@@ -15,7 +15,6 @@ from torch import Tensor
 from spd.experiments.piecewise.models import (
     PiecewiseFunctionSPDFullRankTransformer,
     PiecewiseFunctionSPDRankPenaltyTransformer,
-    PiecewiseFunctionSPDTransformer,
     PiecewiseFunctionTransformer,
 )
 from spd.models.components import (
@@ -154,7 +153,7 @@ def plot_components_fullrank(
 
 
 def plot_model_functions(
-    spd_model: PiecewiseFunctionSPDTransformer | PiecewiseFunctionSPDFullRankTransformer,
+    spd_model: PiecewiseFunctionSPDFullRankTransformer | PiecewiseFunctionSPDRankPenaltyTransformer,
     target_model: PiecewiseFunctionTransformer,
     attribution_type: Literal["gradient", "ablation", "activation"],
     device: str,
@@ -372,7 +371,7 @@ def plot_single_network(ax: plt.Axes, weights: list[dict[str, Float[Tensor, "i j
 
 
 def plot_piecewise_network(
-    model: PiecewiseFunctionSPDTransformer | PiecewiseFunctionSPDFullRankTransformer,
+    model: PiecewiseFunctionSPDFullRankTransformer | PiecewiseFunctionSPDRankPenaltyTransformer,
 ) -> dict[str, plt.Figure]:
     n_components = model.k
     mlps: torch.nn.ModuleList = model.mlps

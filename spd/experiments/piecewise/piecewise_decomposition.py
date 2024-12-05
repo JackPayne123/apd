@@ -42,7 +42,7 @@ wandb.require("core")
 
 
 def piecewise_plot_results_fn(
-    model: PiecewiseFunctionSPDTransformer | PiecewiseFunctionSPDFullRankTransformer,
+    model: PiecewiseFunctionSPDFullRankTransformer | PiecewiseFunctionSPDRankPenaltyTransformer,
     target_model: PiecewiseFunctionTransformer,
     step: int,
     out_dir: Path | None,
@@ -187,6 +187,8 @@ def get_model_and_dataloader(
             init_scale=config.task_config.init_scale,
             m=config.m,
         )
+    else:
+        raise ValueError(f"Unknown/unsupported SPD type: {config.spd_type}")
 
     if config.distil_from_target:
         assert config.spd_type == "full_rank", "Distillation only supported for full rank"
@@ -316,6 +318,10 @@ def main(
         param_map[f"mlp_{i}.input_layer.weight"] = f"mlp_{i}.input_layer.weight"
         param_map[f"mlp_{i}.output_layer.weight"] = f"mlp_{i}.output_layer.weight"
 
+    assert isinstance(
+        piecewise_model_spd,
+        PiecewiseFunctionSPDFullRankTransformer | PiecewiseFunctionSPDRankPenaltyTransformer,
+    )
     optimize(
         model=piecewise_model_spd,
         config=config,

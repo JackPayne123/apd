@@ -9,10 +9,7 @@ from matplotlib.colors import CenteredNorm
 from torch import Tensor
 from tqdm import tqdm
 
-from spd.experiments.linear.models import (
-    DeepLinearComponentFullRankModel,
-    DeepLinearComponentModel,
-)
+from spd.experiments.linear.models import DeepLinearComponentFullRankModel
 from spd.utils import calc_grad_attributions_full_rank_per_layer, permute_to_identity
 
 
@@ -133,7 +130,7 @@ def plot_subnetwork_grad_attributions_fn(
 
 
 def plot_multiple_subnetwork_params(
-    model: DeepLinearComponentModel | DeepLinearComponentFullRankModel,
+    model: DeepLinearComponentFullRankModel,
     step: int | None = None,
     n_instances: int | None = None,
 ) -> plt.Figure:
@@ -187,7 +184,7 @@ def plot_multiple_subnetwork_params(
 
 
 def make_linear_plots(
-    model: DeepLinearComponentModel | DeepLinearComponentFullRankModel,
+    model: DeepLinearComponentFullRankModel,
     step: int | None,
     out_dir: Path | None,
     device: str,

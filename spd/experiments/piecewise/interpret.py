@@ -6,6 +6,8 @@ import torch
 import yaml
 
 from spd.experiments.piecewise.models import (
+    PiecewiseFunctionSPDFullRankTransformer,
+    PiecewiseFunctionSPDRankPenaltyTransformer,
     PiecewiseFunctionTransformer,
 )
 from spd.experiments.piecewise.piecewise_decomposition import get_model_and_dataloader
@@ -43,7 +45,9 @@ spd_model.load_state_dict(torch.load(pretrained_path, weights_only=True, map_loc
 # To test handcoded AB, uncomment the following line
 # spd_model.set_handcoded_spd_params(hardcoded_model)
 
-
+assert isinstance(
+    spd_model, PiecewiseFunctionSPDFullRankTransformer | PiecewiseFunctionSPDRankPenaltyTransformer
+)
 fig_dict = plot_components_fullrank(model=spd_model, step=-1, out_dir=None, slow_images=True)
 
 
