@@ -1,6 +1,7 @@
 # %% Imports
 
 
+import einops
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
@@ -13,6 +14,7 @@ from spd.experiments.resid_mlp.plotting import (
     plot_individual_feature_response,
     plot_spd_relu_contribution,
     plot_virtual_weights_target_spd,
+    spd_calculate_virtual_weights,
 )
 from spd.experiments.resid_mlp.resid_mlp_dataset import ResidualMLPDataset
 from spd.run_spd import ResidualMLPTaskConfig, calc_recon_mse
@@ -76,15 +78,14 @@ for name, param in model.named_parameters():
     print(f"{name}: {param.shape}")
 
 
-# %% Do usual interp plots
+# %% Feature-relu contribution plots
 
 fig1, fig2 = plot_spd_relu_contribution(model, target_model, device, k_plot_limit=3)
 fig1.suptitle("How much does each ReLU contribute to each feature?")
 fig2.suptitle("How much does each feature route through each ReLU?")
 
-# %%
 
-
+# %% Individual feature response
 def spd_model_fn(batch: Float[Tensor, "batch n_instances"]):
     assert config.topk is not None
     return run_spd_forward_pass(
@@ -144,9 +145,7 @@ axes[0, 0].set_xlabel("")
 axes[0, 1].set_xlabel("")
 fig.show()
 
-# %%
-
-
+# %% Per-feature performance
 fig, ax = plt.subplots(figsize=(15, 5))
 sorted_indices = analyze_per_feature_performance(
     model_fn=spd_model_fn,
@@ -170,10 +169,46 @@ ax.legend()
 fig.show()
 
 
-# %%
-
-
+# %% Virtual weights
 fig = plot_virtual_weights_target_spd(target_model, model, device)
 fig.show()
+
+# %% Analysis of one feature / subnetwork, picking feature 1 because it looks sketch.
+
+# Subnet combinations relevant for feature 1
+virtual_weights = spd_calculate_virtual_weights(model, device)
+in_conns: Float[Tensor, "k1 n_features1 d_mlp"] = virtual_weights["in_conns"][0]
+out_conns: Float[Tensor, "k2 d_mlp n_features2"] = virtual_weights["out_conns"][0]
+relu_conns_sum: Float[Tensor, "k1 k2 f1 f2"] = einops.einsum(
+    in_conns, out_conns, "k1 f1 d_mlp, k2 d_mlp f2 -> k1 k2 f1 f2"
+)
+plt.matshow(relu_conns_sum[:, :, 1, 1].detach().cpu())
+plt.title("Subnet combinations relevant for feature 1")
+plt.show()
+
+# Per-neuron contribution to feature 1
+relu_conns: Float[Tensor, "k1 k2 f1 f2"] = einops.einsum(
+    in_conns, out_conns, "k1 f1 d_mlp, k2 d_mlp f2 -> k1 k2 f1 f2 d_mlp"
+)
+plt.plot(relu_conns[1, 1, 1, 1, :].detach().cpu(), label="Subnet 1 of W_in and W_out")
+plt.plot(
+    relu_conns[:, :, 1, 1, :].sum(dim=(0, 1)).detach().cpu(),
+    label="All subnets (i,j) of W_in and W_out",
+)
+plt.plot(
+    relu_conns[:, :, 1, 1, :].sum(dim=(0, 1)).detach().cpu()
+    - relu_conns[1, 1, 1, 1, :].detach().cpu(),
+    label="All subnets (i,j) != (1,1) of W_in and W_out",
+)
+plt.title("Per-neuron contribution to feature 1")
+plt.xlabel("Neuron")
+plt.ylabel("Weight")
+plt.legend()
+plt.show()
+
+# Which subnets contain the neuron-45 contribution to feature 1?
+plt.matshow(relu_conns[:, :, 1, 1, 45].detach().cpu())
+plt.title("Which subnets contain the neuron-45 contribution to feature 1?")
+print("Seems to be the diagonal k1=95, k2=95 term", relu_conns[:, :, 1, 1, 45].argmax())
 
 # %%
