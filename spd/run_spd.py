@@ -128,7 +128,7 @@ class Config(BaseModel):
     lr_warmup_pct: Probability = 0.0
     sparsity_loss_type: Literal["jacobian"] = "jacobian"
     sparsity_warmup_pct: Probability = 0.0
-    unit_norm_matrices: bool = True
+    unit_norm_matrices: bool = False
     attribution_type: Literal["gradient", "ablation", "activation"] = "gradient"
     task_config: (
         DeepLinearConfig
