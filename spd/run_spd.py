@@ -792,6 +792,7 @@ def optimize(
             model=model,
             batch=batch,
             out=out,
+            pre_acts=pre_acts,
             inner_acts=inner_acts,
             layer_acts=layer_acts,
             attribution_type=config.attribution_type,
@@ -983,6 +984,7 @@ def optimize(
                 device=device,
                 config=config,
                 topk_mask=topk_mask,
+                pre_acts=pre_acts,
             )
             if config.wandb_project:
                 wandb.log(

@@ -234,6 +234,7 @@ def make_plots(
     out_dir: Path,
     device: str,
     config: Config,
+    pre_acts: dict[str, Float[Tensor, "batch n_instances d_in"] | Float[Tensor, "batch d_in"]],
     topk_mask: Float[Tensor, "batch k"] | None,
     **_,
 ) -> dict[str, plt.Figure]:
@@ -246,7 +247,9 @@ def make_plots(
         assert topk_mask is not None
         assert isinstance(config.task_config, TMSTaskConfig)
         n_instances = model.config.n_instances if hasattr(model, "config") else model.n_instances
-        attribution_scores = collect_subnetwork_attributions(model, device, n_instances=n_instances)
+        attribution_scores = collect_subnetwork_attributions(
+            model, pre_acts=pre_acts, device=device, n_instances=n_instances
+        )
         plots["subnetwork_attributions"] = plot_subnetwork_attributions_multiple_instances(
             attribution_scores=attribution_scores, out_dir=out_dir, step=step
         )
