@@ -1,6 +1,6 @@
 wandb_project: spd-resid-mlp
 wandb_run_name: null
-wandb_run_name_prefix: "rp_sweep4_hc5k_"
+wandb_run_name_prefix: "rp_sweep5_hc5k_"
 spd_type: rank_penalty
 unit_norm_matrices: false
 seed: 0
@@ -13,6 +13,7 @@ param_match_coeff: 1.0
 topk_recon_coeff: 1.0
 schatten_pnorm: 1.0
 schatten_coeff: 1.0
+topk_act_recon_coeff: 1.0
 lr: 0.001
 batch_size: 1000
 steps: 10_000
