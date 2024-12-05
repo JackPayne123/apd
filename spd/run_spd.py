@@ -20,7 +20,6 @@ from pydantic import (
     model_validator,
 )
 from torch import Tensor
-from torch.nn import functional as F
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
@@ -987,13 +986,9 @@ def optimize(
             if config.topk_act_recon_coeff is not None:
                 assert layer_acts_topk is not None
                 assert post_acts is not None
-                post_acts_after_relu = {"layers.0.linear1": F.relu(post_acts["layers.0.linear1"])}
-                layer_acts_topk_after_relu = {
-                    "layers.0.linear1": F.relu(layer_acts_topk["layers.0.linear1"])
-                }
                 topk_act_recon_loss = calc_topk_act_recon(
-                    target_post_acts=post_acts_after_relu,
-                    layer_acts_topk=layer_acts_topk_after_relu,
+                    target_post_acts=post_acts,
+                    layer_acts_topk=layer_acts_topk,
                 )
 
         if config.schatten_coeff is not None:
