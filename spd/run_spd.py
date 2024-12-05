@@ -287,15 +287,15 @@ def get_lr_schedule_fn(
             elif step < steps * 0.6:
                 return 0.1 + np.cos(0.5 * np.pi * step / (steps * 0.6 - 1))
             elif step < steps * 0.7:
-                return 0.01 + np.cos(0.5 * np.pi * step / (steps * 0.7 - 1))
+                return 0.01 + 0.1 * np.cos(0.5 * np.pi * step / (steps * 0.7 - 1))
             elif step < steps * 0.8:
-                return 0.001 + np.cos(0.5 * np.pi * step / (steps * 0.8 - 1))
+                return 0.001 + 0.01 * np.cos(0.5 * np.pi * step / (steps * 0.8 - 1))
             elif step < steps * 0.9:
-                return 0.0001 + np.cos(0.5 * np.pi * step / (steps * 0.9 - 1))
+                return 0.0001 + 0.001 * np.cos(0.5 * np.pi * step / (steps * 0.9 - 1))
             elif step < steps:
-                return 0.00001 + np.cos(0.5 * np.pi * step / (steps - 1))
+                return 0.00001 + 0.0001 * np.cos(0.5 * np.pi * step / (steps - 1))
             else:
-                return 0.000001
+                return 0.00001
 
         return lr_schedule_fn
     else:
