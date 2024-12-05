@@ -124,7 +124,7 @@ class Config(BaseModel):
     pnorm: PositiveFloat | None = None
     pnorm_end: PositiveFloat | None = None
     m: PositiveInt | None = None
-    lr_schedule: Literal["linear", "constant", "cosine", "exponential"] = "constant"
+    lr_schedule: Literal["linear", "constant", "cosine", "exponential", "cosine_steps"] = "constant"
     lr_exponential_halflife: PositiveFloat | None = None
     lr_warmup_pct: Probability = 0.0
     sparsity_loss_type: Literal["jacobian"] = "jacobian"
@@ -263,7 +263,7 @@ def get_common_run_name_suffix(config: Config) -> str:
 
 
 def get_lr_schedule_fn(
-    lr_schedule: Literal["linear", "constant", "cosine", "exponential"],
+    lr_schedule: Literal["linear", "constant", "cosine", "exponential", "cosine_steps"],
     lr_exponential_halflife: PositiveFloat | None = None,
 ) -> Callable[[int, int], float]:
     if lr_schedule == "linear":

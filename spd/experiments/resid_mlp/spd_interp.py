@@ -22,7 +22,7 @@ from spd.utils import run_spd_forward_pass, set_seed
 device = "cuda" if torch.cuda.is_available() else "cpu"
 print(f"Using device: {device}")
 set_seed(0)  # You can change this seed if needed
-wandb_path = "wandb:spd-resid-mlp/runs/j97vra9b"
+wandb_path = "wandb:spd-resid-mlp/runs/50ngtqb5"
 # Load the pretrained SPD model
 model, config, label_coeffs = ResidualMLPSPDRankPenaltyModel.from_pretrained(wandb_path)
 assert isinstance(config.task_config, ResidualMLPTaskConfig)
@@ -149,20 +149,22 @@ fig.show()
 
 fig, ax = plt.subplots(figsize=(15, 5))
 sorted_indices = analyze_per_feature_performance(
-    model_fn=target_model_fn,
-    model_config=target_model.config,
-    ax=ax,
-    label="Target",
-    device=device,
-    sorted_indices=None,
-)
-analyze_per_feature_performance(
     model_fn=spd_model_fn,
     model_config=model.config,
     ax=ax,
     label="SPD",
     device=device,
+    sorted_indices=None,
+    zorder=1,
+)
+analyze_per_feature_performance(
+    model_fn=target_model_fn,
+    model_config=target_model.config,
+    ax=ax,
+    label="Target",
+    device=device,
     sorted_indices=sorted_indices,
+    zorder=0,
 )
 ax.legend()
 fig.show()

@@ -26,4 +26,7 @@ task_config:
   k: 100
   feature_probability: 0.01
   data_generation_type: "at_least_zero_active"
+  # 1 instance run
   pretrained_model_path: wandb:spd-train-resid-mlp/runs/lkg96w24
+  # 5 instances run
+  # pretrained_model_path: wandb:spd-train-resid-mlp/runs/ftclyklc

@@ -354,7 +354,7 @@ def spd_calculate_diag_relu_conns(
                     "n_instances k1 n_features d_mlp, n_instance k2 d_mlp n_features -> n_instances k1 k2 n_features d_mlp",
                 )
             )
-            return all_diag_relu_conns.sum(dim=(-2, -3)) - nocross_diag_relu_conns
+            return all_diag_relu_conns.sum(dim=(-3, -4)) - nocross_diag_relu_conns
         elif k_select == "sum_before":
             sum_diag_relu_conns: Float[Tensor, "n_instances n_features d_mlp"] = einops.einsum(
                 in_conns.sum(dim=1),
@@ -424,6 +424,7 @@ def analyze_per_feature_performance(
     ax: plt.Axes | None = None,
     label: str | None = None,
     sorted_indices: torch.Tensor | None = None,
+    zorder: int = 0,
 ) -> torch.Tensor:
     """For each feature, run a bunch where only that feature varies, then measure loss"""
     n_features = model_config.n_features
@@ -444,7 +445,8 @@ def analyze_per_feature_performance(
     # Plot the losses as bar chart with x labels corresponding to feature index
     if ax is None:
         fig, ax = plt.subplots(figsize=(15, 5))
-    ax.bar(features, losses[sorted_indices], alpha=0.5, label=label)
+    color = f"C{zorder%10}"
+    ax.bar(features, losses[sorted_indices], alpha=0.5, label=label, zorder=zorder)
     ax.set_xticks(features, features[sorted_indices].numpy(), fontsize=6, rotation=90)
     ax.set_xlabel("Feature index")
     ax.set_ylabel("Loss")
