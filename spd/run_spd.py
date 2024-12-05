@@ -125,7 +125,7 @@ class Config(BaseModel):
     pnorm: PositiveFloat | None = None
     pnorm_end: PositiveFloat | None = None
     m: PositiveInt | None = None
-    lr_schedule: Literal["linear", "constant", "cosine", "exponential", "cosine_steps"] = "constant"
+    lr_schedule: Literal["linear", "constant", "cosine", "exponential"] = "constant"
     lr_exponential_halflife: PositiveFloat | None = None
     lr_warmup_pct: Probability = 0.0
     sparsity_loss_type: Literal["jacobian"] = "jacobian"
@@ -264,7 +264,7 @@ def get_common_run_name_suffix(config: Config) -> str:
 
 
 def get_lr_schedule_fn(
-    lr_schedule: Literal["linear", "constant", "cosine", "exponential", "cosine_steps"],
+    lr_schedule: Literal["linear", "constant", "cosine", "exponential"],
     lr_exponential_halflife: PositiveFloat | None = None,
 ) -> Callable[[int, int], float]:
     if lr_schedule == "linear":
@@ -279,25 +279,6 @@ def get_lr_schedule_fn(
         gamma = 0.5 ** (1 / halflife)
         logger.info(f"Using exponential LR schedule with halflife {halflife} steps (gamma {gamma})")
         return lambda step, steps: gamma**step
-    elif lr_schedule == "cosine_steps":
-
-        def lr_schedule_fn(step: int, steps: int) -> float:
-            if step < steps * 0.5:
-                return np.cos(0.5 * np.pi * step / (steps - 1))
-            elif step < steps * 0.6:
-                return 0.1 + np.cos(0.5 * np.pi * step / (steps * 0.6 - 1))
-            elif step < steps * 0.7:
-                return 0.01 + 0.1 * np.cos(0.5 * np.pi * step / (steps * 0.7 - 1))
-            elif step < steps * 0.8:
-                return 0.001 + 0.01 * np.cos(0.5 * np.pi * step / (steps * 0.8 - 1))
-            elif step < steps * 0.9:
-                return 0.0001 + 0.001 * np.cos(0.5 * np.pi * step / (steps * 0.9 - 1))
-            elif step < steps:
-                return 0.00001 + 0.0001 * np.cos(0.5 * np.pi * step / (steps - 1))
-            else:
-                return 0.00001
-
-        return lr_schedule_fn
     else:
         raise ValueError(f"Unknown lr_schedule: {lr_schedule}")
 
