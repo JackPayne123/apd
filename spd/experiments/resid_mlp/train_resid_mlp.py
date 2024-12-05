@@ -61,21 +61,21 @@ class ResidMLPTrainConfig(BaseModel):
 
 
 def loss_function(
-    out: Float[Tensor, "batch n_instances d_model"],
-    labels: Float[Tensor, "batch n_instances d_model"],
-    feature_importances: Float[Tensor, "batch n_instances d_model"],
-    post_acts: dict[str, Float[Tensor, "batch n_instances d_model"]],
+    out: Float[Tensor, "batch n_instances n_features"] | Float[Tensor, "batch n_instances d_embed"],
+    labels: Float[Tensor, "batch n_instances n_features"],
+    feature_importances: Float[Tensor, "batch n_instances n_features"],
+    post_acts: dict[str, Float[Tensor, "batch n_instances d_embed"]],
     model: ResidualMLPModel,
     config: ResidMLPTrainConfig,
-) -> Float[Tensor, "batch n_instances d_embed"] | Float[Tensor, "batch n_instances d_resid"]:
+) -> Float[Tensor, "batch n_instances d_embed"] | Float[Tensor, "batch n_instances d_embed"]:
     if config.loss_type == "readoff":
         loss = ((out - labels) ** 2) * feature_importances
     elif config.loss_type == "resid":
         assert torch.allclose(
             feature_importances, torch.ones_like(feature_importances)
         ), "feature_importances incompatible with loss_type resid"
-        resid_out: Float[Tensor, "batch n_instances d_resid"] = post_acts["final_residual"]
-        resid_labels: Float[Tensor, "batch n_instances d_resid"] = einops.einsum(
+        resid_out: Float[Tensor, "batch n_instances d_embed"] = out
+        resid_labels: Float[Tensor, "batch n_instances d_embed"] = einops.einsum(
             labels,
             model.W_E,
             "batch n_instances n_features, n_instances n_features d_embed "
@@ -94,7 +94,7 @@ def train(
     dataloader: DatasetGeneratedDataLoader[
         tuple[
             Float[Tensor, "batch n_instances n_features"],
-            Float[Tensor, "batch n_instances d_resid"],
+            Float[Tensor, "batch n_instances d_embed"],
         ]
     ],
     feature_importances: Float[Tensor, "batch_size n_instances n_features"],
@@ -145,9 +145,10 @@ def train(
         optimizer.zero_grad()
         batch: Float[Tensor, "batch n_instances n_features"] = batch.to(device)
         labels: Float[Tensor, "batch n_instances n_features"] = labels.to(device)
-        out, pre_acts, post_acts = model(batch)
+        out, pre_acts, post_acts = model(batch, return_residual=config.loss_type == "resid")
         loss: (
-            Float[Tensor, "batch n_instances d_embed"] | Float[Tensor, "batch n_instances d_resid"]
+            Float[Tensor, "batch n_instances n_features"]
+            | Float[Tensor, "batch n_instances d_embed"]
         ) = loss_function(out, labels, feature_importances, post_acts, model, config)
         loss = loss.mean(dim=(0, 2))
         current_losses = loss.detach()
@@ -171,7 +172,7 @@ def train(
         batch, labels = next(iter(dataloader))
         batch = batch.to(device)
         labels = labels.to(device)
-        out, _, post_acts = model(batch)
+        out, _, post_acts = model(batch, return_residual=config.loss_type == "resid")
         loss = loss_function(out, labels, feature_importances, post_acts, model, config)
         loss = loss.mean(dim=(0, 2))
         final_losses.append(loss)

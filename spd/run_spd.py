@@ -771,7 +771,9 @@ def calc_topk_act_recon(
         The activation reconstruction loss. Will have an n_instances dimension if the model has an
             n_instances dimension, otherwise a scalar.
     """
-    assert target_post_acts.keys() == layer_acts_topk.keys(), "Layer keys must match"
+    assert (
+        target_post_acts.keys() == layer_acts_topk.keys()
+    ), f"Layer keys must match: {target_post_acts.keys()} != {layer_acts_topk.keys()}"
 
     device = next(iter(layer_acts_topk.values())).device
 

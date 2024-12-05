@@ -84,15 +84,11 @@ class InstancesMLP(nn.Module):
 
         pre_acts = {
             "linear1": x,
-            "bias1": x,
             "linear2": out1,
-            "bias2": out1,
         }
         post_acts = {
             "linear1": out1_pre_act_fn,
-            "bias1": out1_pre_act_fn,
             "linear2": out2,
-            "bias2": out2,
         }
         return out2, pre_acts, post_acts
 
@@ -229,9 +225,11 @@ class ResidualMLPModel(Model):
         )
 
     def forward(
-        self, x: Float[Tensor, "batch n_instances n_features"]
+        self,
+        x: Float[Tensor, "batch n_instances n_features"],
+        return_residual: bool = False,
     ) -> tuple[
-        Float[Tensor, "batch n_instances d_embed"],
+        Float[Tensor, "batch n_instances n_features"] | Float[Tensor, "batch n_instances d_embed"],
         dict[
             str,
             Float[Tensor, "batch n_instances d_embed"] | Float[Tensor, "batch n_instances d_mlp"],
@@ -265,8 +263,10 @@ class ResidualMLPModel(Model):
         )
         if self.config.apply_output_act_fn:
             out = self.act_fn(out)
-        layer_post_acts["final_residual"] = residual
-        return out, layer_pre_acts, layer_post_acts
+        if return_residual:
+            return residual, layer_pre_acts, layer_post_acts
+        else:
+            return out, layer_pre_acts, layer_post_acts
 
     @staticmethod
     def _download_wandb_files(wandb_project_run_id: str) -> ResidualMLPPaths:
