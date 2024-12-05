@@ -141,7 +141,6 @@ def test_piecewise_batch_topk_and_l2() -> None:
 def test_piecewise_topk_and_l2() -> None:
     config = Config(
         spd_type="rank_penalty",
-        unit_norm_matrices=False,
         topk=4,
         batch_topk=False,
         batch_size=4,
@@ -159,7 +158,6 @@ def test_piecewise_topk_and_l2() -> None:
 def test_piecewise_lp() -> None:
     config = Config(
         spd_type="rank_penalty",
-        unit_norm_matrices=False,
         topk=None,
         batch_topk=False,
         batch_size=4,
@@ -178,7 +176,6 @@ def test_piecewise_lp() -> None:
 def test_piecewise_lp_simple_bias_false() -> None:
     config = Config(
         spd_type="rank_penalty",
-        unit_norm_matrices=False,
         topk=None,
         batch_topk=False,
         batch_size=4,

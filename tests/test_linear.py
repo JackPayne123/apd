@@ -71,7 +71,6 @@ def deep_linear_decomposition_optimize_test(config: Config) -> None:
 def test_deep_linear_batch_topk_no_l2() -> None:
     config = Config(
         spd_type="full_rank",
-        unit_norm_matrices=False,
         topk=2,
         batch_topk=True,
         batch_size=4,
@@ -89,7 +88,6 @@ def test_deep_linear_batch_topk_no_l2() -> None:
 def test_deep_linear_batch_topk_and_l2() -> None:
     config = Config(
         spd_type="full_rank",
-        unit_norm_matrices=False,
         topk=2,
         batch_topk=True,
         batch_size=4,
@@ -107,7 +105,6 @@ def test_deep_linear_batch_topk_and_l2() -> None:
 def test_deep_linear_batch_topk_and_lp_and_l2() -> None:
     config = Config(
         spd_type="full_rank",
-        unit_norm_matrices=False,
         topk=2,
         batch_topk=True,
         pnorm=0.9,
@@ -127,7 +124,6 @@ def test_deep_linear_batch_topk_and_lp_and_l2() -> None:
 def test_deep_linear_topk_and_l2() -> None:
     config = Config(
         spd_type="full_rank",
-        unit_norm_matrices=False,
         topk=2,
         batch_topk=False,
         batch_size=4,
@@ -145,7 +141,6 @@ def test_deep_linear_topk_and_l2() -> None:
 def test_deep_linear_lp() -> None:
     config = Config(
         spd_type="full_rank",
-        unit_norm_matrices=False,
         topk=None,
         batch_topk=False,
         batch_size=4,
