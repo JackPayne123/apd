@@ -322,8 +322,8 @@ def calc_grad_attributions_full_rank_per_layer(
 
 
 def collect_subnetwork_attributions(
-    model: SPDModel | SPDFullRankModel | SPDRankPenaltyModel,
-    pre_acts: dict[str, Float[Tensor, "batch n_instances d_in"] | Float[Tensor, "batch d_in"]],
+    spd_model: SPDModel | SPDFullRankModel | SPDRankPenaltyModel,
+    target_model: Model,
     device: str,
     n_instances: int | None = None,
 ) -> Float[Tensor, "batch k"] | Float[Tensor, "batch n_instances k"]:
@@ -334,27 +334,28 @@ def collect_subnetwork_attributions(
     and collects the attributions.
 
     Args:
-        model: The model to collect attributions on.
+        spd_model: The model to collect attributions on.
+        target_model: The target model to collect attributions on.
+        pre_acts: The activations after the parameter matrix in the target model.
         device: The device to run computations on.
-        spd_type: The type of SPD model.
         n_instances: The number of instances in the batch.
 
     Returns:
         The attribution scores.
     """
-    test_batch = torch.eye(model.n_features, device=device)
+    test_batch = torch.eye(spd_model.n_features, device=device)
     if n_instances is not None:
         test_batch = einops.repeat(
             test_batch, "batch n_features -> batch n_instances n_features", n_instances=n_instances
         )
 
-    out, test_layer_acts, test_inner_acts = model(test_batch)
+    target_out, pre_acts, post_acts = target_model(test_batch)
     attribution_scores = calc_grad_attributions(
-        target_out=out,
+        target_out=target_out,
+        subnet_params=spd_model.all_subnetwork_params(),
         pre_acts=pre_acts,
-        subnet_params=model.all_subnetwork_params(),
-        post_acts=test_layer_acts,
-        k=model.k,
+        post_acts=post_acts,
+        k=spd_model.k,
     )
     return attribution_scores
 

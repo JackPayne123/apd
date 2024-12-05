@@ -185,7 +185,6 @@ def resid_mlp_plot_results_fn(
     device: str,
     config: Config,
     topk_mask: Float[Tensor, " batch_size k"] | None,
-    pre_acts: dict[str, Float[Tensor, "batch n_instances d_in"] | Float[Tensor, "batch d_in"]],
     dataloader: DatasetGeneratedDataLoader[
         tuple[Float[Tensor, "batch n_features"], Float[Tensor, "batch d_embed"]]
     ]
@@ -196,7 +195,10 @@ def resid_mlp_plot_results_fn(
     fig_dict = {}
 
     attribution_scores = collect_subnetwork_attributions(
-        model, pre_acts=pre_acts, device=device, n_instances=model.n_instances
+        spd_model=model,
+        target_model=target_model,
+        device=device,
+        n_instances=model.n_instances,
     )
     fig_dict["subnetwork_attributions"] = plot_subnetwork_attributions(
         attribution_scores, out_dir, step
