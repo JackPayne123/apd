@@ -40,14 +40,14 @@ def _collect_permuted_subnetwork_attributions(
         n_instances=model.n_instances,
     )
 
-    _, pre_acts, _ = target_model(test_batch)
+    _, pre_acts, post_acts = target_model(test_batch)
     out, test_layer_acts, test_inner_acts = model(test_batch)
 
     layer_attributions = calc_grad_attributions_full_rank_per_layer(
-        out=out,
+        target_out=out,
         pre_acts=pre_acts,
+        post_acts=post_acts,
         subnet_params=model.all_subnetwork_params(),
-        layer_acts=test_layer_acts,
         k=model.k,
     )
 

@@ -246,7 +246,7 @@ def calc_grad_attributions(
         feature_attributions: Float[Tensor, "batch k"] | Float[Tensor, "batch n_instances k"] = (
             torch.zeros(attr_shape, device=target_out.device, dtype=target_out.dtype)
         )
-        grad_layer_acts: tuple[
+        grad_post_acts: tuple[
             Float[Tensor, "batch d_out"] | Float[Tensor, "batch n_instances d_out"], ...
         ] = torch.autograd.grad(
             target_out[..., feature_idx].sum(), list(post_acts.values()), retain_graph=True
@@ -261,7 +261,7 @@ def calc_grad_attributions(
                 "... d_in, ... k d_in d_out -> ... k d_out",
             )
             feature_attributions += einops.einsum(
-                grad_layer_acts[i], inner_acts, "... d_out ,... k d_out -> ... k"
+                grad_post_acts[i], inner_acts, "... d_out ,... k d_out -> ... k"
             )
 
         attribution_scores += feature_attributions**2
@@ -270,12 +270,12 @@ def calc_grad_attributions(
 
 
 def calc_grad_attributions_full_rank_per_layer(
-    out: Float[Tensor, "... out_dim"],
+    target_out: Float[Tensor, "batch out_dim"] | Float[Tensor, "batch n_instances out_dim"],
     pre_acts: dict[str, Float[Tensor, "batch d_in"] | Float[Tensor, "batch n_instances d_in"]],
+    post_acts: dict[str, Float[Tensor, "batch d_out"] | Float[Tensor, "batch n_instances d_out"]],
     subnet_params: dict[
         str, Float[Tensor, "k d_in d_out"] | Float[Tensor, "n_instances k d_in d_out"]
     ],
-    layer_acts: dict[str, Float[Tensor, "... d_out"]],
     k: int,
 ) -> list[Float[Tensor, "... k"]]:
     """Calculate the attributions for each layer.
@@ -299,24 +299,23 @@ def calc_grad_attributions_full_rank_per_layer(
     Returns:
         The list of attribution scores for each layer.
     """
-    first_param_matrix_name = next(iter(pre_acts.keys()))
-    attr_shape = pre_acts[first_param_matrix_name].shape[:-1] + (k,)
+    assert post_acts.keys() == pre_acts.keys() == subnet_params.keys()
+    attr_shape = target_out.shape[:-1] + (k,)  # (batch, k) or (batch, n_instances, k)
     layer_attribution_scores: list[Float[Tensor, "... k"]] = [
-        torch.zeros(attr_shape, device=pre_acts[first_param_matrix_name].device)
-        for _ in range(len(pre_acts))
+        torch.zeros(attr_shape, device=target_out.device) for _ in range(len(pre_acts))
     ]
-    for feature_idx in range(out.shape[-1]):
-        grad_layer_acts: tuple[Float[Tensor, "... k"], ...] = torch.autograd.grad(
-            out[..., feature_idx].sum(), list(layer_acts.values()), retain_graph=True
+    for feature_idx in range(target_out.shape[-1]):
+        grad_post_acts: tuple[Float[Tensor, "... k"], ...] = torch.autograd.grad(
+            target_out[..., feature_idx].sum(), list(post_acts.values()), retain_graph=True
         )
-        for i, param_matrix_name in enumerate(layer_acts.keys()):
+        for i, param_matrix_name in enumerate(post_acts.keys()):
             inner_acts = einops.einsum(
                 pre_acts[param_matrix_name].detach().clone(),
                 subnet_params[param_matrix_name],
                 "... d_in, ... k d_in d_out -> ... k d_out",
             )
             layer_attribution_scores[i] += einops.einsum(
-                grad_layer_acts[i].detach(), inner_acts, "... d_out ,... k d_out -> ... k"
+                grad_post_acts[i].detach(), inner_acts, "... d_out ,... k d_out -> ... k"
             ).pow(2)
 
     return layer_attribution_scores
