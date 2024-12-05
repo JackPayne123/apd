@@ -271,8 +271,12 @@ def calc_grad_attributions(
 
 def calc_grad_attributions_full_rank_per_layer(
     out: Float[Tensor, "... out_dim"],
-    inner_acts: dict[str, Float[Tensor, "... k d_out"]],
+    pre_acts: dict[str, Float[Tensor, "batch d_in"] | Float[Tensor, "batch n_instances d_in"]],
+    subnet_params: dict[
+        str, Float[Tensor, "k d_in d_out"] | Float[Tensor, "n_instances k d_in d_out"]
+    ],
     layer_acts: dict[str, Float[Tensor, "... d_out"]],
+    k: int,
 ) -> list[Float[Tensor, "... k"]]:
     """Calculate the attributions for each layer.
 
@@ -287,29 +291,32 @@ def calc_grad_attributions_full_rank_per_layer(
 
     Args:
         out: The output of the model.
-        inner_acts: The activations at the output of each subnetwork before being summed.
+        pre_acts: The activations at the output of each subnetwork before being summed.
+        subnet_params: The subnet parameter matrix at each layer.
         layer_acts: The activations at the output of each layer after being summed.
+        k: The number of subnetwork parameters.
 
     Returns:
         The list of attribution scores for each layer.
     """
-    first_param_matrix_name = next(iter(inner_acts.keys()))
+    first_param_matrix_name = next(iter(pre_acts.keys()))
+    attr_shape = pre_acts[first_param_matrix_name].shape[:-1] + (k,)
     layer_attribution_scores: list[Float[Tensor, "... k"]] = [
-        torch.zeros(
-            inner_acts[first_param_matrix_name].shape[:-1],
-            device=inner_acts[first_param_matrix_name].device,
-        )
-        for _ in range(len(inner_acts))
+        torch.zeros(attr_shape, device=pre_acts[first_param_matrix_name].device)
+        for _ in range(len(pre_acts))
     ]
     for feature_idx in range(out.shape[-1]):
         grad_layer_acts: tuple[Float[Tensor, "... k"], ...] = torch.autograd.grad(
             out[..., feature_idx].sum(), list(layer_acts.values()), retain_graph=True
         )
         for i, param_matrix_name in enumerate(layer_acts.keys()):
+            inner_acts = einops.einsum(
+                pre_acts[param_matrix_name].detach().clone(),
+                subnet_params[param_matrix_name],
+                "... d_in, ... k d_in d_out -> ... k d_out",
+            )
             layer_attribution_scores[i] += einops.einsum(
-                grad_layer_acts[i].detach(),
-                inner_acts[param_matrix_name],
-                "... d_out ,... k d_out -> ... k",
+                grad_layer_acts[i].detach(), inner_acts, "... d_out ,... k d_out -> ... k"
             ).pow(2)
 
     return layer_attribution_scores
