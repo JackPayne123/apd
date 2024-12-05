@@ -76,16 +76,17 @@ def plot_subnetwork_correlations(
         batch = batch.to(device=device)
         assert config.topk is not None
 
-        _, pre_acts, _ = target_model(batch)
+        target_out, pre_acts, post_acts = target_model(batch)
         # Get the topk mask
         model_output_spd, layer_acts, inner_acts = spd_model(batch)
         attribution_scores = calculate_attributions(
             model=spd_model,
             batch=batch,
             out=model_output_spd,
+            target_out=target_out,
             pre_acts=pre_acts,
+            post_acts=post_acts,
             inner_acts=inner_acts,
-            layer_acts=layer_acts,
             attribution_type=config.attribution_type,
         )
 
