@@ -987,8 +987,7 @@ def optimize(
                 assert layer_acts_topk is not None
                 assert post_acts is not None
                 topk_act_recon_loss = calc_topk_act_recon(
-                    target_post_acts=post_acts,
-                    layer_acts_topk=layer_acts_topk,
+                    target_post_acts=post_acts, layer_acts_topk=layer_acts_topk
                 )
 
         if config.schatten_coeff is not None:
