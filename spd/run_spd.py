@@ -737,11 +737,8 @@ def optimize(
             data_iter = iter(dataloader)
             batch = next(data_iter)[0]
 
-        pre_acts = None
-        post_acts = None
-
         batch = batch.to(device=device)
-        labels, pre_acts, post_acts = pretrained_model(batch)
+        target_out, pre_acts, post_acts = pretrained_model(batch)
 
         total_samples += batch.shape[0]
 
@@ -764,7 +761,7 @@ def optimize(
         out, layer_acts, inner_acts = model(batch)
 
         # Calculate losses
-        out_recon_loss = calc_recon_mse(out, labels, has_instance_dim)
+        out_recon_loss = calc_recon_mse(out, target_out, has_instance_dim)
 
         orthog_loss = None
         if config.orthog_coeff is not None:
@@ -792,9 +789,10 @@ def optimize(
             model=model,
             batch=batch,
             out=out,
+            target_out=target_out,
             pre_acts=pre_acts,
+            post_acts=post_acts,
             inner_acts=inner_acts,
-            layer_acts=layer_acts,
             attribution_type=config.attribution_type,
         )
 
@@ -838,12 +836,12 @@ def optimize(
 
             if config.topk_recon_coeff is not None:
                 assert out_topk is not None
-                topk_recon_loss = calc_recon_mse(out_topk, labels, has_instance_dim)
+                topk_recon_loss = calc_recon_mse(out_topk, target_out, has_instance_dim)
 
             if config.topk_param_attrib_coeff is not None:
                 assert pre_acts is not None and post_acts is not None
                 topk_param_attrib_loss = calc_topk_param_attrib_loss(
-                    target_out=labels,
+                    target_out=target_out,
                     target_params=pretrained_model.all_decomposable_params(),
                     subnetwork_params=model.all_subnetwork_params(),
                     topk_mask=topk_mask,
