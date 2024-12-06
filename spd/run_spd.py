@@ -111,7 +111,7 @@ class Config(BaseModel):
     lr: PositiveFloat
     orthog_coeff: NonNegativeFloat | None = None
     out_recon_coeff: NonNegativeFloat | None = None
-    topk_act_recon_coeff: NonNegativeFloat | None = None
+    act_recon_coeff: NonNegativeFloat | None = None
     param_match_coeff: NonNegativeFloat | None = 1.0
     topk_recon_coeff: NonNegativeFloat | None = None
     topk_l2_coeff: NonNegativeFloat | None = None
@@ -250,8 +250,8 @@ def get_common_run_name_suffix(config: Config) -> str:
         run_suffix += f"topkl2_{config.topk_l2_coeff:.2e}_"
     if config.schatten_coeff is not None:
         run_suffix += f"schatten{config.schatten_coeff:.2e}_"
-    if config.topk_act_recon_coeff is not None:
-        run_suffix += f"topkactrecon_{config.topk_act_recon_coeff:.2e}_"
+    if config.act_recon_coeff is not None:
+        run_suffix += f"actrecon_{config.act_recon_coeff:.2e}_"
     if config.topk_param_attrib_coeff is not None:
         run_suffix += f"topkattrib_{config.topk_param_attrib_coeff:.2e}_"
     run_suffix += f"sd{config.seed}_"
@@ -638,35 +638,32 @@ def calc_topk_param_attrib_loss(
     return loss / n_params
 
 
-def calc_topk_act_recon(
+def calc_act_recon(
     target_post_acts: dict[
         str, Float[Tensor, "batch n_instances d_out"] | Float[Tensor, "batch d_out"]
     ],
-    layer_acts_topk: dict[
-        str, Float[Tensor, "batch n_instances d_out"] | Float[Tensor, "batch d_out"]
-    ],
+    layer_acts: dict[str, Float[Tensor, "batch n_instances d_out"] | Float[Tensor, "batch d_out"]],
 ) -> Float[Tensor, ""] | Float[Tensor, " n_instances"]:
-    """MSE between all target model activations and the sum of the topk subnetwork activations.
+    """MSE between all target model activations and the output of each subnetwork in the SPD model.
 
     Args:
         target_post_acts: The activations after each layer in the target model.
-        layer_acts_topk: The activations after each subnetwork in the SPD model summed over the topk
-            subnetworks.
+        layer_acts: The activations after each subnetwork in the SPD model.
 
     Returns:
         The activation reconstruction loss. Will have an n_instances dimension if the model has an
             n_instances dimension, otherwise a scalar.
     """
-    assert target_post_acts.keys() == layer_acts_topk.keys(), "Layer keys must match"
+    assert target_post_acts.keys() == layer_acts.keys(), "Layer keys must match"
 
-    device = next(iter(layer_acts_topk.values())).device
+    device = next(iter(layer_acts.values())).device
 
     total_act_dim = 0  # Accumulate the d_out over all layers for normalization
     loss = torch.zeros(1, device=device)
     for layer_name in target_post_acts:
         total_act_dim += target_post_acts[layer_name].shape[-1]
 
-        error = ((target_post_acts[layer_name] - layer_acts_topk[layer_name]) ** 2).sum(dim=-1)
+        error = ((target_post_acts[layer_name] - layer_acts[layer_name]) ** 2).sum(dim=-1)
         loss = loss + error
 
     # Normalize by the total number of output dimensions and mean over the batch dim
@@ -810,7 +807,7 @@ def optimize(
             topk_recon_loss,
             topk_mask,
             topk_param_attrib_loss,
-            topk_act_recon_loss,
+            layer_acts_topk,
         ) = None, None, None, None, None, None, None
         if config.topk is not None:
             # We always assume the final subnetwork is the one we want to distil
@@ -851,12 +848,12 @@ def optimize(
                     n_params=n_params,
                 )
 
-            if config.topk_act_recon_coeff is not None:
-                assert layer_acts_topk is not None
-                assert post_acts is not None
-                topk_act_recon_loss = calc_topk_act_recon(
-                    target_post_acts=post_acts, layer_acts_topk=layer_acts_topk
-                )
+        act_recon_loss = None
+        if config.act_recon_coeff is not None:
+            act_recon_loss = calc_act_recon(
+                target_post_acts=post_acts,
+                layer_acts=layer_acts if layer_acts_topk is None else layer_acts_topk,
+            )
 
         if config.schatten_coeff is not None:
             assert isinstance(
@@ -902,9 +899,9 @@ def optimize(
         if topk_param_attrib_loss is not None:
             assert config.topk_param_attrib_coeff is not None
             loss = loss + config.topk_param_attrib_coeff * topk_param_attrib_loss.mean()
-        if topk_act_recon_loss is not None:
-            assert config.topk_act_recon_coeff is not None
-            loss = loss + config.topk_act_recon_coeff * topk_act_recon_loss.mean()
+        if act_recon_loss is not None:
+            assert config.act_recon_coeff is not None
+            loss = loss + config.act_recon_coeff * act_recon_loss.mean()
         if schatten_loss is not None:
             assert config.schatten_coeff is not None
             loss = loss + config.schatten_coeff * schatten_loss.mean()
@@ -930,8 +927,8 @@ def optimize(
                 tqdm.write(f"Orthog loss:{nl}{orthog_loss}")
             if topk_param_attrib_loss is not None:
                 tqdm.write(f"Topk param attrib loss:{nl}{topk_param_attrib_loss}")
-            if topk_act_recon_loss is not None:
-                tqdm.write(f"Topk act recon loss:{nl}{topk_act_recon_loss}")
+            if act_recon_loss is not None:
+                tqdm.write(f"Act recon loss:{nl}{act_recon_loss}")
             if schatten_loss is not None:
                 tqdm.write(f"Schatten loss:{nl}{schatten_loss}")
             if config.wandb_project:
@@ -959,8 +956,8 @@ def optimize(
                         "topk_param_attrib_loss": topk_param_attrib_loss.mean().item()
                         if topk_param_attrib_loss is not None
                         else None,
-                        "topk_act_recon_loss": topk_act_recon_loss.mean().item()
-                        if topk_act_recon_loss is not None
+                        "act_recon_loss": act_recon_loss.mean().item()
+                        if act_recon_loss is not None
                         else None,
                         "schatten_loss": schatten_loss.mean().item()
                         if schatten_loss is not None
