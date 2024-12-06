@@ -1,0 +1,34 @@
+wandb_project: spd-piecewise
+wandb_run_name: null
+wandb_run_name_prefix: "sweep1d_4f_2l_rp_"
+spd_type: rank_penalty
+unit_norm_matrices: false
+seed: 0
+topk: 0.2217
+batch_size: 10000
+batch_topk: true
+topk_l2_coeff: null
+param_match_coeff: 0.1
+topk_recon_coeff: 2
+schatten_coeff: 5.0
+schatten_pnorm: 1.0
+lr: 0.003
+steps: 200_000
+print_freq: 500
+image_freq: 50_000
+slow_images: true
+save_freq: 50_000
+lr_warmup_pct: 0.004
+lr_schedule: cosine
+task_config:
+  task_name: piecewise
+  n_functions: 4
+  neurons_per_function: 10
+  n_layers: 2
+  feature_probability: 0.05
+  range_min: 0
+  range_max: 5
+  k: 4
+  init_scale: 1.0
+  simple_bias: false
+  handcoded_AB: false

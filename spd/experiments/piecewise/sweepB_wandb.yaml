@@ -1,0 +1,15 @@
+program: spd/experiments/piecewise/piecewise_decomposition.py
+method: grid
+metric:
+  name: topk_recon_loss
+  goal: minimize
+parameters:
+  seed:
+    values: [0, 1, 2, 3, 4, 5]
+  topk_recon_coeff:
+    values: [20, 100]
+command:
+- ${env}
+- ${interpreter}
+- ${program}
+- spd/experiments/piecewise/sweepB_spd.yaml

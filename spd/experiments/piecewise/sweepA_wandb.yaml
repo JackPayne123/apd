@@ -1,0 +1,22 @@
+program: spd/experiments/piecewise/piecewise_decomposition.py
+method: grid
+metric:
+  name: topk_recon_loss
+  goal: minimize
+parameters:
+parameters:
+  lr:
+    values: [0.0006, 0.003, 0.015]
+  schatten_pnorm:
+    values: [1.0, 0.7, 0.3]
+  schatten_coeff:
+    values: [5.0, 0.1, 25.0]
+  param_match_coeff:
+    values: [0.5, 0.1, 2.5]
+  topk_recon_coeff:
+    values: [1.0, 0.2, 2.0, 5.0]
+command:
+- ${env}
+- ${interpreter}
+- ${program}
+- spd/experiments/piecewise/sweepA_spd.yaml
