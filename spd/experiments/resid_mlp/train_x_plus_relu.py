@@ -32,7 +32,7 @@ if __name__ == "__main__":
         label_type="act_plus_resid",
         loss_type="resid",
         use_trivial_label_coeffs=True,
-        feature_probability=0.05,
+        feature_probability=0.02,
         importance_val=1,
         data_generation_type="at_least_zero_active",
         batch_size=2048,
