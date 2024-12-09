@@ -21,7 +21,6 @@ from spd.experiments.piecewise.models import (
 )
 from spd.experiments.piecewise.piecewise_dataset import PiecewiseDataset
 from spd.experiments.piecewise.plotting import (
-    plot_components,
     plot_components_fullrank,
     plot_model_functions,
     plot_piecewise_network,
@@ -36,20 +35,15 @@ from spd.run_spd import (
     get_common_run_name_suffix,
     optimize,
 )
-from spd.utils import (
-    BatchedDataLoader,
-    init_wandb,
-    load_config,
-    save_config_to_wandb,
-    set_seed,
-)
+from spd.utils import BatchedDataLoader, load_config, set_seed
+from spd.wandb_utils import init_wandb
 
 wandb.require("core")
 
 
 def piecewise_plot_results_fn(
-    model: PiecewiseFunctionSPDTransformer | PiecewiseFunctionSPDFullRankTransformer,
-    target_model: PiecewiseFunctionTransformer | None,
+    model: PiecewiseFunctionSPDFullRankTransformer | PiecewiseFunctionSPDRankPenaltyTransformer,
+    target_model: PiecewiseFunctionTransformer,
     step: int,
     out_dir: Path | None,
     device: str,
@@ -68,7 +62,6 @@ def piecewise_plot_results_fn(
             spd_model=model,
             target_model=target_model,
             attribution_type=config.attribution_type,
-            spd_type=config.spd_type,
             device=device,
             start=config.task_config.range_min,
             stop=config.task_config.range_max,
@@ -84,6 +77,7 @@ def piecewise_plot_results_fn(
             # Plot correlations
             fig_dict_correlations = plot_subnetwork_correlations(
                 dataloader=dataloader,
+                target_model=target_model,
                 spd_model=model,
                 config=config,
                 device=device,
@@ -104,14 +98,6 @@ def piecewise_plot_results_fn(
             model=model, step=step, out_dir=out_dir, slow_images=slow_images
         )
         fig_dict.update(fig_dict_components)
-    elif isinstance(model, PiecewiseFunctionSPDTransformer):
-        if config.task_config.n_layers == 1:
-            fig_dict_components = plot_components(
-                model=model, step=step, out_dir=out_dir, device=device, slow_images=slow_images
-            )
-            fig_dict.update(fig_dict_components)
-        else:
-            tqdm.write("Skipping component plots for >1 layer models")
     else:
         tqdm.write(f"Skipping component plots for {type(model)}")
     # Save plots to files
@@ -205,16 +191,8 @@ def get_model_and_dataloader(
             init_scale=config.task_config.init_scale,
             m=config.m,
         )
-    elif config.spd_type == "rank_one":
-        piecewise_model_spd = PiecewiseFunctionSPDTransformer(
-            n_inputs=piecewise_model.n_inputs,
-            d_mlp=piecewise_model.d_mlp,
-            n_layers=piecewise_model.n_layers,
-            k=config.task_config.k,
-            init_scale=config.task_config.init_scale,
-        )
     else:
-        raise ValueError(f"Unknown SPD type: {config.spd_type}")
+        raise ValueError(f"Unknown/unsupported SPD type: {config.spd_type}")
 
     if config.distil_from_target:
         assert config.spd_type == "full_rank", "Distillation only supported for full rank"
@@ -223,18 +201,12 @@ def get_model_and_dataloader(
     # Copy the biases (never decomposed)
     for i in range(piecewise_model_spd.n_layers):
         # Copy input biases from model & set requires_grad=False
-        if config.spd_type == "rank_one":
-            piecewise_model_spd.mlps[i].bias1.data[:] = (
-                piecewise_model.mlps[i].input_layer.bias.data.detach().clone()
-            )
-            piecewise_model_spd.mlps[i].bias1.requires_grad_(False)
-        else:
-            piecewise_model_spd.mlps[i].linear1.bias.data[:] = (
-                piecewise_model.mlps[i].input_layer.bias.data.detach().clone()
-            )
-            piecewise_model_spd.mlps[i].linear1.bias.requires_grad_(False)
-            # Make sure that there is no output bias
-            assert piecewise_model_spd.mlps[i].linear2.bias is None
+        piecewise_model_spd.mlps[i].linear1.bias.data[:] = (
+            piecewise_model.mlps[i].input_layer.bias.data.detach().clone()
+        )
+        piecewise_model_spd.mlps[i].linear1.bias.requires_grad_(False)
+        # Make sure that there is no output bias
+        assert piecewise_model_spd.mlps[i].linear2.bias is None
 
     # Handcoded the parameters if requested
     if config.task_config.handcoded_AB:
@@ -244,28 +216,17 @@ def get_model_and_dataloader(
                 "bug in the W_out matrices (noticed in full_rank, unsure about others)"
             )
         logger.info("Setting handcoded A and B matrices (!)")
-        if config.spd_type == "rank_one":
-            assert isinstance(piecewise_model_spd, PiecewiseFunctionSPDTransformer)
-            piecewise_model_spd.set_handcoded_spd_params(piecewise_model)
-        elif config.spd_type in ["full_rank", "rank_penalty"]:
-            assert isinstance(
-                piecewise_model_spd,
-                PiecewiseFunctionSPDFullRankTransformer
-                | PiecewiseFunctionSPDRankPenaltyTransformer,
-            )
-            logger.info("Setting handcoded A and B matrices (!)")
-            # Create a rank-one handcoded model & copy its SPD weights
-            rank_one_spd_model = PiecewiseFunctionSPDTransformer(
-                n_inputs=piecewise_model.n_inputs,
-                d_mlp=piecewise_model.d_mlp,
-                n_layers=piecewise_model.n_layers,
-                k=config.task_config.k,
-                init_scale=config.task_config.init_scale,
-            )
-            rank_one_spd_model.set_handcoded_spd_params(piecewise_model)
-            piecewise_model_spd.set_handcoded_spd_params(rank_one_spd_model)
-        else:
-            raise ValueError(f"Unknown SPD type for handcoded AB: {config.spd_type}")
+
+        # Create a rank-one handcoded model & copy its SPD weights
+        rank_one_spd_model = PiecewiseFunctionSPDTransformer(
+            n_inputs=piecewise_model.n_inputs,
+            d_mlp=piecewise_model.d_mlp,
+            n_layers=piecewise_model.n_layers,
+            k=config.task_config.k,
+            init_scale=config.task_config.init_scale,
+        )
+        rank_one_spd_model.set_handcoded_spd_params(piecewise_model)
+        piecewise_model_spd.set_handcoded_spd_params(rank_one_spd_model)
 
     piecewise_model_spd.to(device)
 
@@ -311,7 +272,6 @@ def main(
 
     if config.wandb_project:
         config = init_wandb(config, config.wandb_project, sweep_config_path)
-        save_config_to_wandb(config)
 
     set_seed(config.seed)
     logger.info(config)
@@ -331,6 +291,8 @@ def main(
 
     with open(out_dir / "final_config.yaml", "w") as f:
         yaml.dump(config.model_dump(mode="json"), f, indent=2)
+    if config.wandb_project:
+        wandb.save(str(out_dir / "final_config.yaml"), base_path=out_dir)
 
     piecewise_model, piecewise_model_spd, dataloader, test_dataloader = get_model_and_dataloader(
         config, device, out_dir
@@ -360,6 +322,10 @@ def main(
         param_map[f"mlp_{i}.input_layer.weight"] = f"mlp_{i}.input_layer.weight"
         param_map[f"mlp_{i}.output_layer.weight"] = f"mlp_{i}.output_layer.weight"
 
+    assert isinstance(
+        piecewise_model_spd,
+        PiecewiseFunctionSPDFullRankTransformer | PiecewiseFunctionSPDRankPenaltyTransformer,
+    )
     optimize(
         model=piecewise_model_spd,
         config=config,

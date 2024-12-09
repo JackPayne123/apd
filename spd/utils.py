@@ -1,23 +1,17 @@
-import os
 import random
-import time
 from collections.abc import Iterator
 from pathlib import Path
-from tempfile import TemporaryDirectory
 from typing import Any, Generic, Literal, NamedTuple, TypeVar
 
 import einops
 import numpy as np
 import torch
-import wandb
 import yaml
-from dotenv import load_dotenv
 from jaxtyping import Float, Int
 from pydantic import BaseModel
 from pydantic.v1.utils import deep_update
 from torch import Tensor
 from torch.utils.data import DataLoader, Dataset
-from wandb.apis.public import Run
 
 from spd.models.base import Model, SPDFullRankModel, SPDModel, SPDRankPenaltyModel
 from spd.settings import REPO_ROOT
@@ -26,7 +20,7 @@ T = TypeVar("T", bound=BaseModel)
 Q = TypeVar("Q")
 
 
-def to_root_path(path: str | Path):
+def to_root_path(path: str | Path) -> Path:
     """Converts relative paths to absolute ones, assuming they are relative to the rib root."""
     return Path(path) if Path(path).is_absolute() else Path(REPO_ROOT / path)
 
@@ -158,53 +152,6 @@ def replace_pydantic_model(model: BaseModelType, *updates: dict[str, Any]) -> Ba
     return model.__class__(**deep_update(model.model_dump(), *updates))
 
 
-def init_wandb(config: T, project: str, sweep_config_path: Path | str | None) -> T:
-    """Initialize Weights & Biases and return a config updated with sweep hyperparameters.
-
-    If no sweep config is provided, the config is returned as is.
-
-    If a sweep config is provided, wandb is first initialized with the sweep config. This will
-    cause wandb to choose specific hyperparameters for this instance of the sweep and store them
-    in wandb.config. We then update the config with these hyperparameters.
-
-    Args:
-        config: The base config.
-        project: The name of the wandb project.
-        sweep_config_path: The path to the sweep config file. If provided, updates the config with
-            the hyperparameters from this instance of the sweep.
-
-    Returns:
-        Config updated with sweep hyperparameters (if any).
-    """
-    if sweep_config_path is not None:
-        with open(sweep_config_path) as f:
-            sweep_data = yaml.safe_load(f)
-        wandb.init(config=sweep_data, save_code=True)
-    else:
-        load_dotenv(override=True)
-        wandb.init(project=project, entity=os.getenv("WANDB_ENTITY"), save_code=True)
-
-    # Update the config with the hyperparameters for this sweep (if any)
-    config = replace_pydantic_model(config, wandb.config)
-
-    # Update the non-frozen keys in the wandb config (only relevant for sweeps)
-    wandb.config.update(config.model_dump(mode="json"))
-    return config
-
-
-def save_config_to_wandb(config: BaseModel, filename: str = "final_config.yaml") -> None:
-    # Save the config to wandb
-    with TemporaryDirectory() as tmp_dir:
-        config_path = Path(tmp_dir) / filename
-        with open(config_path, "w") as f:
-            yaml.dump(config.model_dump(mode="json"), f, indent=2)
-        wandb.save(str(config_path), policy="now", base_path=tmp_dir)
-        # Unfortunately wandb.save is async, so we need to wait for it to finish before
-        # continuing, and wandb python api provides no way to do this.
-        # TODO: Find a better way to do this.
-        time.sleep(1)
-
-
 def init_param_(param: torch.Tensor, scale: float = 1.0) -> None:
     torch.nn.init.kaiming_uniform_(param)
     with torch.no_grad():
@@ -250,14 +197,28 @@ class BatchedDataLoader(DataLoader[Q], Generic[Q]):
             yield batch[0], label[0]
 
 
-def calc_grad_attributions_rank_one(
-    out: Float[Tensor, "batch d_out"] | Float[Tensor, "batch n_instances d_out"],
-    inner_acts_vals: list[Float[Tensor, "batch k"] | Float[Tensor, "batch n_instances k"]],
+def calc_grad_attributions(
+    target_out: Float[Tensor, "batch out_dim"] | Float[Tensor, "batch n_instances out_dim"],
+    pre_acts: dict[str, Float[Tensor, "batch d_in"] | Float[Tensor, "batch n_instances d_in"]],
+    post_acts: dict[str, Float[Tensor, "batch d_out"] | Float[Tensor, "batch n_instances d_out"]],
+    subnet_params: dict[
+        str, Float[Tensor, "k d_in d_out"] | Float[Tensor, "n_instances k d_in d_out"]
+    ],
+    k: int,
 ) -> Float[Tensor, "batch k"] | Float[Tensor, "batch n_instances k"]:
     """Calculate the sum of the (squared) attributions from each output dimension.
 
-    An attribution is the element-wise product of the gradient of the output dimension w.r.t. the
-    inner acts and the inner acts themselves.
+    An attribution is the product of the gradient of the target model output w.r.t. the post acts
+    and the inner acts (i.e. the output of each subnetwork before being summed).
+
+    Note that we don't use the inner_acts collected from the SPD model, because this includes the
+    computational graph of the full model. We only want the subnetwork parameters of the current
+    layer to be in the computational graph. To do this, we multiply a detached version of the
+    pre_acts by the subnet parameters.
+
+    NOTE: Multplying the pre_acts by the subnet parameters would be less efficient than multiplying
+    the pre_acts by A and then B in the case where subnet_params is rank one or rank penalty. In
+    the future, we can implement this more efficient version. For now, this simpler version is fine.
 
     Note: This code may be run in between the training forward pass, and the loss.backward() and
     opt.step() calls; it must not mess with the training. The reason the current implementation is
@@ -266,120 +227,41 @@ def calc_grad_attributions_rank_one(
     where we want to later use the `out` variable in e.g. the loss function.
 
     Args:
-        out: The output of the model.
-        inner_acts_vals: The inner acts of the model (i.e. the set of subnetwork activations for
-            each parameter matrix).
-
+        target_out: The output of the target model.
+        pre_acts: The activations at the output of each subnetwork before being summed.
+        post_acts: The activations at the output of each layer after being summed.
+        subnet_params: The subnet parameter matrix at each layer.
+        k: The number of subnetwork parameters.
     Returns:
         The sum of the (squared) attributions from each output dimension.
     """
-    attribution_scores: Float[Tensor, " k"] | Float[Tensor, "n_instances k"] = torch.zeros_like(
-        inner_acts_vals[0]
+    assert post_acts.keys() == pre_acts.keys() == subnet_params.keys()
+    attr_shape = target_out.shape[:-1] + (k,)  # (batch, k) or (batch, n_instances, k)
+    attribution_scores: Float[Tensor, "batch k"] | Float[Tensor, "batch n_instances k"] = (
+        torch.zeros(attr_shape, device=target_out.device, dtype=target_out.dtype)
     )
-    for feature_idx in range(out.shape[-1]):
-        feature_attributions: Float[Tensor, " k"] | Float[Tensor, "n_instances k"] = (
-            torch.zeros_like(inner_acts_vals[0])
-        )
-        feature_grads: tuple[
-            Float[Tensor, "batch k"] | Float[Tensor, "batch n_instances k"], ...
-        ] = torch.autograd.grad(out[..., feature_idx].sum(), inner_acts_vals, retain_graph=True)
-        assert len(feature_grads) == len(inner_acts_vals)
-        for param_matrix_idx in range(len(inner_acts_vals)):
-            feature_attributions += (
-                feature_grads[param_matrix_idx] * inner_acts_vals[param_matrix_idx]
-            )
 
-        attribution_scores += feature_attributions**2
-
-    return attribution_scores
-
-
-def calc_grad_attributions_rank_one_per_layer(
-    out: Float[Tensor, "... d_out"],
-    inner_acts_vals: list[Float[Tensor, "... k"]],
-) -> list[Float[Tensor, "... k"]]:
-    """Calculate the gradient attributions for each layer.
-
-    This differs from calc_attributions_rank_one in that it returns a list of attribution scores
-    for each layer that are the sum of squares of output features, rather than taking the sum of
-    squared attributions across layers.
-
-    i.e. we do sum_{n_features}(activation * grad)^2 for each layer, rather than
-    sum_{n_features}(sum_{layers}(activation * grad))^2.
-
-    Note that we don't have an ablation version of this for computational reasons.
-    Args:
-        out: The output of the model.
-        inner_acts: The inner acts of the model (i.e. the set of subnetwork activations for each
-            parameter matrix).
-
-    Returns:
-        The list of attribution scores for each layer.
-    """
-
-    layer_attribution_scores: list[Float[Tensor, "... k"]] = [
-        torch.zeros_like(inner_acts_vals[0]) for _ in range(len(inner_acts_vals))
-    ]
-    for feature_idx in range(out.shape[-1]):
-        feature_grads: tuple[Float[Tensor, "... k"], ...] = torch.autograd.grad(
-            out[..., feature_idx].sum(), inner_acts_vals, retain_graph=True
-        )
-        assert len(feature_grads) == len(inner_acts_vals)
-        for param_matrix_idx in range(len(inner_acts_vals)):
-            layer_attribution_scores[param_matrix_idx] += (
-                feature_grads[param_matrix_idx] * inner_acts_vals[param_matrix_idx]
-            ).pow(2)
-
-    return layer_attribution_scores
-
-
-def calc_grad_attributions_full_rank(
-    out: Float[Tensor, "... out_dim"],
-    inner_acts: dict[str, Float[Tensor, "... k d_out"]],
-    layer_acts: dict[str, Float[Tensor, "... d_out"]],
-) -> Float[Tensor, "... k"]:
-    """Calculate the sum of the (squared) attributions from each output dimension.
-
-    An attribution is the element-wise product of the gradient of the output dimension w.r.t. the
-    layer acts and the inner acts.
-
-    Note: This code may be run in between the training forward pass, and the loss.backward() and
-    opt.step() calls; it must not mess with the training. The reason the current implementation is
-    fine to run anywhere is that we just use autograd rather than backward which does not
-    populate the .grad attributes. Unrelatedly, we use retain_graph=True in a bunch of cases
-    where we want to later use the `out` variable in e.g. the loss function.
-
-    Args:
-        out: The output of the model.
-        inner_acts: The activations at the output of each subnetwork before being summed.
-        layer_acts: The activations at the output of each layer after being summed.
-
-    Returns:
-        The sum of the (squared) attributions from each output dimension.
-    """
-    assert inner_acts.keys() == layer_acts.keys()
-    first_param_matrix_name = next(iter(inner_acts.keys()))
-    attribution_scores: Float[Tensor, "... k"] = torch.zeros(
-        inner_acts[first_param_matrix_name].shape[:-1],
-        device=inner_acts[first_param_matrix_name].device,
-    )
-    out_dim = out.shape[-1]
+    out_dim = target_out.shape[-1]
     for feature_idx in range(out_dim):
-        feature_attributions: Float[Tensor, "... k"] = torch.zeros(
-            inner_acts[first_param_matrix_name].shape[:-1],
-            device=inner_acts[first_param_matrix_name].device,
+        feature_attributions: Float[Tensor, "batch k"] | Float[Tensor, "batch n_instances k"] = (
+            torch.zeros(attr_shape, device=target_out.device, dtype=target_out.dtype)
         )
-        grad_layer_acts: tuple[Float[Tensor, "... d_out"], ...] = torch.autograd.grad(
-            out[..., feature_idx].sum(), list(layer_acts.values()), retain_graph=True
+        grad_post_acts: tuple[
+            Float[Tensor, "batch d_out"] | Float[Tensor, "batch n_instances d_out"], ...
+        ] = torch.autograd.grad(
+            target_out[..., feature_idx].sum(), list(post_acts.values()), retain_graph=True
         )
-        for i, param_matrix_name in enumerate(layer_acts.keys()):
+        for i, param_matrix_name in enumerate(post_acts.keys()):
             # Note that this operation would be equivalent to:
             # einsum(grad_inner_acts, inner_acts, "... k d_out ,... k d_out -> ... k")
             # since the gradient distributes over the sum.
+            inner_acts = einops.einsum(
+                pre_acts[param_matrix_name].detach().clone(),
+                subnet_params[param_matrix_name],
+                "... d_in, ... k d_in d_out -> ... k d_out",
+            )
             feature_attributions += einops.einsum(
-                grad_layer_acts[i].detach(),
-                inner_acts[param_matrix_name],
-                "... d_out ,... k d_out -> ... k",
+                grad_post_acts[i], inner_acts, "... d_out ,... k d_out -> ... k"
             )
 
         attribution_scores += feature_attributions**2
@@ -388,9 +270,13 @@ def calc_grad_attributions_full_rank(
 
 
 def calc_grad_attributions_full_rank_per_layer(
-    out: Float[Tensor, "... out_dim"],
-    inner_acts: dict[str, Float[Tensor, "... k d_out"]],
-    layer_acts: dict[str, Float[Tensor, "... d_out"]],
+    target_out: Float[Tensor, "batch out_dim"] | Float[Tensor, "batch n_instances out_dim"],
+    pre_acts: dict[str, Float[Tensor, "batch d_in"] | Float[Tensor, "batch n_instances d_in"]],
+    post_acts: dict[str, Float[Tensor, "batch d_out"] | Float[Tensor, "batch n_instances d_out"]],
+    subnet_params: dict[
+        str, Float[Tensor, "k d_in d_out"] | Float[Tensor, "n_instances k d_in d_out"]
+    ],
+    k: int,
 ) -> list[Float[Tensor, "... k"]]:
     """Calculate the attributions for each layer.
 
@@ -405,40 +291,42 @@ def calc_grad_attributions_full_rank_per_layer(
 
     Args:
         out: The output of the model.
-        inner_acts: The activations at the output of each subnetwork before being summed.
+        pre_acts: The activations at the output of each subnetwork before being summed.
+        subnet_params: The subnet parameter matrix at each layer.
         layer_acts: The activations at the output of each layer after being summed.
+        k: The number of subnetwork parameters.
 
     Returns:
         The list of attribution scores for each layer.
     """
-    first_param_matrix_name = next(iter(inner_acts.keys()))
+    assert post_acts.keys() == pre_acts.keys() == subnet_params.keys()
+    attr_shape = target_out.shape[:-1] + (k,)  # (batch, k) or (batch, n_instances, k)
     layer_attribution_scores: list[Float[Tensor, "... k"]] = [
-        torch.zeros(
-            inner_acts[first_param_matrix_name].shape[:-1],
-            device=inner_acts[first_param_matrix_name].device,
-        )
-        for _ in range(len(inner_acts))
+        torch.zeros(attr_shape, device=target_out.device) for _ in range(len(pre_acts))
     ]
-    for feature_idx in range(out.shape[-1]):
-        grad_layer_acts: tuple[Float[Tensor, "... k"], ...] = torch.autograd.grad(
-            out[..., feature_idx].sum(), list(layer_acts.values()), retain_graph=True
+    for feature_idx in range(target_out.shape[-1]):
+        grad_post_acts: tuple[Float[Tensor, "... k"], ...] = torch.autograd.grad(
+            target_out[..., feature_idx].sum(), list(post_acts.values()), retain_graph=True
         )
-        for i, param_matrix_name in enumerate(layer_acts.keys()):
+        for i, param_matrix_name in enumerate(post_acts.keys()):
+            inner_acts = einops.einsum(
+                pre_acts[param_matrix_name].detach().clone(),
+                subnet_params[param_matrix_name],
+                "... d_in, ... k d_in d_out -> ... k d_out",
+            )
             layer_attribution_scores[i] += einops.einsum(
-                grad_layer_acts[i].detach(),
-                inner_acts[param_matrix_name],
-                "... d_out ,... k d_out -> ... k",
+                grad_post_acts[i].detach(), inner_acts, "... d_out ,... k d_out -> ... k"
             ).pow(2)
 
     return layer_attribution_scores
 
 
 def collect_subnetwork_attributions(
-    model: SPDModel | SPDFullRankModel | SPDRankPenaltyModel,
+    spd_model: SPDModel | SPDFullRankModel | SPDRankPenaltyModel,
+    target_model: Model,
     device: str,
-    spd_type: Literal["full_rank", "rank_one", "rank_penalty"],
     n_instances: int | None = None,
-) -> Float[Tensor, "batch k"]:
+) -> Float[Tensor, "batch k"] | Float[Tensor, "batch n_instances k"]:
     """
     Collect subnetwork attributions.
 
@@ -446,30 +334,29 @@ def collect_subnetwork_attributions(
     and collects the attributions.
 
     Args:
-        model (ResidualLinearSPDFullRankModel): The model to collect attributions on.
-        device (str): The device to run computations on.
-        spd_type (str): The type of SPD model.
-        n_instances (int | None): The number of instances in the batch.
+        spd_model: The model to collect attributions on.
+        target_model: The target model to collect attributions on.
+        pre_acts: The activations after the parameter matrix in the target model.
+        device: The device to run computations on.
+        n_instances: The number of instances in the batch.
 
     Returns:
         The attribution scores.
     """
-    test_batch = torch.eye(model.n_features, device=device)
+    test_batch = torch.eye(spd_model.n_features, device=device)
     if n_instances is not None:
         test_batch = einops.repeat(
             test_batch, "batch n_features -> batch n_instances n_features", n_instances=n_instances
         )
 
-    out, test_layer_acts, test_inner_acts = model(test_batch)
-
-    if spd_type == "rank_one":
-        attribution_scores = calc_grad_attributions_rank_one(
-            out=out, inner_acts_vals=list(test_inner_acts.values())
-        )
-    else:
-        attribution_scores = calc_grad_attributions_full_rank(
-            out=out, inner_acts=test_inner_acts, layer_acts=test_layer_acts
-        )
+    target_out, pre_acts, post_acts = target_model(test_batch)
+    attribution_scores = calc_grad_attributions(
+        target_out=target_out,
+        subnet_params=spd_model.all_subnetwork_params(),
+        pre_acts=pre_acts,
+        post_acts=post_acts,
+        k=spd_model.k,
+    )
     return attribution_scores
 
 
@@ -519,25 +406,24 @@ def calculate_attributions(
     model: SPDModel | SPDFullRankModel | SPDRankPenaltyModel,
     batch: Float[Tensor, "... n_features"],
     out: Float[Tensor, "... n_features"],
+    target_out: Float[Tensor, "... n_features"],
+    pre_acts: dict[str, Float[Tensor, "batch n_instances d_in"] | Float[Tensor, "batch d_in"]],
+    post_acts: dict[str, Float[Tensor, "batch n_instances d_out"] | Float[Tensor, "batch d_out"]],
     inner_acts: dict[str, Float[Tensor, "batch n_instances k"] | Float[Tensor, "batch k"]],
-    layer_acts: dict[str, Float[Tensor, "batch n_instances d_out"] | Float[Tensor, "batch d_out"]],
     attribution_type: Literal["ablation", "gradient", "activation"],
-    spd_type: Literal["rank_one", "full_rank", "rank_penalty"],
 ) -> Float[Tensor, "batch n_instances k"] | Float[Tensor, "batch k"]:
     attributions = None
     if attribution_type == "ablation":
         attributions = calc_ablation_attributions(model=model, batch=batch, out=out)
     elif attribution_type == "gradient":
-        if spd_type == "rank_one":
-            attributions = calc_grad_attributions_rank_one(
-                out=out, inner_acts_vals=list(inner_acts.values())
-            )
-        else:
-            attributions = calc_grad_attributions_full_rank(
-                out=out, inner_acts=inner_acts, layer_acts=layer_acts
-            )
+        attributions = calc_grad_attributions(
+            target_out=target_out,
+            pre_acts=pre_acts,
+            subnet_params=model.all_subnetwork_params(),
+            post_acts=post_acts,
+            k=model.k,
+        )
     elif attribution_type == "activation":
-        assert spd_type != "rank_one", "Activation attributions not supported for rank one"
         attributions = calc_activation_attributions(inner_acts=inner_acts)
     else:
         raise ValueError(f"Invalid attribution type: {attribution_type}")
@@ -636,7 +522,7 @@ def remove_grad_parallel_to_subnetwork_vecs(
 
 class SPDOutputs(NamedTuple):
     target_model_output: (
-        Float[Tensor, "batch d_model_out"] | Float[Tensor, "batch n_instances d_model_out"] | None
+        Float[Tensor, "batch d_model_out"] | Float[Tensor, "batch n_instances d_model_out"]
     )
     spd_model_output: (
         Float[Tensor, "batch d_model_out"] | Float[Tensor, "batch n_instances d_model_out"]
@@ -658,29 +544,26 @@ class SPDOutputs(NamedTuple):
 
 def run_spd_forward_pass(
     spd_model: SPDModel | SPDFullRankModel | SPDRankPenaltyModel,
-    target_model: Model | None,
+    target_model: Model,
     input_array: Float[Tensor, "batch n_inputs"],
     attribution_type: Literal["gradient", "ablation", "activation"],
-    spd_type: Literal["rank_one", "full_rank", "rank_penalty"],
     batch_topk: bool,
     topk: float,
     distil_from_target: bool,
 ) -> SPDOutputs:
     # non-SPD model, and SPD-model non-topk forward pass
-    if target_model is not None:
-        target_model_output, _, _ = target_model(input_array)
-    else:
-        target_model_output = None
+    target_model_output, pre_acts, post_acts = target_model(input_array)
 
     model_output_spd, layer_acts, inner_acts = spd_model(input_array)
     attribution_scores = calculate_attributions(
         model=spd_model,
         batch=input_array,
         out=model_output_spd,
+        target_out=target_model_output,
+        pre_acts=pre_acts,
+        post_acts=post_acts,
         inner_acts=inner_acts,
-        layer_acts=layer_acts,
         attribution_type=attribution_type,
-        spd_type=spd_type,
     )
 
     # We always assume the final subnetwork is the one we want to distil
@@ -706,14 +589,128 @@ def run_spd_forward_pass(
     )
 
 
-def download_wandb_file(run: Run, file_name: str) -> Path:
-    cache_dir = Path(os.environ.get("SPD_CACHE_DIR", "/tmp/"))
-    run_cache_dir = cache_dir / run.id
-    run_cache_dir.mkdir(parents=True, exist_ok=True)
-    file_on_wandb = run.file(file_name)
-    return Path(file_on_wandb.download(exist_ok=True, replace=True, root=run_cache_dir).name)  # type: ignore
+class SparseFeatureDataset(
+    Dataset[
+        tuple[
+            Float[Tensor, "batch n_instances n_features"],
+            Float[Tensor, "batch n_instances n_features"],
+        ]
+    ]
+):
+    def __init__(
+        self,
+        n_instances: int,
+        n_features: int,
+        feature_probability: float,
+        device: str,
+        data_generation_type: Literal[
+            "exactly_one_active", "exactly_two_active", "at_least_zero_active"
+        ] = "at_least_zero_active",
+        value_range: tuple[float, float] = (0.0, 1.0),
+    ):
+        self.n_instances = n_instances
+        self.n_features = n_features
+        self.feature_probability = feature_probability
+        self.device = device
+        self.data_generation_type = data_generation_type
+        self.value_range = value_range
+
+    def __len__(self) -> int:
+        return 2**31
+
+    def generate_batch(
+        self, batch_size: int
+    ) -> tuple[
+        Float[Tensor, "batch n_instances n_features"], Float[Tensor, "batch n_instances n_features"]
+    ]:
+        if self.data_generation_type == "exactly_one_active":
+            batch = self._generate_one_feature_active_batch(batch_size)
+        elif self.data_generation_type == "exactly_two_active":
+            batch = self._generate_two_feature_active_batch(batch_size)
+        elif self.data_generation_type == "at_least_zero_active":
+            batch = self._generate_multi_feature_batch(batch_size)
+        else:
+            raise ValueError(f"Invalid generation type: {self.data_generation_type}")
+        return batch, batch.clone().detach()
+
+    def _generate_one_feature_active_batch(
+        self, batch_size: int
+    ) -> Float[Tensor, "batch n_instances n_features"]:
+        """Generate a batch with one feature active per sample and instance."""
+        batch = torch.zeros(batch_size, self.n_instances, self.n_features, device=self.device)
+
+        active_features = torch.randint(
+            0, self.n_features, (batch_size, self.n_instances), device=self.device
+        )
+        min_val, max_val = self.value_range
+        random_values = torch.rand(batch_size, self.n_instances, 1, device=self.device)
+        random_values = random_values * (max_val - min_val) + min_val
+        batch.scatter_(dim=2, index=active_features.unsqueeze(-1), src=random_values)
+        return batch
+
+    def _generate_two_feature_active_batch(
+        self, batch_size: int
+    ) -> Float[Tensor, "batch n_instances n_features"]:
+        """Generate a batch with exactly two features active per sample and instance."""
+        batch = torch.zeros(batch_size, self.n_instances, self.n_features, device=self.device)
+
+        # Create indices for all features
+        feature_indices = torch.arange(self.n_features, device=self.device)
+        # Expand to batch size and n_instances
+        feature_indices = feature_indices.expand(batch_size, self.n_instances, self.n_features)
+
+        # For each instance in the batch, randomly permute the features
+        perm = torch.rand_like(feature_indices.float()).argsort(dim=-1)
+        permuted_features = feature_indices.gather(dim=-1, index=perm)
+
+        # Take first two indices for each instance - guaranteed no duplicates
+        active_features = permuted_features[..., :2]
+
+        # Generate random values in value_range for the active features
+        min_val, max_val = self.value_range
+        random_values = torch.rand(batch_size, self.n_instances, 2, device=self.device)
+        random_values = random_values * (max_val - min_val) + min_val
+
+        # Place the first active feature
+        batch.scatter_(dim=2, index=active_features[..., 0:1], src=random_values[..., 0:1])
+        # Place the second active feature
+        batch.scatter_(dim=2, index=active_features[..., 1:2], src=random_values[..., 1:2])
+
+        return batch
+
+    def _generate_multi_feature_batch(
+        self, batch_size: int
+    ) -> Float[Tensor, "batch n_instances n_features"]:
+        """Generate a batch where each feature activates independently with probability
+        `feature_probability`."""
+        min_val, max_val = self.value_range
+        batch = (
+            torch.rand((batch_size, self.n_instances, self.n_features), device=self.device)
+            * (max_val - min_val)
+            + min_val
+        )
+        mask = torch.rand_like(batch) < self.feature_probability
+        return batch * mask
 
 
-def load_yaml(file_path: Path) -> dict[str, Any]:
-    with open(file_path) as f:
-        return yaml.safe_load(f)
+def compute_feature_importances(
+    batch_size: int,
+    n_instances: int,
+    n_features: int,
+    importance_val: float | None,
+    device: str,
+) -> Float[Tensor, "batch_size n_instances n_features"]:
+    # Defines a tensor where the i^th feature has importance importance^i
+    if importance_val is None or importance_val == 1.0:
+        importance_tensor = torch.ones(batch_size, n_instances, n_features, device=device)
+    else:
+        powers = torch.arange(n_features, device=device)
+        importances = torch.pow(importance_val, powers)
+        # Now make it a tensor of shape (batch_size, n_instances, n_features)
+        importance_tensor = einops.repeat(
+            importances,
+            "n_features -> batch_size n_instances n_features",
+            batch_size=batch_size,
+            n_instances=n_instances,
+        )
+    return importance_tensor

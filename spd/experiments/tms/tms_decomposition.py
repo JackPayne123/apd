@@ -5,6 +5,7 @@ the losses of the "correct" solution during training.
 """
 
 from pathlib import Path
+from typing import Any
 
 import fire
 import matplotlib.pyplot as plt
@@ -13,56 +14,70 @@ import torch
 import wandb
 import yaml
 from jaxtyping import Float
-from matplotlib.colors import CenteredNorm
 from torch import Tensor
 from tqdm import tqdm
 
 from spd.experiments.tms.models import (
     TMSModel,
+    TMSModelConfig,
     TMSSPDFullRankModel,
-    TMSSPDModel,
     TMSSPDRankPenaltyModel,
+    TMSSPDRankPenaltyModelConfig,
 )
-from spd.experiments.tms.utils import TMSDataset, plot_A_matrix
 from spd.log import logger
-from spd.run_spd import Config, TMSConfig, get_common_run_name_suffix, optimize
+from spd.run_spd import Config, TMSTaskConfig, get_common_run_name_suffix, optimize
 from spd.utils import (
     DatasetGeneratedDataLoader,
+    SparseFeatureDataset,
     collect_subnetwork_attributions,
-    init_wandb,
     load_config,
-    permute_to_identity,
-    save_config_to_wandb,
     set_seed,
 )
+from spd.wandb_utils import init_wandb
 
 wandb.require("core")
 
 
-def get_run_name(config: Config, task_config: TMSConfig) -> str:
+def get_run_name(config: Config, tms_model_config: TMSModelConfig) -> str:
     """Generate a run name based on the config."""
     if config.wandb_run_name:
         run_suffix = config.wandb_run_name
     else:
         run_suffix = get_common_run_name_suffix(config)
-        run_suffix += f"ft{task_config.n_features}_"
-        run_suffix += f"hid{task_config.n_hidden}"
-        if task_config.handcoded:
-            run_suffix += "_handcoded"
+        run_suffix += f"ft{tms_model_config.n_features}_"
+        run_suffix += f"hid{tms_model_config.n_hidden}"
+        run_suffix += f"hid-layers{tms_model_config.n_hidden_layers}"
     return config.wandb_run_name_prefix + run_suffix
 
 
-def plot_permuted_A(model: TMSSPDModel, step: int, out_dir: Path, **_) -> plt.Figure:
-    permuted_A_T_list: list[torch.Tensor] = []
-    for i in range(model.n_instances):
-        permuted_matrix = permute_to_identity(model.A[i].T.abs())
-        permuted_A_T_list.append(permuted_matrix)
-    permuted_A_T = torch.stack(permuted_A_T_list, dim=0)
+def plot_A_matrix(x: torch.Tensor, pos_only: bool = False) -> plt.Figure:
+    n_instances = x.shape[0]
 
-    fig = plot_A_matrix(permuted_A_T, pos_only=True)
-    fig.savefig(out_dir / f"A_{step}.png")
-    plt.close(fig)
-    tqdm.write(f"Saved A matrix to {out_dir / f'A_{step}.png'}")
+    fig, axs = plt.subplots(
+        1, n_instances, figsize=(2.5 * n_instances, 2), squeeze=False, sharey=True
+    )
+
+    cmap = "Blues" if pos_only else "RdBu"
+    ims = []
+    for i in range(n_instances):
+        ax = axs[0, i]
+        instance_data = x[i, :, :].detach().cpu().float().numpy()
+        max_abs_val = np.abs(instance_data).max()
+        vmin = 0 if pos_only else -max_abs_val
+        vmax = max_abs_val
+        im = ax.matshow(instance_data, vmin=vmin, vmax=vmax, cmap=cmap)
+        ims.append(im)
+        ax.xaxis.set_ticks_position("bottom")
+        if i == 0:
+            ax.set_ylabel("k", rotation=0, labelpad=10, va="center")
+        else:
+            ax.set_yticks([])  # Remove y-axis ticks for all but the first plot
+        ax.xaxis.set_label_position("top")
+        ax.set_xlabel("n_features")
+
+    plt.subplots_adjust(wspace=0.1, bottom=0.15, top=0.9)
+    fig.subplots_adjust(bottom=0.2)
+
     return fig
 
 
@@ -172,7 +187,7 @@ def plot_subnetwork_attributions_statistics_multiple_instances(
 
 
 def plot_subnetwork_params(
-    model: TMSSPDFullRankModel | TMSSPDModel | TMSSPDRankPenaltyModel, step: int, out_dir: Path, **_
+    model: TMSSPDFullRankModel | TMSSPDRankPenaltyModel, step: int, out_dir: Path, **_
 ) -> plt.Figure:
     """Plot the subnetwork parameter matrix."""
     all_params = model.all_subnetwork_params()
@@ -193,10 +208,11 @@ def plot_subnetwork_params(
     )
 
     for i in range(n_instances):
+        instance_max = np.abs(subnet_params[i].detach().cpu().numpy()).max()
         for j in range(k):
             ax = axs[j, i]  # type: ignore
             param = subnet_params[i, j].detach().cpu().numpy()
-            ax.matshow(param, cmap="RdBu", norm=CenteredNorm())
+            ax.matshow(param, cmap="RdBu", vmin=-instance_max, vmax=instance_max)
             ax.set_xticks([])
             ax.set_yticks([])
 
@@ -213,7 +229,8 @@ def plot_subnetwork_params(
 
 
 def make_plots(
-    model: TMSSPDFullRankModel | TMSSPDModel | TMSSPDRankPenaltyModel,
+    model: TMSSPDFullRankModel | TMSSPDRankPenaltyModel,
+    target_model: TMSModel,
     step: int,
     out_dir: Path,
     device: str,
@@ -222,17 +239,19 @@ def make_plots(
     **_,
 ) -> dict[str, plt.Figure]:
     plots = {}
-    if isinstance(model, TMSSPDFullRankModel | TMSSPDRankPenaltyModel):
-        plots["subnetwork_params"] = plot_subnetwork_params(model, step, out_dir)
-    else:
-        plots["A"] = plot_permuted_A(model, step, out_dir)
-        plots["subnetwork_params"] = plot_subnetwork_params(model, step, out_dir)
+    if model.hidden_layers is not None:
+        logger.warning("Only plotting the W matrix params and not the hidden layers.")
+    plots["subnetwork_params"] = plot_subnetwork_params(model, step, out_dir)
 
     if config.topk is not None:
         assert topk_mask is not None
-        assert isinstance(config.task_config, TMSConfig)
+        assert isinstance(config.task_config, TMSTaskConfig)
+        n_instances = model.config.n_instances if hasattr(model, "config") else model.n_instances
         attribution_scores = collect_subnetwork_attributions(
-            model, device, spd_type=config.spd_type, n_instances=config.task_config.n_instances
+            spd_model=model,
+            target_model=target_model,
+            device=device,
+            n_instances=n_instances,
         )
         plots["subnetwork_attributions"] = plot_subnetwork_attributions_multiple_instances(
             attribution_scores=attribution_scores, out_dir=out_dir, step=step
@@ -245,20 +264,44 @@ def make_plots(
     return plots
 
 
+def save_target_model_info(
+    save_to_wandb: bool,
+    out_dir: Path,
+    tms_model: TMSModel,
+    tms_model_train_config_dict: dict[str, Any],
+) -> None:
+    torch.save(tms_model.state_dict(), out_dir / "tms.pth")
+
+    with open(out_dir / "tms_train_config.yaml", "w") as f:
+        yaml.dump(tms_model_train_config_dict, f, indent=2)
+
+    if save_to_wandb:
+        wandb.save(str(out_dir / "tms.pth"), base_path=out_dir)
+        wandb.save(str(out_dir / "tms_train_config.yaml"), base_path=out_dir)
+
+
 def main(
     config_path_or_obj: Path | str | Config, sweep_config_path: Path | str | None = None
 ) -> None:
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+
     config = load_config(config_path_or_obj, config_model=Config)
     task_config = config.task_config
-    assert isinstance(task_config, TMSConfig)
+    assert isinstance(task_config, TMSTaskConfig)
 
     if config.wandb_project:
         config = init_wandb(config, config.wandb_project, sweep_config_path)
-        save_config_to_wandb(config)
+
     set_seed(config.seed)
     logger.info(config)
 
-    run_name = get_run_name(config, task_config)
+    target_model, target_model_train_config_dict = TMSModel.from_pretrained(
+        task_config.pretrained_model_path
+    )
+    target_model = target_model.to(device)
+    target_model.eval()
+
+    run_name = get_run_name(config=config, tms_model_config=target_model.config)
     if config.wandb_project:
         assert wandb.run, "wandb.run must be initialized before training"
         wandb.run.name = run_name
@@ -267,72 +310,58 @@ def main(
 
     with open(out_dir / "final_config.yaml", "w") as f:
         yaml.dump(config.model_dump(mode="json"), f, indent=2)
+    if config.wandb_project:
+        wandb.save(str(out_dir / "final_config.yaml"), base_path=out_dir)
 
-    device = "cuda" if torch.cuda.is_available() else "cpu"
+    save_target_model_info(
+        save_to_wandb=config.wandb_project is not None,
+        out_dir=out_dir,
+        tms_model=target_model,
+        tms_model_train_config_dict=target_model_train_config_dict,
+    )
+
     if config.spd_type == "full_rank":
+        # Note that we don't currently support n_hidden_layers for full rank
         model = TMSSPDFullRankModel(
-            n_instances=task_config.n_instances,
-            n_features=task_config.n_features,
-            n_hidden=task_config.n_hidden,
-            k=task_config.k,
-            bias_val=task_config.bias_val,
-            device=device,
-        )
-    elif config.spd_type == "rank_one":
-        model = TMSSPDModel(
-            n_instances=task_config.n_instances,
-            n_features=task_config.n_features,
-            n_hidden=task_config.n_hidden,
+            n_instances=target_model.config.n_instances,
+            n_features=target_model.config.n_features,
+            n_hidden=target_model.config.n_hidden,
+            n_hidden_layers=target_model.config.n_hidden_layers,
             k=task_config.k,
             bias_val=task_config.bias_val,
             device=device,
         )
     elif config.spd_type == "rank_penalty":
-        model = TMSSPDRankPenaltyModel(
-            n_instances=task_config.n_instances,
-            n_features=task_config.n_features,
-            n_hidden=task_config.n_hidden,
+        tms_spd_rank_penalty_model_config = TMSSPDRankPenaltyModelConfig(
+            **target_model.config.model_dump(mode="json"),
             k=task_config.k,
             m=config.m,
             bias_val=task_config.bias_val,
-            device=device,
         )
+        model = TMSSPDRankPenaltyModel(config=tms_spd_rank_penalty_model_config)
     else:
         raise ValueError(f"Unknown spd_type: {config.spd_type}")
 
-    pretrained_model = None
-    if task_config.pretrained_model_path:
-        pretrained_model = TMSModel(
-            n_instances=task_config.n_instances,
-            n_features=task_config.n_features,
-            n_hidden=task_config.n_hidden,
-            device=device,
-        )
-        pretrained_model.load_state_dict(
-            torch.load(task_config.pretrained_model_path, map_location=device)
-        )
-        pretrained_model.eval()
-        if task_config.handcoded:
-            model.set_handcoded_spd_params(pretrained_model)
-
-        # Manually set the bias for the SPD model from the bias in the pretrained model
-        model.b_final.data[:] = pretrained_model.b_final.data.clone()
+    # Manually set the bias for the SPD model from the bias in the pretrained model
+    model.b_final.data[:] = target_model.b_final.data.clone()
 
     if not task_config.train_bias:
         model.b_final.requires_grad = False
 
-    param_map = None
-    if task_config.pretrained_model_path:
-        # Map from pretrained model's `all_decomposable_params` to the SPD models'
-        # `all_subnetwork_params_summed`.
-        param_map = {"W": "W", "W_T": "W_T"}
+    # Map from pretrained model's `all_decomposable_params` to the SPD models'
+    # `all_subnetwork_params_summed`.
+    param_map = {"W": "W", "W_T": "W_T"}
+    if model.hidden_layers is not None:
+        for i in range(len(model.hidden_layers)):
+            param_map[f"hidden_{i}"] = f"hidden_{i}"
 
-    dataset = TMSDataset(
-        n_instances=task_config.n_instances,
-        n_features=task_config.n_features,
+    dataset = SparseFeatureDataset(
+        n_instances=target_model.config.n_instances,
+        n_features=target_model.config.n_features,
         feature_probability=task_config.feature_probability,
         device=device,
         data_generation_type=task_config.data_generation_type,
+        value_range=(0.0, 1.0),
     )
     dataloader = DatasetGeneratedDataLoader(dataset, batch_size=config.batch_size)
 
@@ -342,7 +371,7 @@ def main(
         out_dir=out_dir,
         device=device,
         dataloader=dataloader,
-        pretrained_model=pretrained_model,
+        pretrained_model=target_model,
         param_map=param_map,
         plot_results_fn=make_plots,
     )

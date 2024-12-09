@@ -1,40 +1,51 @@
-import json
+"""TMS model, adapted from
+https://colab.research.google.com/github/anthropics/toy-models-of-superposition/blob/main/toy_models.ipynb
+"""
+
 import warnings
 from collections.abc import Callable
 from pathlib import Path
-from typing import Literal
+from typing import Literal, Self
 
 import einops
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
+import wandb
+import yaml
 from jaxtyping import Float
 from matplotlib import collections as mc
-from pydantic import BaseModel, PositiveInt
+from pydantic import BaseModel, ConfigDict, PositiveInt, model_validator
 from torch import Tensor
 from tqdm import tqdm, trange
 
-from spd.experiments.tms.models import TMSModel
-from spd.experiments.tms.utils import TMSDataset
-from spd.utils import DatasetGeneratedDataLoader, set_seed
+from spd.experiments.tms.models import TMSModel, TMSModelConfig
+from spd.log import logger
+from spd.utils import DatasetGeneratedDataLoader, SparseFeatureDataset, set_seed
+
+wandb.require("core")
 
 
 class TMSTrainConfig(BaseModel):
-    n_features: PositiveInt
-    n_hidden: PositiveInt
-
-    # We optimize n_instances models in a single training loop
-    # to let us sweep over sparsity or importance curves
-    # efficiently.
-
-    # We could potentially use torch.vmap instead.
-    n_instances: PositiveInt
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    wandb_project: str | None = None  # The name of the wandb project (if None, don't log to wandb)
+    tms_model_config: TMSModelConfig
     feature_probability: float
     batch_size: PositiveInt
     steps: PositiveInt
     seed: int = 0
     lr: float
     data_generation_type: Literal["at_least_zero_active", "exactly_one_active"]
+    fixed_identity_hidden_layers: bool = False
+    fixed_random_hidden_layers: bool = False
+
+    @model_validator(mode="after")
+    def validate_fixed_layers(self) -> Self:
+        if self.fixed_identity_hidden_layers and self.fixed_random_hidden_layers:
+            raise ValueError(
+                "Cannot set both fixed_identity_hidden_layers and fixed_random_hidden_layers to True"
+            )
+        return self
 
 
 def linear_lr(step: int, steps: int) -> float:
@@ -52,6 +63,7 @@ def cosine_decay_lr(step: int, steps: int) -> float:
 def train(
     model: TMSModel,
     dataloader: DatasetGeneratedDataLoader[tuple[torch.Tensor, torch.Tensor]],
+    log_wandb: bool,
     importance: float = 1.0,
     steps: int = 5_000,
     print_freq: int = 100,
@@ -83,11 +95,15 @@ def train(
                 for h in hooks:
                     h(hook_data)
             if step % print_freq == 0 or (step + 1 == steps):
-                tqdm.write(f"Step {step} Loss: {loss.item() / model.n_instances}")
+                tqdm.write(f"Step {step} Loss: {loss.item() / model.config.n_instances}")
                 t.set_postfix(
-                    loss=loss.item() / model.n_instances,
+                    loss=loss.item() / model.config.n_instances,
                     lr=step_lr,
                 )
+                if log_wandb:
+                    wandb.log(
+                        {"loss": loss.item() / model.config.n_instances, "lr": step_lr}, step=step
+                    )
 
 
 def plot_intro_diagram(model: TMSModel, filepath: Path) -> None:
@@ -97,7 +113,7 @@ def plot_intro_diagram(model: TMSModel, filepath: Path) -> None:
     https://colab.research.google.com/github/anthropics/toy-models-of-superposition/blob/main/toy_models.ipynb.
     """
     WA = model.W.detach()
-    sel = range(config.n_instances)  # can be used to highlight specific sparsity levels
+    sel = range(model.config.n_instances)  # can be used to highlight specific sparsity levels
     color = plt.cm.viridis(np.array([0.0]))  # type: ignore
     plt.rcParams["figure.dpi"] = 200
     fig, axs = plt.subplots(1, len(sel), figsize=(2 * len(sel), 2))
@@ -138,7 +154,7 @@ def calculate_feature_cosine_similarities(
     masked_sims = cosine_sims[:, mask].reshape(rows.shape[0], -1)
 
     max_sims = masked_sims.max(dim=-1).values
-    theoretical_max = (1 / model.n_hidden) ** 0.5
+    theoretical_max = (1 / model.config.n_hidden) ** 0.5
 
     if (max_sims > theoretical_max).any():
         warnings.warn(
@@ -151,57 +167,104 @@ def calculate_feature_cosine_similarities(
     return max_sims
 
 
+def get_model_and_dataloader(
+    config: TMSTrainConfig, device: str
+) -> tuple[TMSModel, DatasetGeneratedDataLoader[tuple[torch.Tensor, torch.Tensor]]]:
+    model = TMSModel(config=config.tms_model_config)
+    if (
+        config.fixed_identity_hidden_layers or config.fixed_random_hidden_layers
+    ) and model.hidden_layers is not None:
+        for i in range(model.config.n_hidden_layers):
+            if config.fixed_identity_hidden_layers:
+                model.hidden_layers[i].data[:, :, :] = torch.eye(
+                    model.config.n_hidden, device=device
+                )
+            elif config.fixed_random_hidden_layers:
+                model.hidden_layers[i].data[:, :, :] = torch.randn_like(model.hidden_layers[i])
+            model.hidden_layers[i].requires_grad = False
+
+    dataset = SparseFeatureDataset(
+        n_instances=config.tms_model_config.n_instances,
+        n_features=config.tms_model_config.n_features,
+        feature_probability=config.feature_probability,
+        device=device,
+        data_generation_type=config.data_generation_type,
+        value_range=(0.0, 1.0),
+    )
+    dataloader = DatasetGeneratedDataLoader(dataset, batch_size=config.batch_size)
+    return model, dataloader
+
+
+def run_train(config: TMSTrainConfig, device: str) -> None:
+    model, dataloader = get_model_and_dataloader(config, device)
+
+    model_cfg = config.tms_model_config
+    run_name = (
+        f"tms_n-features{model_cfg.n_features}_n-hidden{model_cfg.n_hidden}_"
+        f"n-hidden-layers{model_cfg.n_hidden_layers}_n-instances{model_cfg.n_instances}_"
+        f"seed{config.seed}"
+    )
+    if config.fixed_identity_hidden_layers:
+        run_name += "_fixed-identity"
+    elif config.fixed_random_hidden_layers:
+        run_name += "_fixed-random"
+    out_dir = Path(__file__).parent / "out" / run_name
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    if config.wandb_project:
+        wandb.init(project=config.wandb_project, name=run_name)
+
+    # Save config
+    config_path = out_dir / "tms_train_config.yaml"
+    with open(config_path, "w") as f:
+        yaml.dump(config.model_dump(mode="json"), f, indent=2)
+    if config.wandb_project:
+        wandb.save(str(config_path), base_path=out_dir)
+    logger.info(f"Saved config to {config_path}")
+
+    train(
+        model,
+        dataloader=dataloader,
+        log_wandb=config.wandb_project is not None,
+        steps=config.steps,
+    )
+
+    model_path = out_dir / "tms.pth"
+    torch.save(model.state_dict(), model_path)
+    if config.wandb_project:
+        wandb.save(str(model_path), base_path=out_dir)
+    logger.info(f"Saved model to {model_path}")
+
+    if model_cfg.n_hidden == 2:
+        plot_intro_diagram(model, filepath=out_dir / "polygon.png")
+        logger.info(f"Saved diagram to {out_dir / 'polygon.png'}")
+
+    maxs = calculate_feature_cosine_similarities(model)
+    logger.info(f"Cosine sims max: {maxs.tolist()}")
+    logger.info(f"1/sqrt(n_hidden): {1 / np.sqrt(model_cfg.n_hidden)}")
+
+
 if __name__ == "__main__":
     device = "cuda" if torch.cuda.is_available() else "cpu"
     config = TMSTrainConfig(
-        n_features=5,
-        n_hidden=2,
-        n_instances=12,
+        wandb_project="spd-train-tms",
+        tms_model_config=TMSModelConfig(
+            n_features=5,
+            n_hidden=2,
+            n_hidden_layers=1,
+            n_instances=12,
+            device=device,
+        ),
         feature_probability=0.05,
         batch_size=1024,
         steps=5_000,
         seed=0,
         lr=5e-3,
         data_generation_type="at_least_zero_active",
+        fixed_identity_hidden_layers=True,
+        fixed_random_hidden_layers=False,
     )
 
     set_seed(config.seed)
 
-    model = TMSModel(
-        n_instances=config.n_instances,
-        n_features=config.n_features,
-        n_hidden=config.n_hidden,
-        device=device,
-    )
-
-    dataset = TMSDataset(
-        n_instances=config.n_instances,
-        n_features=config.n_features,
-        feature_probability=config.feature_probability,
-        device=device,
-        data_generation_type=config.data_generation_type,
-    )
-    dataloader = DatasetGeneratedDataLoader(dataset, batch_size=config.batch_size)
-    train(model, dataloader=dataloader, steps=config.steps)
-
-    run_name = (
-        f"tms_n-features{config.n_features}_n-hidden{config.n_hidden}_"
-        f"n-instances{config.n_instances}_seed{config.seed}.pth"
-    )
-    out_dir = Path(__file__).parent / "out" / run_name
-    out_dir.mkdir(parents=True, exist_ok=True)
-
-    torch.save(model.state_dict(), out_dir / "model.pth")
-    print(f"Saved model to {out_dir / 'model.pth'}")
-
-    with open(out_dir / "config.json", "w") as f:
-        json.dump(config.model_dump(), f, indent=4)
-    print(f"Saved config to {out_dir / 'config.json'}")
-
-    if config.n_hidden == 2:
-        plot_intro_diagram(model, filepath=out_dir / run_name.replace(".pth", ".png"))
-        print(f"Saved diagram to {out_dir / run_name.replace('.pth', '.png')}")
-
-    maxs = calculate_feature_cosine_similarities(model)
-    print(f"Cosine sims max: {maxs.tolist()}")
-    print(f"1/sqrt(n_hidden): {1 / np.sqrt(config.n_hidden)}")
+    run_train(config, device)

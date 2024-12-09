@@ -7,11 +7,12 @@ from torch import Tensor, nn
 
 from spd.models.base import SPDFullRankModel
 from spd.utils import (
+    SparseFeatureDataset,
     calc_ablation_attributions,
     calc_activation_attributions,
-    calc_grad_attributions_rank_one,
     calc_topk_mask,
     calculate_closeness_to_identity,
+    compute_feature_importances,
     permute_to_identity,
 )
 
@@ -61,75 +62,6 @@ def test_permute_to_identity(A: torch.Tensor, expected: torch.Tensor):
 def test_closeness_to_identity(A: torch.Tensor, expected_closeness_max: float):
     closeness = calculate_closeness_to_identity(A)
     assert closeness <= expected_closeness_max
-
-
-def test_calc_attributions_rank_one_one_inner_act():
-    # Set up a simple linear model with known gradients
-    inner_acts = [torch.tensor([2.0, 3.0], requires_grad=True)]
-
-    # Define weights for our linear model
-    weights = torch.tensor(
-        [
-            [1.0, 2.0],  # For out[0]
-            [3.0, 4.0],  # For out[1]
-        ]
-    )
-
-    # Calculate the output
-    out = torch.matmul(weights, inner_acts[0])
-
-    # Calculate attributions
-    attributions = calc_grad_attributions_rank_one(out, inner_acts)
-
-    # Expected attributions
-    expected_attributions = torch.zeros_like(inner_acts[0])
-    for i in range(2):  # For each output dimension
-        attribution_per_dim = weights[i] * inner_acts[0]
-        expected_attributions += attribution_per_dim**2
-
-    # Check if the calculated attributions match the expected attributions
-    torch.testing.assert_close(attributions, expected_attributions)
-
-    # Additional check: ensure the shape is correct
-    assert attributions.shape == inner_acts[0].shape
-
-
-def test_calc_attributions_rank_one_two_inner_acts():
-    # Set up a simple linear model with known gradients
-    inner_acts = [
-        torch.tensor([1.0, 2.0, 3.0], requires_grad=True),
-        torch.tensor([4.0, 5.0, 6.0], requires_grad=True),
-    ]
-
-    # Define weights for our linear model
-    weights = [
-        torch.tensor([2.0, 3.0]),  # Gradients will be 2 and 3 for the first inner_act
-        torch.tensor([1.0, 4.0]),  # Gradients will be 1 and 4 for the second inner_act
-    ]
-
-    # Calculate the output
-    out = torch.stack(
-        [
-            inner_acts[0] * weights[0][0] + inner_acts[1] * weights[1][0],
-            inner_acts[0] * weights[0][1] + inner_acts[1] * weights[1][1],
-        ],
-        dim=-1,
-    )
-
-    # Calculate attributions
-    attributions = calc_grad_attributions_rank_one(out, inner_acts)
-
-    # Expected attributions
-    expected_attributions = torch.zeros_like(inner_acts[0])
-    for i in range(2):  # For each output dimension
-        attribution_per_dim = sum(weights[j][i] * inner_acts[j] for j in range(2))
-        expected_attributions += attribution_per_dim**2
-
-    # Check if the calculated attributions match the expected attributions
-    torch.testing.assert_close(attributions, expected_attributions)
-
-    # Additional check: ensure the shape is correct
-    assert attributions.shape == inner_acts[0].shape
 
 
 def test_calc_topk_mask_without_batch_topk():
@@ -207,6 +139,15 @@ def test_ablation_attributions():
         def all_subnetwork_params(self) -> dict[str, Float[Tensor, "... k d_layer_in d_layer_out"]]:
             raise NotImplementedError
 
+        def all_subnetwork_params_summed(
+            self,
+        ) -> dict[
+            str,
+            Float[Tensor, "d_layer_in d_layer_out"]
+            | Float[Tensor, "n_instances d_layer_in d_layer_out"],
+        ]:
+            raise NotImplementedError
+
         def set_subnet_to_zero(self, subnet_idx: int) -> dict[str, Tensor]:
             stored_vals = {"subnetwork_params": self.subnetwork_params[subnet_idx].detach().clone()}
             self.subnetwork_params[subnet_idx] = 0.0
@@ -269,3 +210,132 @@ def test_calc_activation_attributions_with_n_instances():
 
     result = calc_activation_attributions(inner_acts)
     torch.testing.assert_close(result, expected)
+
+
+def test_dataset_at_least_zero_active():
+    n_instances = 3
+    n_features = 5
+    feature_probability = 0.5
+    device = "cpu"
+    batch_size = 100
+
+    dataset = SparseFeatureDataset(
+        n_instances=n_instances,
+        n_features=n_features,
+        feature_probability=feature_probability,
+        device=device,
+        data_generation_type="at_least_zero_active",
+        value_range=(0.0, 1.0),
+    )
+
+    batch, _ = dataset.generate_batch(batch_size)
+
+    # Check shape
+    assert batch.shape == (batch_size, n_instances, n_features), "Incorrect batch shape"
+
+    # Check that the values are between 0 and 1
+    assert torch.all((batch >= 0) & (batch <= 1)), "Values should be between 0 and 1"
+
+    # Check that the proportion of non-zero elements is close to feature_probability
+    non_zero_proportion = torch.count_nonzero(batch) / batch.numel()
+    assert (
+        abs(non_zero_proportion - feature_probability) < 0.05
+    ), f"Expected proportion {feature_probability}, but got {non_zero_proportion}"
+
+
+def test_dataset_exactly_one_active():
+    n_instances = 3
+    n_features = 5
+    feature_probability = 0.5  # This won't be used when data_generation_type="exactly_one_active"
+    device = "cpu"
+    batch_size = 10
+    value_range = (-1.0, 3.0)
+
+    dataset = SparseFeatureDataset(
+        n_instances=n_instances,
+        n_features=n_features,
+        feature_probability=feature_probability,
+        device=device,
+        data_generation_type="exactly_one_active",
+        value_range=value_range,
+    )
+
+    batch, _ = dataset.generate_batch(batch_size)
+
+    # Check shape
+    assert batch.shape == (batch_size, n_instances, n_features), "Incorrect batch shape"
+
+    # Check that there's exactly one non-zero value per sample and instance
+    for sample in batch:
+        for instance in sample:
+            non_zero_count = torch.count_nonzero(instance)
+            assert non_zero_count == 1, f"Expected 1 non-zero value, but found {non_zero_count}"
+
+    # Check that the non-zero values are in the value_range
+    non_zero_values = batch[batch != 0]
+    assert torch.all(
+        (non_zero_values >= value_range[0]) & (non_zero_values <= value_range[1])
+    ), f"Non-zero values should be between {value_range[0]} and {value_range[1]}"
+
+
+def test_dataset_exactly_two_active():
+    n_instances = 3
+    n_features = 5
+    feature_probability = 0.5  # This won't be used when data_generation_type="exactly_one_active"
+    device = "cpu"
+    batch_size = 10
+    value_range = (0.0, 1.0)
+
+    dataset = SparseFeatureDataset(
+        n_instances=n_instances,
+        n_features=n_features,
+        feature_probability=feature_probability,
+        device=device,
+        data_generation_type="exactly_two_active",
+        value_range=value_range,
+    )
+
+    batch, _ = dataset.generate_batch(batch_size)
+
+    # Check shape
+    assert batch.shape == (batch_size, n_instances, n_features), "Incorrect batch shape"
+
+    # Check that there's exactly one non-zero value per sample and instance
+    for sample in batch:
+        for instance in sample:
+            non_zero_count = torch.count_nonzero(instance)
+            assert non_zero_count == 2, f"Expected 2 non-zero values, but found {non_zero_count}"
+
+    # Check that the non-zero values are in the value_range
+    non_zero_values = batch[batch != 0]
+    assert torch.all(
+        (non_zero_values >= value_range[0]) & (non_zero_values <= value_range[1])
+    ), f"Non-zero values should be between {value_range[0]} and {value_range[1]}"
+
+
+@pytest.mark.parametrize(
+    "importance_val, expected_tensor",
+    [
+        (
+            1.0,
+            torch.tensor([[[1.0, 1.0, 1.0], [1.0, 1.0, 1.0]], [[1.0, 1.0, 1.0], [1.0, 1.0, 1.0]]]),
+        ),
+        (
+            0.5,
+            torch.tensor(
+                [[[1.0, 0.5, 0.25], [1.0, 0.5, 0.25]], [[1.0, 0.5, 0.25], [1.0, 0.5, 0.25]]]
+            ),
+        ),
+        (
+            0.0,
+            torch.tensor([[[1.0, 0.0, 0.0], [1.0, 0.0, 0.0]], [[1.0, 0.0, 0.0], [1.0, 0.0, 0.0]]]),
+        ),
+    ],
+)
+def test_compute_feature_importances(
+    importance_val: float, expected_tensor: Float[Tensor, "batch_size n_instances n_features"]
+):
+    importances = compute_feature_importances(
+        batch_size=2, n_instances=2, n_features=3, importance_val=importance_val, device="cpu"
+    )
+    torch.testing.assert_close(importances, expected_tensor)

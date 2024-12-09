@@ -17,7 +17,6 @@ from tqdm import tqdm
 from spd.experiments.piecewise.models import (
     PiecewiseFunctionSPDFullRankTransformer,
     PiecewiseFunctionSPDRankPenaltyTransformer,
-    PiecewiseFunctionSPDTransformer,
     PiecewiseFunctionTransformer,
 )
 from spd.models.components import (
@@ -28,10 +27,7 @@ from spd.models.components import (
 from spd.run_spd import (
     calc_recon_mse,
 )
-from spd.utils import (
-    calc_grad_attributions_rank_one,
-    run_spd_forward_pass,
-)
+from spd.utils import run_spd_forward_pass
 
 
 def get_weight_matrix(
@@ -69,13 +65,11 @@ def plot_matrix(
     fontsize = 8 if matrix.numel() < 50 else 4
     norm = norm if norm is not None else CenteredNorm()
     im = ax.matshow(matrix.detach().cpu().numpy(), cmap="coolwarm", norm=norm)
-    for (j, i), label in np.ndenumerate(matrix.detach().cpu().numpy()):
-        ax.text(i, j, f"{label:.2f}", ha="center", va="center", fontsize=fontsize)
-    if xlabel != "":
-        ax.set_xlabel(xlabel)
-        ax.xaxis.set_label_position("top")
-    else:
-        ax.set_xticklabels([])
+    # If less than 500 elements, show the values
+    if matrix.numel() < 500:
+        for (j, i), label in np.ndenumerate(matrix.detach().cpu().numpy()):
+            ax.text(i, j, f"{label:.2f}", ha="center", va="center", fontsize=fontsize)
+    ax.set_xlabel(xlabel)
     if ylabel != "":
         ax.set_ylabel(ylabel)
     else:
@@ -206,131 +200,10 @@ def plot_components_fullrank(
     return {"matrices_layer0": fig}
 
 
-def plot_components(
-    model: PiecewiseFunctionSPDTransformer,
-    step: int,
-    out_dir: Path | None,
-    device: str,
-    slow_images: bool,
-) -> dict[str, plt.Figure]:
-    # Create a batch of inputs with different control bits active
-    x_val = torch.tensor(2.5, device=device)
-    batch_size = model.n_inputs - 1  # Assuming first input is for x_val and rest are control bits
-    x = torch.zeros(batch_size, model.n_inputs, device=device)
-    x[:, 0] = x_val
-    x[torch.arange(batch_size), torch.arange(1, batch_size + 1)] = 1
-    # Forward pass to get the output and inner activations
-    out, layer_acts, inner_acts = model(x)
-    # Calculate attribution scores
-    attribution_scores = calc_grad_attributions_rank_one(
-        out=out, inner_acts_vals=list(inner_acts.values())
-    )
-    attribution_scores_normed = attribution_scores / attribution_scores.std(dim=1, keepdim=True)
-    # Get As and Bs and ABs
-    n_layers = model.n_layers
-    all_As_and_Bs = model.all_As_and_Bs()
-    assert len(all_As_and_Bs) % 2 == 0, "A and B matrices must have an even length (MLP in + out)"
-    assert len(all_As_and_Bs) // 2 == n_layers, "Number of A and B matrices must be 2*n_layers"
-    As = [tup[0] for tup in all_As_and_Bs.values()]
-    Bs = [tup[1] for tup in all_As_and_Bs.values()]
-    ABs = [torch.einsum("...fk,...kg->...fg", As[i], Bs[i]) for i in range(len(As))]
-    ABs_by_k = [torch.einsum("...fk,...kg->...kfg", As[i], Bs[i]) for i in range(len(As))]
-
-    # Figure for attribution scores
-    fig_a, ax = plt.subplots(1, 1, figsize=(4, 4), constrained_layout=True)
-    fig_a.suptitle(f"Subnetwork Analysis (Step {step})")
-    plot_matrix(
-        ax,
-        attribution_scores_normed,
-        "Normalized attribution Scores",
-        "Subnetwork index",
-        "Function index",
-    )
-
-    # Figures for A, B, AB of each layer
-    n_rows = 3 + model.k if slow_images else 3
-    n_cols = 4
-    figsize = (8 * n_cols, 4 + 4 * n_rows)
-    figs = [plt.figure(figsize=figsize, constrained_layout=True) for _ in range(n_layers)]
-    # Plot normalized attribution scores
-
-    for n in range(n_layers):
-        fig = figs[n]
-        gs = fig.add_gridspec(n_rows, n_cols)
-        plot_matrix(
-            fig.add_subplot(gs[0, 0]),
-            As[2 * n],
-            f"A (W_in, layer {n})",
-            "Subnetwork index",
-            "Embedding index",
-            "%.1f",
-        )
-        plot_matrix(
-            fig.add_subplot(gs[0, 1:]),
-            Bs[2 * n],
-            f"B (W_in, layer {n})",
-            "Neuron index",
-            "Subnetwork index",
-            "%.2f",
-        )
-        plot_matrix(
-            fig.add_subplot(gs[1, 0]),
-            Bs[2 * n + 1].T,
-            f"B (W_out, layer {n})",
-            "Subnetwork index",
-            "Embedding index",
-            "%.1f",
-        )
-        plot_matrix(
-            fig.add_subplot(gs[1, 1:]),
-            As[2 * n + 1].T,
-            f"A (W_out, layer {n})",
-            "Neuron index",
-            "",
-            "%.2f",
-        )
-        plot_matrix(
-            fig.add_subplot(gs[2, :2]),
-            ABs[2 * n],
-            f"AB summed (W_in, layer {n})",
-            "Neuron index",
-            "Embedding index",
-            "%.2f",
-        )
-        plot_matrix(
-            fig.add_subplot(gs[2, 2:]),
-            ABs[2 * n + 1].T,
-            f"AB.T  summed (W_out.T, layer {n})",
-            "Neuron index",
-            "",
-            "%.2f",
-        )
-        if slow_images:
-            for k in range(model.k):
-                plot_matrix(
-                    fig.add_subplot(gs[3 + k, :2]),
-                    ABs_by_k[2 * n][k],
-                    f"AB k={k} (W_in, layer {n})",
-                    "Neuron index",
-                    "Embedding index",
-                    "%.2f",
-                )
-                plot_matrix(
-                    fig.add_subplot(gs[3 + k, 2:]),
-                    ABs_by_k[2 * n + 1][k].T,
-                    f"AB.T k={k} (W_out.T, layer {n})",
-                    "Neuron index",
-                    "Embedding index",
-                    "%.2f",
-                )
-    return {"attrib_scores": fig_a, **{f"matrices_layer{n}": fig for n, fig in enumerate(figs)}}
-
-
 def plot_model_functions(
-    spd_model: PiecewiseFunctionSPDTransformer | PiecewiseFunctionSPDFullRankTransformer,
-    target_model: PiecewiseFunctionTransformer | None,
+    spd_model: PiecewiseFunctionSPDFullRankTransformer | PiecewiseFunctionSPDRankPenaltyTransformer,
+    target_model: PiecewiseFunctionTransformer,
     attribution_type: Literal["gradient", "ablation", "activation"],
-    spd_type: Literal["rank_one", "full_rank", "rank_penalty"],
     device: str,
     start: float,
     stop: float,
@@ -370,7 +243,6 @@ def plot_model_functions(
         target_model=target_model,
         input_array=input_array,
         attribution_type=attribution_type,
-        spd_type=spd_type,
         batch_topk=batch_topk,
         topk=topk,
         distil_from_target=distil_from_target,
@@ -391,17 +263,13 @@ def plot_model_functions(
         print(
             f"How often is topk_mask True or control_bits == 0: {topk_mask_control_bits.mean():.3%}"
         )
-        if model_output_hardcoded is not None:
-            # Calculate recon loss
-            topk_recon_loss = calc_recon_mse(
-                out_topk, model_output_hardcoded, has_instance_dim=False
-            )
-            print(f"Topk recon loss: {topk_recon_loss:.4f}")
+        # Calculate recon loss
+        topk_recon_loss = calc_recon_mse(out_topk, model_output_hardcoded, has_instance_dim=False)
+        print(f"Topk recon loss: {topk_recon_loss:.4f}")
 
     # Convert stuff to numpy
     model_output_spd = model_output_spd[:, 0].cpu().detach().numpy()
-    if model_output_hardcoded is not None:
-        model_output_hardcoded = model_output_hardcoded[:, 0].cpu().detach().numpy()
+    model_output_hardcoded = model_output_hardcoded[:, 0].cpu().detach().numpy()
     out_topk = out_topk.cpu().detach().numpy()
     input_xs = input_array[:, 0].cpu().detach().numpy()
 
@@ -417,16 +285,14 @@ def plot_model_functions(
         color3 = colors[(4 * cb + 3) % len(colors)]
         s = slice(cb * n_samples, (cb + 1) * n_samples)
         ax.plot(input_xs[s], out_topk[s], ls="--", color=color0)
-        if model_output_hardcoded is not None:
-            assert target_model is not None
-            assert target_model.controlled_resnet is not None
-            ax.plot(input_xs[s], model_output_hardcoded[s], label=f"cb={cb}", color=color1)
-            ax.plot(
-                x_space,
-                target_model.controlled_resnet.functions[cb](x_space),
-                ls=":",
-                color=color2,
-            )
+        assert target_model.controlled_resnet is not None
+        ax.plot(input_xs[s], model_output_hardcoded[s], label=f"cb={cb}", color=color1)
+        ax.plot(
+            x_space,
+            target_model.controlled_resnet.functions[cb](x_space),
+            ls=":",
+            color=color2,
+        )
         ax.plot(input_xs[s], model_output_spd[s], ls="-.", color=color3)
         k_cb = attribution_scores[s].mean(dim=0).argmax()
         # ax_attrib
@@ -475,9 +341,8 @@ def plot_model_functions(
         tqdm.write("Skipping inner acts plot for more than 2 SPD 'layers'")
     # Add some additional (blue) legend lines explaining the different line styles
     ax.plot([], [], ls="--", color=colors[0], label="spd model topk")
-    if model_output_hardcoded is not None:
-        ax.plot([], [], ls="-", color=colors[1], label="target model")
-        ax.plot([], [], ls=":", color=colors[2], label="true function")
+    ax.plot([], [], ls="-", color=colors[1], label="target model")
+    ax.plot([], [], ls=":", color=colors[2], label="true function")
     ax.plot([], [], ls="-.", color=colors[3], label="spd model")
     ax.legend(ncol=3, loc="lower left")
     ax_attrib.legend(ncol=3, loc="lower left")
@@ -563,7 +428,7 @@ def plot_single_network(ax: plt.Axes, weights: list[dict[str, Float[Tensor, "i j
 
 
 def plot_piecewise_network(
-    model: PiecewiseFunctionSPDTransformer | PiecewiseFunctionSPDFullRankTransformer,
+    model: PiecewiseFunctionSPDFullRankTransformer | PiecewiseFunctionSPDRankPenaltyTransformer,
 ) -> dict[str, plt.Figure]:
     n_components = model.k
     mlps: torch.nn.ModuleList = model.mlps
