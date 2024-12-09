@@ -220,20 +220,23 @@ def resid_mlp_plot_results_fn(
     ############################################################################################
     # Individual feature responses + per-feature performance
     ############################################################################################
-    def spd_model_fn(batch: Float[Tensor, "batch n_instances"]):
+    def spd_model_fn(
+        batch: Float[Tensor, "batch n_instances"],
+    ) -> Float[Tensor, "batch n_instances n_features"]:
         assert config.topk is not None
         return run_spd_forward_pass(
             spd_model=model,
             target_model=target_model,
             input_array=batch,
             attribution_type=config.attribution_type,
-            spd_type=config.spd_type,
             batch_topk=config.batch_topk,
             topk=config.topk,
             distil_from_target=config.distil_from_target,
         ).spd_topk_model_output
 
-    def target_model_fn(batch: Float[Tensor, "batch n_instances"]):
+    def target_model_fn(
+        batch: Float[Tensor, "batch n_instances"],
+    ) -> Float[Tensor, "batch n_instances n_features"]:
         return target_model(batch)[0]
 
     fig, axes = plt.subplots(nrows=2, ncols=2, figsize=(15, 15), constrained_layout=True)
@@ -308,7 +311,10 @@ def resid_mlp_plot_results_fn(
     ############################################################################################
     assert config.spd_type in ("full_rank", "rank_penalty")
     attribution_scores = collect_subnetwork_attributions(
-        model, device, spd_type=config.spd_type, n_instances=model.n_instances
+        spd_model=model,
+        target_model=target_model,
+        device=device,
+        n_instances=model.n_instances,
     )
     fig_dict["subnetwork_attributions"] = plot_subnetwork_attributions(
         attribution_scores, out_dir, step
@@ -318,6 +324,7 @@ def resid_mlp_plot_results_fn(
         if dataloader is not None and config.task_config.k > 1:
             fig_dict_correlations = plot_subnetwork_correlations(
                 dataloader=dataloader,
+                target_model=target_model,
                 spd_model=model,
                 config=config,
                 device=device,

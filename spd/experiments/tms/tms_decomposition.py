@@ -14,7 +14,6 @@ import torch
 import wandb
 import yaml
 from jaxtyping import Float
-from matplotlib.colors import CenteredNorm
 from torch import Tensor
 from tqdm import tqdm
 
@@ -209,10 +208,11 @@ def plot_subnetwork_params(
     )
 
     for i in range(n_instances):
+        instance_max = np.abs(subnet_params[i].detach().cpu().numpy()).max()
         for j in range(k):
             ax = axs[j, i]  # type: ignore
             param = subnet_params[i, j].detach().cpu().numpy()
-            ax.matshow(param, cmap="RdBu", norm=CenteredNorm())
+            ax.matshow(param, cmap="RdBu", vmin=-instance_max, vmax=instance_max)
             ax.set_xticks([])
             ax.set_yticks([])
 
@@ -230,6 +230,7 @@ def plot_subnetwork_params(
 
 def make_plots(
     model: TMSSPDFullRankModel | TMSSPDRankPenaltyModel,
+    target_model: TMSModel,
     step: int,
     out_dir: Path,
     device: str,
@@ -247,7 +248,10 @@ def make_plots(
         assert isinstance(config.task_config, TMSTaskConfig)
         n_instances = model.config.n_instances if hasattr(model, "config") else model.n_instances
         attribution_scores = collect_subnetwork_attributions(
-            model, device, spd_type=config.spd_type, n_instances=n_instances
+            spd_model=model,
+            target_model=target_model,
+            device=device,
+            n_instances=n_instances,
         )
         plots["subnetwork_attributions"] = plot_subnetwork_attributions_multiple_instances(
             attribution_scores=attribution_scores, out_dir=out_dir, step=step

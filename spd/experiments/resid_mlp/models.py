@@ -82,14 +82,8 @@ class InstancesMLP(nn.Module):
         if self.bias2 is not None:
             out2 = out2 + self.bias2
 
-        pre_acts = {
-            "linear1": x,
-            "linear2": out1,
-        }
-        post_acts = {
-            "linear1": out1_pre_act_fn,
-            "linear2": out2,
-        }
+        pre_acts = {"linear1": x, "linear2": out1}
+        post_acts = {"linear1": out1_pre_act_fn, "linear2": out2}
         return out2, pre_acts, post_acts
 
 
@@ -383,8 +377,9 @@ class ResidualMLPSPDRankPenaltyModel(SPDRankPenaltyModel):
     ):
         super().__init__()
         self.config = config
-        self.n_features = config.n_features  # Currently needed for backward compatibility
-        self.n_instances = config.n_instances  # Currently needed for backward compatibility
+        self.n_features = config.n_features  # Required for backward compatibility
+        self.n_instances = config.n_instances  # Required for backward compatibility
+        self.k = config.k  # Required for backward compatibility
 
         assert config.act_fn_name in ["gelu", "relu"]
         self.act_fn = F.gelu if config.act_fn_name == "gelu" else F.relu
