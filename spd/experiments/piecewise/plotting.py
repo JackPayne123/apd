@@ -361,6 +361,77 @@ def plot_model_functions(
     return {"model_functions": fig}
 
 
+def plot_model_functions_paper(
+    spd_model: PiecewiseFunctionSPDFullRankTransformer | PiecewiseFunctionSPDRankPenaltyTransformer,
+    target_model: PiecewiseFunctionTransformer,
+    attribution_type: Literal["gradient", "ablation", "activation"],
+    device: str,
+    start: float,
+    stop: float,
+    print_info: bool = False,
+    distil_from_target: bool = False,
+) -> dict[str, plt.Figure]:
+    k = spd_model.k
+    fig, axs = plt.subplots(ncols=k, figsize=(10, 3), constrained_layout=True, sharey=True)
+    assert isinstance(axs, np.ndarray)
+    # For these tests we run with unusual data where there's always 1 control bit active, which
+    # might differ from training. Thus we manually set topk to 1. Note that this should work for
+    # both, batch and non-batch topk.
+    topk = 1
+    # Disable batch_topk to rule out errors caused by batch -- non-batch is an easier task for SPD
+    # in the toy setting used for plots.
+    batch_topk = False
+    # Get model outputs for simple example data. Create input array with 10_000 rows, 1000
+    # rows for each function. Set the 0th column to be linspace(0, 5, 1000) repeated. Set the
+    # control bits to [0,1,0,0,...] for the first 1000 rows, [0,0,1,0,...] for the next 1000 rows,
+    # etc.
+    n_samples = 1000
+    n_functions = spd_model.num_functions
+    # Set the control bits
+    input_array = torch.eye(spd_model.n_inputs)[-n_functions:, :]
+    input_array = input_array.repeat_interleave(n_samples, dim=0)
+    input_array = input_array.to(device)
+    # Set the 0th input to x_space
+    x_space = torch.linspace(start, stop, n_samples)
+    input_array[:, 0] = x_space.repeat(n_functions)
+
+    spd_outputs = run_spd_forward_pass(
+        spd_model=spd_model,
+        target_model=target_model,
+        input_array=input_array,
+        attribution_type=attribution_type,
+        batch_topk=batch_topk,
+        topk=topk,
+        distil_from_target=distil_from_target,
+    )
+    model_output_hardcoded = spd_outputs.target_model_output
+    out_topk = spd_outputs.spd_topk_model_output
+
+    # Convert stuff to numpy
+    model_output_hardcoded = model_output_hardcoded[:, 0].cpu().detach().numpy()
+    out_topk = out_topk.cpu().detach().numpy()
+    input_xs = input_array[:, 0].cpu().detach().numpy()
+
+    # Plot for every k
+    tab20b_colors = plt.get_cmap("tab20b").colors  # type: ignore
+    tab20c_colors = plt.get_cmap("tab20c").colors  # type: ignore
+    colors = [*tab20b_colors, *tab20c_colors]
+    # cb stands for control bit which is active there; this differs from k due to permutation
+    for cb in range(n_functions):
+        color0 = colors[(4 * cb + 0) % len(colors)]
+        color1 = colors[(4 * cb + 3) % len(colors)]
+        s = slice(cb * n_samples, (cb + 1) * n_samples)
+        ax = axs[cb]
+        ax.plot(input_xs[s], model_output_hardcoded[s], color=color0, label="Target model")
+        ax.plot(input_xs[s], out_topk[s], ls="--", color=color1, label="SPD top-k")
+        ax.legend(loc="lower left")
+        assert target_model.controlled_resnet is not None
+        ax.set_xlabel("Input x")
+        ax.set_title(f"Feature / subnetwork {cb}")
+    axs[0].set_ylabel("Output f(x)")
+    return {"model_functions_paper": fig}
+
+
 def plot_single_network(
     ax: plt.Axes,
     weights: list[dict[str, Float[Tensor, "i j"]]],

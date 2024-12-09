@@ -14,6 +14,7 @@ from spd.experiments.piecewise.piecewise_decomposition import get_model_and_data
 from spd.experiments.piecewise.plotting import (
     plot_components_fullrank,
     plot_model_functions,
+    plot_model_functions_paper,
     plot_piecewise_network,
 )
 from spd.experiments.piecewise.trig_functions import create_trig_function
@@ -72,6 +73,17 @@ if config.topk is not None:
     fig_dict.update(**plot_piecewise_network(spd_model, hardcoded_model))
     fig_dict.update(
         **plot_model_functions(
+            spd_model=spd_model,
+            target_model=hardcoded_model,
+            attribution_type=config.attribution_type,
+            device=device,
+            start=config.task_config.range_min,
+            stop=config.task_config.range_max,
+            print_info=True,
+        )
+    )
+    fig_dict.update(
+        **plot_model_functions_paper(
             spd_model=spd_model,
             target_model=hardcoded_model,
             attribution_type=config.attribution_type,

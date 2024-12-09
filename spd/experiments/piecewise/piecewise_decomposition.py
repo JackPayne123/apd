@@ -23,6 +23,7 @@ from spd.experiments.piecewise.piecewise_dataset import PiecewiseDataset
 from spd.experiments.piecewise.plotting import (
     plot_components_fullrank,
     plot_model_functions,
+    plot_model_functions_paper,
     plot_piecewise_network,
 )
 from spd.experiments.piecewise.trig_functions import generate_trig_functions
@@ -59,6 +60,17 @@ def piecewise_plot_results_fn(
     # Plot model functions and network
     if config.topk is not None:
         fig_dict_functions = plot_model_functions(
+            spd_model=model,
+            target_model=target_model,
+            attribution_type=config.attribution_type,
+            device=device,
+            start=config.task_config.range_min,
+            stop=config.task_config.range_max,
+            print_info=False,
+            distil_from_target=config.distil_from_target,
+        )
+        fig_dict.update(fig_dict_functions)
+        fig_dict_functions = plot_model_functions_paper(
             spd_model=model,
             target_model=target_model,
             attribution_type=config.attribution_type,
