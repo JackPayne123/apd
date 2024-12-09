@@ -26,7 +26,7 @@ from spd.utils import REPO_ROOT
 
 pretrained_path = (
     REPO_ROOT
-    / "spd/experiments/piecewise/out/reproducegood10_topk2.22e-01_topkrecon5.00e+00_schatten5.00e+00_sd0_attr-gra_lr3.00e-03_bs10000_lay2/spd_model_150000.pth"
+    / "spd/experiments/piecewise/out/reproducegood10_topk2.22e-01_topkrecon5.00e+00_schatten5.00e+00_sd0_attr-gra_lr3.00e-03_bs10000_lay2/spd_model_200000.pth"
 )
 with open(pretrained_path.parent / "final_config.yaml") as f:
     config = Config(**yaml.safe_load(f))

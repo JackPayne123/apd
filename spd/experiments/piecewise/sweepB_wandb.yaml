@@ -5,9 +5,9 @@ metric:
   goal: minimize
 parameters:
   seed:
-    values: [0, 1, 2]
+    values: [0]
   topk:
-    values: [0.2, 0.21, 0.2217]
+    values: [0.2217]
 command:
 - ${env}
 - ${interpreter}
