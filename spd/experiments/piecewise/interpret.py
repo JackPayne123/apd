@@ -24,7 +24,10 @@ from spd.run_spd import (
 )
 from spd.utils import REPO_ROOT
 
-pretrained_path = REPO_ROOT / "spd/experiments/piecewise/demo_spd_model/model_50000.pth"
+pretrained_path = (
+    REPO_ROOT
+    / "spd/experiments/piecewise/out/reproducegood10_topk2.22e-01_topkrecon5.00e+00_schatten5.00e+00_sd0_attr-gra_lr3.00e-03_bs10000_lay2/spd_model_150000.pth"
+)
 with open(pretrained_path.parent / "final_config.yaml") as f:
     config = Config(**yaml.safe_load(f))
 
@@ -40,15 +43,20 @@ hardcoded_model, spd_model, dataloader, test_dataloader = get_model_and_dataload
     config, device, out_dir=None
 )
 assert isinstance(hardcoded_model, PiecewiseFunctionTransformer)
-spd_model.load_state_dict(torch.load(pretrained_path, weights_only=True, map_location="cpu"))
+spd_model.load_state_dict(torch.load(pretrained_path, weights_only=True, map_location=device))
 
-# To test handcoded AB, uncomment the following line
+
+# %%
+
+# To test handcoded AB, uncomment the following line (full rank only)
 # spd_model.set_handcoded_spd_params(hardcoded_model)
 
 assert isinstance(
     spd_model, PiecewiseFunctionSPDFullRankTransformer | PiecewiseFunctionSPDRankPenaltyTransformer
 )
-fig_dict = plot_components_fullrank(model=spd_model, step=-1, out_dir=None, slow_images=True)
+fig_dict = {}
+
+fig_dict.update(**plot_components_fullrank(model=spd_model, out_dir=None, slow_images=True))
 
 
 if config.topk is not None:
@@ -61,7 +69,7 @@ if config.topk is not None:
             device=device,
         )
     )
-    fig_dict.update(**plot_piecewise_network(spd_model))
+    fig_dict.update(**plot_piecewise_network(spd_model, hardcoded_model))
     fig_dict.update(
         **plot_model_functions(
             spd_model=spd_model,

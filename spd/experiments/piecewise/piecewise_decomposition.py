@@ -69,7 +69,7 @@ def piecewise_plot_results_fn(
             distil_from_target=config.distil_from_target,
         )
         fig_dict.update(fig_dict_functions)
-        fig_dict_network = plot_piecewise_network(model)
+        fig_dict_network = plot_piecewise_network(model, hardcoded_model=target_model)
         fig_dict.update(fig_dict_network)
 
     if config.topk is not None:
@@ -95,7 +95,7 @@ def piecewise_plot_results_fn(
         PiecewiseFunctionSPDFullRankTransformer | PiecewiseFunctionSPDRankPenaltyTransformer,
     ):
         fig_dict_components = plot_components_fullrank(
-            model=model, step=step, out_dir=out_dir, slow_images=slow_images
+            model=model, out_dir=out_dir, slow_images=slow_images
         )
         fig_dict.update(fig_dict_components)
     else:

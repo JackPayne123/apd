@@ -8,7 +8,7 @@ import matplotlib.ticker as tkr
 import numpy as np
 import torch
 from einops import einsum
-from jaxtyping import Float
+from jaxtyping import Float, Int
 from matplotlib.colors import CenteredNorm
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 from torch import Tensor
@@ -88,7 +88,6 @@ def plot_matrix(
 
 def plot_components_fullrank(
     model: PiecewiseFunctionSPDFullRankTransformer | PiecewiseFunctionSPDRankPenaltyTransformer,
-    step: int,
     out_dir: Path | None,
     slow_images: bool,
     show_bias: bool | None = None,
@@ -362,7 +361,12 @@ def plot_model_functions(
     return {"model_functions": fig}
 
 
-def plot_single_network(ax: plt.Axes, weights: list[dict[str, Float[Tensor, "i j"]]]) -> None:
+def plot_single_network(
+    ax: plt.Axes,
+    weights: list[dict[str, Float[Tensor, "i j"]]],
+    colors: list[dict[str, Int[Tensor, "i j"]]] | None = None,
+    show_resid_shades: bool = False,
+) -> None:
     n_layers = len(weights)
     d_embed = weights[0]["W_in"].shape[0]
     d_mlp = weights[0]["W_in"].shape[1]
@@ -381,54 +385,107 @@ def plot_single_network(ax: plt.Axes, weights: list[dict[str, Float[Tensor, "i j
 
     # Plot edges
     cmap = plt.get_cmap("RdBu")
+    max_in_norm = max(weights[lay]["W_in"].abs().max().item() for lay in range(n_layers))
+    max_out_norm = max(weights[lay]["W_out"].abs().max().item() for lay in range(n_layers))
     for lay in range(n_layers):
         # Normalize weights
-        W_in_norm = weights[lay]["W_in"] / weights[lay]["W_in"].abs().max()
-        W_out_norm = weights[lay]["W_out"] / weights[lay]["W_out"].abs().max()
+        W_in_norm = weights[lay]["W_in"] / max_in_norm
+        W_out_norm = weights[lay]["W_out"] / max_out_norm
+        colors_in = colors[lay]["W_in"].int() if colors is not None else None
+        colors_out = colors[lay]["W_out"].int() if colors is not None else None
+        plot_lay = n_layers - (lay + 1)
         for i in range(d_embed):
             for j in range(d_mlp):
                 weight = W_in_norm[i, j].item()
-                color = cmap(0.5 * (weight + 1))
+                if colors_in is not None:
+                    color = f"C{colors_in[i, j]}" if colors_in[i, j] != -1 else "k"
+                else:
+                    color = cmap(0.5 * (weight + 1))
                 ax.plot(
                     [x_embed[i], x_mlp[j]],
-                    [2 * lay + 2, 2 * lay + 1],
+                    [2 * plot_lay + 2, 2 * plot_lay + 1],
                     color=color,
                     linewidth=abs(weight),
                 )
                 weight = W_out_norm[j, i].item()
-                color = cmap(0.5 * (weight + 1))
+                if colors_out is not None:
+                    color = f"C{colors_out[j, i]}" if colors_out[j, i] != -1 else "k"
+                else:
+                    color = cmap(0.5 * (weight + 1))
                 ax.plot(
                     [x_mlp[j], x_embed[i]],
-                    [2 * lay + 1, 2 * lay],
+                    [2 * plot_lay + 1, 2 * plot_lay],
                     color=color,
                     linewidth=abs(weight),
                 )
     # Draw residual steam
     for i in range(d_embed):
         ax.plot([x_embed[i], x_embed[i]], [0, 2 * n_layers], color="grey", linewidth=0.5, zorder=-1)
-    ax.add_patch(
-        plt.Rectangle(
-            (0.05, 0.05),
-            0.45,
-            0.9,
-            fill=True,
-            color="grey",
-            alpha=0.25,
-            transform=ax.transAxes,
-            zorder=-2,
+    if show_resid_shades:
+        ax.add_patch(
+            plt.Rectangle(
+                (0.05, 0.05),
+                0.45,
+                0.9,
+                fill=True,
+                color="grey",
+                alpha=0.25,
+                transform=ax.transAxes,
+                zorder=-2,
+            )
         )
-    )
-    # Draw MLP branching off
-    y1 = np.linspace(0, 2 * n_layers, 100)
-    x1a = (1 + np.cos((y1 + 1) * 2 * np.pi / n_layers)) / 4 - 0.00
-    x1b = (1 + np.cos((y1 + 1) * 2 * np.pi / n_layers)) / 4 + 0.50
-    ax.fill_betweenx(y1, x1a, x1b, color="tan", alpha=0.5, zorder=-1)
+        # Draw MLP branching off
+        y1 = np.linspace(0, 2 * n_layers, 100)
+        x1a = (1 + np.cos((y1 + 1) * 2 * np.pi / n_layers)) / 4 - 0.00
+        x1b = (1 + np.cos((y1 + 1) * 2 * np.pi / n_layers)) / 4 + 0.50
+        ax.fill_betweenx(y1, x1a, x1b, color="tan", alpha=0.5, zorder=-1)
     # Turn off axes
     ax.axis("off")
 
 
+def get_weight_colors_single(
+    weights: dict[str, Float[Tensor, "i j"]],
+    target_weights: dict[str, Float[Tensor, "i j"]],
+) -> dict[str, Int[Tensor, "i j"]]:
+    d_resid, d_mlp = weights["W_in"].shape
+    assert weights["W_out"].shape == (d_mlp, d_resid)
+    assert target_weights["W_in"].shape == (d_mlp, d_resid), target_weights["W_in"].shape
+    assert target_weights["W_out"].shape == (d_resid, d_mlp), target_weights["W_out"].shape
+    colors = {}
+    colors["W_in"] = torch.ones_like(weights["W_in"], dtype=torch.int64) * (-2)
+    colors["W_out"] = torch.ones_like(weights["W_out"], dtype=torch.int64) * (-2)
+    for j in range(d_mlp):
+        f = torch.where(target_weights["W_in"].T[1:, j] != 0)[0]
+        colors["W_in"][1 + f, j] = f
+        colors["W_in"][0, j] = f
+        colors["W_out"][j, d_resid - 1] = f
+    # Set colors to -1 for weights that should be 0 (belong to no feature)
+    mask_in = target_weights["W_in"].T == 0
+    mask_out = target_weights["W_out"].T == 0
+    colors["W_in"][mask_in] = -1
+    colors["W_out"][mask_out] = -1
+    # -2 was placeholder value and should be gone now
+    assert torch.all(colors["W_in"] != -2)
+    assert torch.all(colors["W_out"] != -2)
+    return colors
+
+
+def get_subnetwork_colors(
+    subnetworks: dict[int, list[dict[str, Float[Tensor, "i j"]]]],
+    target_network: list[dict[str, Float[Tensor, "i j"]]],
+) -> dict[int, list[dict[str, Int[Tensor, "i j"]]]]:
+    colors = {}
+    for key in subnetworks:
+        colors[key] = []
+        for lay in range(len(subnetworks[key])):
+            colors[key].append(get_weight_colors_single(subnetworks[key][lay], target_network[lay]))
+    return colors
+
+
 def plot_piecewise_network(
     model: PiecewiseFunctionSPDFullRankTransformer | PiecewiseFunctionSPDRankPenaltyTransformer,
+    hardcoded_model: PiecewiseFunctionTransformer,
+    first_column: Literal["Full SPD model", "Target model"] = "Target model",
 ) -> dict[str, plt.Figure]:
     n_components = model.k
     mlps: torch.nn.ModuleList = model.mlps
@@ -438,13 +495,30 @@ def plot_piecewise_network(
     W_outs = [get_weight_matrix(mlps[lay].linear2) for lay in range(n_layers)]
     subnetworks = {}
     subnetworks[-1] = []
+    target_network = []
     for lay in range(n_layers):
-        subnetworks[-1].append({"W_in": W_ins[lay].sum(0), "W_out": W_outs[lay].sum(0)})
+        target_network.append(
+            {
+                "W_in": hardcoded_model.mlps[lay].input_layer.weight,
+                "W_out": hardcoded_model.mlps[lay].output_layer.weight,
+            }
+        )
+
+    if first_column == "Full SPD model":
+        for lay in range(n_layers):
+            subnetworks[-1].append({"W_in": W_ins[lay].sum(0), "W_out": W_outs[lay].sum(0)})
+    else:
+        for lay in range(n_layers):
+            subnetworks[-1].append(
+                {"W_in": target_network[lay]["W_in"].T, "W_out": target_network[lay]["W_out"].T}
+            )
 
     for k in range(n_components):
         subnetworks[k] = []
         for lay in range(n_layers):
-            subnetworks[k].append({"W_in": W_ins[lay][k], "W_out": W_outs[lay][k]})
+            subnetworks[k].append({"W_in": W_ins[lay][k, :], "W_out": W_outs[lay][k, :]})
+
+    colors = get_subnetwork_colors(subnetworks, target_network)
 
     fig, axs = plt.subplots(
         1,
@@ -455,10 +529,18 @@ def plot_piecewise_network(
     axs = np.array(axs)
     for i, k in enumerate(np.arange(-1, n_components)):
         axs[i].set_title(f"Subnet {k}")
-        plot_single_network(axs[i], subnetworks[k])
-    axs[0].set_title("Full model")
+        plot_single_network(axs[i], subnetworks[k], colors[k])
+    axs[0].set_title(first_column)
     axs[0].text(0.275, 0.01, "Outputs", ha="center", va="center", transform=axs[0].transAxes)
     axs[0].text(0.275, 0.985, "Inputs", ha="center", va="center", transform=axs[0].transAxes)
     for lay in range(n_layers):
         axs[0].text(1, 2 * lay + 1, "MLP", ha="left", va="center")
+    fig.legend(
+        [plt.Line2D([0], [0], color=f"C{k}") for k in range(n_components)],
+        [f"Feature {k} weights" for k in range(n_components)],
+        ncol=n_components,
+        loc="center",
+        bbox_to_anchor=(0.5, 0),
+        bbox_transform=fig.transFigure,
+    )
     return {"subnetworks_graph_plots": fig}
