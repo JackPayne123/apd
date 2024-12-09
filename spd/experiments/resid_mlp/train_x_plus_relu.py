@@ -19,9 +19,9 @@ if __name__ == "__main__":
         seed=0,
         resid_mlp_config=ResidualMLPConfig(
             n_instances=1,
-            n_features=20,
-            d_embed=20,
-            d_mlp=10,
+            n_features=50,
+            d_embed=50,
+            d_mlp=20,
             n_layers=1,
             act_fn_name="relu",
             apply_output_act_fn=False,
