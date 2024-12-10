@@ -413,13 +413,11 @@ def plot_model_functions_paper(
     input_xs = input_array[:, 0].cpu().detach().numpy()
 
     # Plot for every k
-    tab20b_colors = plt.get_cmap("tab20b").colors  # type: ignore
-    tab20c_colors = plt.get_cmap("tab20c").colors  # type: ignore
-    colors = [*tab20b_colors, *tab20c_colors]
+    colors = plt.get_cmap("tab20").colors  # type: ignore
     # cb stands for control bit which is active there; this differs from k due to permutation
     for cb in range(n_functions):
-        color0 = colors[(4 * cb + 0) % len(colors)]
-        color1 = colors[(4 * cb + 3) % len(colors)]
+        color0 = colors[(2 * cb + 0) % len(colors)]
+        color1 = colors[(2 * cb + 1) % len(colors)]
         s = slice(cb * n_samples, (cb + 1) * n_samples)
         ax = axs[cb]
         ax.plot(input_xs[s], model_output_hardcoded[s], color=color0, label="Target model")
@@ -427,7 +425,7 @@ def plot_model_functions_paper(
         ax.legend(loc="lower left")
         assert target_model.controlled_resnet is not None
         ax.set_xlabel("Input x")
-        ax.set_title(f"Feature / subnetwork {cb}")
+        ax.set_title(f"Feature {cb}")
     axs[0].set_ylabel("Output f(x)")
     return {"model_functions_paper": fig}
 
@@ -476,7 +474,7 @@ def plot_single_network(
                     [x_embed[i], x_mlp[j]],
                     [2 * plot_lay + 2, 2 * plot_lay + 1],
                     color=color,
-                    linewidth=abs(weight),
+                    linewidth=2 * abs(weight),
                 )
                 weight = W_out_norm[j, i].item()
                 if colors_out is not None:
@@ -487,7 +485,7 @@ def plot_single_network(
                     [x_mlp[j], x_embed[i]],
                     [2 * plot_lay + 1, 2 * plot_lay],
                     color=color,
-                    linewidth=abs(weight),
+                    linewidth=2 * abs(weight),
                 )
     # Draw residual steam
     for i in range(d_embed):
@@ -533,8 +531,8 @@ def get_weight_colors_single(
     # Set colors to -1 for weights that should be 0 (belong to no feature)
     mask_in = target_weights["W_in"].T == 0
     mask_out = target_weights["W_out"].T == 0
-    colors["W_in"][mask_in] = -1
-    colors["W_out"][mask_out] = -1
+    colors["W_in"][mask_in] = d_resid - 2
+    colors["W_out"][mask_out] = d_resid - 2
     # -2 was placeholder value and should be gone now
     assert torch.all(colors["W_in"] != -2)
     assert torch.all(colors["W_out"] != -2)
@@ -607,8 +605,8 @@ def plot_piecewise_network(
     for lay in range(n_layers):
         axs[0].text(1, 2 * lay + 1, "MLP", ha="left", va="center")
     fig.legend(
-        [plt.Line2D([0], [0], color=f"C{k}") for k in range(n_components)],
-        [f"Feature {k} weights" for k in range(n_components)],
+        [plt.Line2D([0], [0], color=f"C{k}") for k in range(n_components + 1)],
+        [*[f"Feature {k} weights" for k in range(n_components)], "Not in target weights"],
         ncol=n_components,
         loc="center",
         bbox_to_anchor=(0.5, 0),
