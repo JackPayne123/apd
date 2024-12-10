@@ -97,5 +97,5 @@ out_path = Path(__file__).parent / "out/attribution_scores" / pretrained_path.pa
 out_path.mkdir(parents=True, exist_ok=True)
 for k, v in fig_dict.items():
     out_file = out_path / f"{k}.png"
-    v.savefig(out_file, dpi=300)
+    v.savefig(out_file, dpi=300, bbox_inches="tight")
     print(f"Saved plot to {out_file}")

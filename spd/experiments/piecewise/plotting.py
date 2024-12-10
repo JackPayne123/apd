@@ -604,12 +604,13 @@ def plot_piecewise_network(
     axs[0].text(0.275, 0.985, "Inputs", ha="center", va="center", transform=axs[0].transAxes)
     for lay in range(n_layers):
         axs[0].text(1, 2 * lay + 1, "MLP", ha="left", va="center")
-    fig.legend(
+    legend = fig.legend(
         [plt.Line2D([0], [0], color=f"C{k}") for k in range(n_components + 1)],
         [*[f"Feature {k} weights" for k in range(n_components)], "Not in target weights"],
-        ncol=n_components,
-        loc="center",
-        bbox_to_anchor=(0.5, 0),
+        ncol=n_components + 1,
+        loc="lower center",
+        bbox_to_anchor=(0.5, -0.05),
         bbox_transform=fig.transFigure,
     )
+    legend.set_in_layout(True)
     return {"subnetworks_graph_plots": fig}
