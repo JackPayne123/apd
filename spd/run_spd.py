@@ -828,6 +828,10 @@ def optimize(
                 )
                 topk_mask = (batch != 0).float().to(device=device)
             else:
+                # # Instead of config.topk, use the exact number of active features over the batch
+                # n_active = (batch != 0).sum()
+                # topk = n_active / batch.shape[0]
+                # topk_mask = calc_topk_mask(topk_attrs, topk, batch_topk=config.batch_topk)
                 topk_mask = calc_topk_mask(topk_attrs, config.topk, batch_topk=config.batch_topk)
             if config.distil_from_target:
                 # Add back the final subnetwork index to the topk mask and set it to True
@@ -866,10 +870,20 @@ def optimize(
 
         act_recon_loss = None
         if config.act_recon_coeff is not None:
+            assert layer_acts_topk is not None
+            post_acts_after_relu = {
+                "layers.0.linear1": torch.nn.functional.relu(post_acts["layers.0.linear1"])
+            }
+            layer_acts_topk_after_relu = {
+                "layers.0.linear1": torch.nn.functional.relu(layer_acts_topk["layers.0.linear1"])
+            }
             act_recon_loss = calc_act_recon(
-                target_post_acts=post_acts,
-                layer_acts=layer_acts if layer_acts_topk is None else layer_acts_topk,
+                target_post_acts=post_acts_after_relu, layer_acts=layer_acts_topk_after_relu
             )
+            # act_recon_loss = calc_act_recon(
+            #     target_post_acts=post_acts,
+            #     layer_acts=layer_acts if layer_acts_topk is None else layer_acts_topk,
+            # )
 
         if config.schatten_coeff is not None:
             assert isinstance(
@@ -986,6 +1000,7 @@ def optimize(
             plot_results_fn is not None
             and config.image_freq is not None
             and step % config.image_freq == 0
+            # and step > 0
         ):
             fig_dict = plot_results_fn(
                 model=model,
