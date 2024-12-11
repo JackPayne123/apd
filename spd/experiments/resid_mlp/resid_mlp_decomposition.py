@@ -392,9 +392,12 @@ def resid_mlp_plot_results_fn(
     # Subnetwork parameters
     ############################################################################################
 
-    fig_dict["subnetwork_params"] = plot_multiple_subnetwork_params(
-        model=model, out_dir=out_dir, step=step
-    )
+    # This can be too big to plot
+    n_matrix_params = target_model.config.d_mlp * target_model.config.d_embed
+    if n_matrix_params < 1000:
+        fig_dict["subnetwork_params"] = plot_multiple_subnetwork_params(
+            model=model, out_dir=out_dir, step=step
+        )
 
     # Save plots to files
     if out_dir:
