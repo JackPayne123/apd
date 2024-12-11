@@ -12,4 +12,4 @@ command:
 - ${env}
 - ${interpreter}
 - ${program}
-- spd/experiments/resid_mlp/sweepA_spd.yaml
+- spd/experiments/resid_mlp/sweepB_spd.yaml
