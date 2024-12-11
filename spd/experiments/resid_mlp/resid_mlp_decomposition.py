@@ -55,14 +55,16 @@ from spd.wandb_utils import init_wandb
 wandb.require("core")
 
 
-def get_run_name(config: Config, n_features: int, n_layers: int, d_resid: int, d_mlp: int) -> str:
+def get_run_name(
+    config: Config, n_features: int, n_layers: int, d_resid: int, d_mlp: int, k: int
+) -> str:
     """Generate a run name based on the config."""
     run_suffix = ""
     if config.wandb_run_name:
         run_suffix = config.wandb_run_name
     else:
         run_suffix = get_common_run_name_suffix(config)
-        run_suffix += f"ft{n_features}_lay{n_layers}_resid{d_resid}_mlp{d_mlp}"
+        run_suffix += f"ft{n_features}_lay{n_layers}_resid{d_resid}_mlp{d_mlp}_k{k}"
     return config.wandb_run_name_prefix + run_suffix
 
 
@@ -456,6 +458,7 @@ def main(
         n_layers=target_model.config.n_layers,
         d_resid=target_model.config.d_embed,
         d_mlp=target_model.config.d_mlp,
+        k=config.task_config.k,
     )
     if config.wandb_project:
         assert wandb.run, "wandb.run must be initialized before training"
