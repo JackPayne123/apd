@@ -6,14 +6,13 @@ from functools import partial
 from pathlib import Path
 from typing import Any
 
-import einops
 import fire
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
 import wandb
 import yaml
-from jaxtyping import Bool, Float
+from jaxtyping import Float
 from matplotlib.colors import CenteredNorm
 from torch import Tensor
 from tqdm import tqdm
@@ -67,24 +66,22 @@ def get_run_name(config: Config, n_features: int, n_layers: int, d_resid: int, d
     return config.wandb_run_name_prefix + run_suffix
 
 
-def calc_dead_subnets(
+def calc_n_active_features_per_subnet(
     model: ResidualMLPSPDRankPenaltyModel, cutoff: float, device: str
-) -> Bool[Tensor, "n_instances k"]:
-    """We consider a subnet dead if there are no values in the k-crossterms that are > cutoff."""
-    dead_subnets: Bool[Tensor, "n_instances k"] | Bool[Tensor, " k"] = torch.zeros(
-        (model.config.n_instances, model.k), device=device
-    ).bool()
+) -> Float[Tensor, "n_instances k"] | Float[Tensor, " k"]:
+    """Calculate the number of active features per subnet (and per instance if n_instances > 1)."""
+    n_active_features_per_subnet: Float[Tensor, "n_instances k"] | Float[Tensor, " k"] = (
+        torch.zeros((model.config.n_instances, model.k), device=device)
+    )
+
     for k in range(model.k):
         relu_conns: Float[Tensor, "n_instances n_features d_mlp"] = spd_calculate_diag_relu_conns(
             model, device, k_select=k
         )
-        # We only care about the max value in the n_features x d_mlp space
-        relu_conns_joined = einops.rearrange(
-            relu_conns, "n_instances n_features d_mlp -> n_instances (n_features d_mlp)"
-        )
-        k_dead = relu_conns_joined.max(dim=-1).values < cutoff
-        dead_subnets[:, k] = k_dead
-    return dead_subnets
+        # Count the number of features for which each subnet fires beyond the cutoff
+        n_active_features_per_subnet[:, k] = (relu_conns.max(dim=-1).values > cutoff).sum(dim=-1)
+
+    return n_active_features_per_subnet
 
 
 def plot_subnetwork_attributions(
@@ -208,6 +205,37 @@ def plot_multiple_subnetwork_params(
     return fig
 
 
+def plot_subnet_categories(model: ResidualMLPSPDRankPenaltyModel, device: str) -> plt.Figure:
+    n_active_features_per_subnet = calc_n_active_features_per_subnet(
+        model, cutoff=1e-2, device=device
+    )
+    n_dead_subnets = (n_active_features_per_subnet == 0).sum(dim=-1).detach().cpu().tolist()
+    n_monosemantic_subnets = (n_active_features_per_subnet == 1).sum(dim=-1).detach().cpu().tolist()
+    n_duosemantic_subnets = (n_active_features_per_subnet == 2).sum(dim=-1).detach().cpu().tolist()
+    n_polysemantic_subnets = (n_active_features_per_subnet > 1).sum(dim=-1).detach().cpu().tolist()
+
+    n_instances = len(n_dead_subnets)
+    fig, ax = plt.subplots(
+        nrows=1, ncols=n_instances, figsize=(5 * n_instances, 5), constrained_layout=True
+    )
+    axs = np.array([ax]) if n_instances == 1 else np.array(ax)
+    categories = ["Dead", "Monosemantic", "Duosemantic", "Polysemantic"]
+
+    for i in range(n_instances):
+        counts = [
+            n_dead_subnets[i],
+            n_monosemantic_subnets[i],
+            n_duosemantic_subnets[i],
+            n_polysemantic_subnets[i],
+        ]
+        axs[i].bar(categories, counts)
+        axs[i].set_xlabel("Category")
+        axs[i].set_ylabel("Count")
+        axs[i].set_title(f"Subnet Categories (Instance {i})")
+
+    return fig
+
+
 def resid_mlp_plot_results_fn(
     model: ResidualMLPSPDRankPenaltyModel,
     target_model: ResidualMLPModel,
@@ -225,14 +253,7 @@ def resid_mlp_plot_results_fn(
     assert isinstance(config.task_config, ResidualMLPTaskConfig)
     fig_dict = {}
 
-    # Save the number of dead subnets to wandb
-    dead_subnets = calc_dead_subnets(model, cutoff=1e-2, device=device)
-    n_dead_subnets: int | list[int] = dead_subnets.sum(dim=-1).detach().cpu().tolist()
-    if isinstance(n_dead_subnets, list) and len(n_dead_subnets) == 1:
-        n_dead_subnets = n_dead_subnets[0]
-    if config.wandb_project:
-        wandb.log({"n_dead_subnets": n_dead_subnets}, step=step)
-    logger.info(f"Number of dead subnets at step {step}: {n_dead_subnets}")
+    fig_dict["subnet_categories"] = plot_subnet_categories(model, device)
 
     ############################################################################################
     # Feature contributions
@@ -469,39 +490,40 @@ def main(
     model.W_U.data[:, :] = target_model.W_U.data.detach().clone()
     model.W_U.requires_grad = False
 
-    # ############ COPY ALIVE SUBNETS FROM FIRST PASS MODEL
-    first_pass_model, _, _ = ResidualMLPSPDRankPenaltyModel.from_pretrained(
-        "wandb:spd-resid-mlp/runs/igfxwtmt"
-    )
-    first_pass_model.to(device)
+    # # ############ COPY ALIVE SUBNETS FROM FIRST PASS MODEL
+    # first_pass_model, _, _ = ResidualMLPSPDRankPenaltyModel.from_pretrained(
+    #     "wandb:spd-resid-mlp/runs/igfxwtmt"
+    # )
+    # first_pass_model.to(device)
 
-    dead_subnets: Bool[Tensor, "n_instances k"] | Bool[Tensor, " k"] = calc_dead_subnets(
-        first_pass_model, cutoff=1e-2, device=device
-    )
+    # n_active_features_per_subnet = calc_n_active_features_per_subnet(
+    #     first_pass_model, cutoff=1e-2, device=device
+    # )
+    # dead_subnets = (n_active_features_per_subnet == 0).bool()
 
-    # Copy over the alive subnets from first_pass_model to SPD model
-    for i in range(model.config.n_layers):
-        model.layers[i].linear1.A.data[:, :, :, :] = torch.where(
-            dead_subnets[:, :, None, None],
-            model.layers[i].linear1.A.data[:, :, :, :],
-            first_pass_model.layers[i].linear1.A.data[:, :, :, :],
-        )
-        model.layers[i].linear1.B.data[:, :, :, :] = torch.where(
-            dead_subnets[:, :, None, None],
-            model.layers[i].linear1.B.data[:, :, :, :],
-            first_pass_model.layers[i].linear1.B.data[:, :, :, :],
-        )
-        model.layers[i].linear2.A.data[:, :, :, :] = torch.where(
-            dead_subnets[:, :, None, None],
-            model.layers[i].linear2.A.data[:, :, :, :],
-            first_pass_model.layers[i].linear2.A.data[:, :, :, :],
-        )
-        model.layers[i].linear2.B.data[:, :, :, :] = torch.where(
-            dead_subnets[:, :, None, None],
-            model.layers[i].linear2.B.data[:, :, :, :],
-            first_pass_model.layers[i].linear2.B.data[:, :, :, :],
-        )
-    # ############
+    # # Copy over the alive subnets from first_pass_model to SPD model
+    # for i in range(model.config.n_layers):
+    #     model.layers[i].linear1.A.data[:, :, :, :] = torch.where(
+    #         dead_subnets[:, :, None, None],
+    #         model.layers[i].linear1.A.data[:, :, :, :],
+    #         first_pass_model.layers[i].linear1.A.data[:, :, :, :],
+    #     )
+    #     model.layers[i].linear1.B.data[:, :, :, :] = torch.where(
+    #         dead_subnets[:, :, None, None],
+    #         model.layers[i].linear1.B.data[:, :, :, :],
+    #         first_pass_model.layers[i].linear1.B.data[:, :, :, :],
+    #     )
+    #     model.layers[i].linear2.A.data[:, :, :, :] = torch.where(
+    #         dead_subnets[:, :, None, None],
+    #         model.layers[i].linear2.A.data[:, :, :, :],
+    #         first_pass_model.layers[i].linear2.A.data[:, :, :, :],
+    #     )
+    #     model.layers[i].linear2.B.data[:, :, :, :] = torch.where(
+    #         dead_subnets[:, :, None, None],
+    #         model.layers[i].linear2.B.data[:, :, :, :],
+    #         first_pass_model.layers[i].linear2.B.data[:, :, :, :],
+    #     )
+    # # ############
 
     # Copy the biases from the target model to the SPD model and set requires_grad to False
     for i in range(target_model.config.n_layers):
