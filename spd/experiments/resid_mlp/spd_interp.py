@@ -26,8 +26,8 @@ from spd.utils import SPDOutputs, run_spd_forward_pass, set_seed
 device = "cuda" if torch.cuda.is_available() else "cpu"
 print(f"Using device: {device}")
 set_seed(0)  # You can change this seed if needed
-# path = "wandb:spd-resid-mlp/runs/knmzdsjg"  # broken, got overwritten due to bug
-path = "wandb:spd-resid-mlp/runs/81njc20h"
+# path = "wandb:spd-resid-mlp/runs/2ala9kjy" #natural
+path = "wandb:spd-resid-mlp/runs/qmio77cl"  # hardcode
 # Load the pretrained SPD model
 model, config, label_coeffs = ResidualMLPSPDRankPenaltyModel.from_pretrained(path)
 assert isinstance(config.task_config, ResidualMLPTaskConfig)
@@ -35,11 +35,48 @@ assert isinstance(config.task_config, ResidualMLPTaskConfig)
 target_model, target_model_train_config_dict, target_label_coeffs = (
     ResidualMLPModel.from_pretrained(config.task_config.pretrained_model_path)
 )
+# Print some basic information about the model
+print(f"Number of features: {model.config.n_features}")
+print(f"Embedding dimension: {model.config.d_embed}")
+print(f"MLP dimension: {model.config.d_mlp}")
+print(f"Number of layers: {model.config.n_layers}")
+print(f"Number of subnetworks (k): {model.config.k}")
 model = model.to(device)
 label_coeffs = label_coeffs.to(device)
 target_model = target_model.to(device)
 target_label_coeffs = target_label_coeffs.to(device)
 assert torch.allclose(target_label_coeffs, torch.tensor(label_coeffs))
+
+for data_generation_type in ["at_least_zero_active", "exactly_one_active", "exactly_two_active"]:
+    dataset = ResidualMLPDataset(
+        n_instances=model.config.n_instances,
+        n_features=model.config.n_features,
+        feature_probability=config.task_config.feature_probability,
+        device=device,
+        calc_labels=False,  # Our labels will be the output of the target model
+        data_generation_type=config.task_config.data_generation_type,
+    )
+    batch, labels = dataset.generate_batch(config.batch_size)
+    batch = batch.to(device)
+    labels = labels.to(device)
+    target_model_output, _, _ = target_model(batch)
+    assert config.topk is not None
+    spd_outputs = run_spd_forward_pass(
+        spd_model=model,
+        target_model=target_model,
+        input_array=batch,
+        attribution_type=config.attribution_type,
+        batch_topk=config.batch_topk,
+        topk=config.topk,
+        distil_from_target=config.distil_from_target,
+    )
+    topk_recon_loss = calc_recon_mse(
+        spd_outputs.spd_topk_model_output, target_model_output, has_instance_dim=True
+    )
+    print(f"Topk recon loss for {data_generation_type}: {np.array(topk_recon_loss.detach().cpu())}")
+
+# %%
+
 dataset = ResidualMLPDataset(
     n_instances=model.config.n_instances,
     n_features=model.config.n_features,
@@ -51,12 +88,6 @@ dataset = ResidualMLPDataset(
 batch, labels = dataset.generate_batch(config.batch_size)
 batch = batch.to(device)
 labels = labels.to(device)
-# Print some basic information about the model
-print(f"Number of features: {model.config.n_features}")
-print(f"Embedding dimension: {model.config.d_embed}")
-print(f"MLP dimension: {model.config.d_mlp}")
-print(f"Number of layers: {model.config.n_layers}")
-print(f"Number of subnetworks (k): {model.config.k}")
 
 target_model_output, _, _ = target_model(batch)
 
@@ -84,22 +115,21 @@ if torch.allclose(model.W_U.data, model.W_E.data.transpose(-2, -1)):
 else:
     print("W_E and W_U are not tied")
 
-# %% Linearity test: Enable one subnet after the other
 
-
+# %% Observe how well the model reconstructs the noise
 def topk_model_fn(
     batch: Float[Tensor, "batch n_instances n_features"],
-    topk_mask: Float[Tensor, "batch n_instances k"],
+    topk_mask: Float[Tensor, "batch n_instances k"] | None,
 ) -> SPDOutputs:
-    topk_mask = topk_mask.to(device)
+    topk_mask = topk_mask.to(device) if topk_mask is not None else None
     assert config.topk is not None
     return run_spd_forward_pass(
         spd_model=model,
         target_model=target_model,
         input_array=batch,
         attribution_type=config.attribution_type,
-        batch_topk=config.batch_topk,
-        topk=config.topk,
+        batch_topk=False,
+        topk=1,
         distil_from_target=config.distil_from_target,
         topk_mask=topk_mask,
     )
@@ -111,24 +141,26 @@ feature_idx = 15
 fig, ax = plt.subplots(nrows=1, ncols=1, constrained_layout=True, figsize=(10, 1 + 3 * nrows))
 fig.suptitle(f"Model {path}")
 plot_resid_vs_mlp_out(
-    model=target_model,
+    target_model=target_model,
     device=device,
     ax=ax,
     instance_idx=instance_idx,
     feature_idx=feature_idx,
     topk_model_fn=topk_model_fn,
-    subnet_indices=torch.tensor([feature_idx]),
+    subnet_indices=None,
 )
 
+# %% Linearity test: Enable one subnet after the other
+
 n_features = model.config.n_features
-j = 15
-subtract_inputs = True
+feature_idx = 15
+subtract_inputs = True  # TODO TRUE subnet
 fig = plot_feature_response_with_subnets(
     topk_model_fn=topk_model_fn,
     device=device,
     model_config=model.config,
-    feature_idx=j,
-    batch_size=20,
+    feature_idx=feature_idx,
+    batch_size=99,
     subtract_inputs=subtract_inputs,
 )["feature_response_with_subnets"]
 if fig is not None:

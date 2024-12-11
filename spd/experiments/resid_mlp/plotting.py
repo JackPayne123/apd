@@ -79,86 +79,6 @@ def plot_individual_feature_response(
     return fig
 
 
-def plot_feature_response_with_subnets(
-    topk_model_fn: Callable[
-        [Float[Tensor, "batch n_instances n_features"], Float[Tensor, "batch n_instances k"]],
-        SPDOutputs,
-    ],
-    device: str,
-    model_config: ResidualMLPConfig | ResidualMLPSPDRankPenaltyConfig,
-    feature_idx: int = 0,
-    instance_idx: int = 0,
-    subtract_inputs: bool = True,
-    ax: plt.Axes | None = None,
-    batch_size: int | None = None,
-):
-    n_instances = model_config.n_instances
-    n_features = model_config.n_features
-    batch_size = batch_size or n_features
-
-    if ax is None:
-        fig, ax = plt.subplots(constrained_layout=True)
-    else:
-        fig = ax.figure
-
-    cmap_blues = plt.get_cmap("Blues")
-    cmap_reds = plt.get_cmap("Reds")
-
-    batch = torch.zeros(batch_size, n_instances, n_features, device=device)
-    batch[:, instance_idx, feature_idx] = 1
-    # blue: feature_idx is on, others random
-    # red: feature_idx is off, others random
-    topk_mask_blue = torch.zeros_like(batch[:, :, :])
-    topk_mask_red = torch.zeros_like(batch[:, :, :])
-    topk_mask_blue[:, :, feature_idx] = 1
-    # Set up batches like this:
-    # Sample 1: 1 feature active
-    # Sample 2: 2 features active ...
-    # red minus 1
-
-    for s in range(batch_size):
-        # Select s random features
-        # Draw without replacement
-        choice = torch.randperm(n_features - 1)[:s]
-        choice[choice >= feature_idx] += 1
-        topk_mask_blue[s, :, choice] = 1
-        topk_mask_red[s, :, choice] = 1
-    assert torch.allclose(
-        topk_mask_blue[:, :, feature_idx], torch.ones_like(topk_mask_blue[:, :, feature_idx])
-    )
-    assert torch.allclose(
-        topk_mask_red[:, :, feature_idx], torch.zeros_like(topk_mask_red[:, :, feature_idx])
-    )
-
-    out_red = topk_model_fn(batch, topk_mask_red)
-    out_blue = topk_model_fn(batch, topk_mask_blue)
-    out_blue_spd = out_blue.spd_topk_model_output[:, instance_idx, :]
-    out_red_spd = out_red.spd_topk_model_output[:, instance_idx, :]
-    out_target = out_blue.target_model_output[:, instance_idx, :]
-
-    if subtract_inputs:
-        out_blue_spd = out_blue_spd - batch[:, instance_idx, :]
-        out_red_spd = out_red_spd - batch[:, instance_idx, :]
-        out_target = out_target - batch[:, instance_idx, :]
-
-    x = torch.arange(n_features)
-    for s in range(batch_size):
-        y = out_blue_spd[s, :].detach().cpu()
-        ax.plot(x, y, color=cmap_blues(s / batch_size), lw=0.5)
-        y = out_red_spd[s, :].detach().cpu()
-        ax.plot(x, y, color=cmap_reds(s / batch_size), lw=0.5)
-    ax.plot([], [], color="blue", label="SPD with right subnet")
-    ax.plot([], [], color="red", label="SPD without right subnet")
-    ax.scatter(
-        x, out_target[0, :].detach().cpu(), color="wheat", label="Target", marker=".", zorder=-1
-    )
-    ax.set_xlabel("Output index")
-    ax.set_ylabel("Output")
-    ax.set_title(f"SPD model output for increasing number of subnets, feature {feature_idx}")
-    ax.legend()
-    return {"feature_response_with_subnets": fig}
-
-
 def _calculate_snr(
     model: ResidualMLPModel, device: str, input_values: tuple[float, float]
 ) -> Tensor:
@@ -603,7 +523,7 @@ def plot_virtual_weights_target_spd(
 
 
 def plot_resid_vs_mlp_out(
-    model: ResidualMLPModel,
+    target_model: ResidualMLPModel,
     device: str,
     ax: plt.Axes,
     topk_model_fn: Callable[
@@ -615,45 +535,166 @@ def plot_resid_vs_mlp_out(
     instance_idx: int = 0,
     feature_idx: int = 0,
 ):
-    if not torch.allclose(model.W_U.data, model.W_E.data.transpose(-2, -1)):
+    tied_weights = True
+    if not torch.allclose(target_model.W_U.data, target_model.W_E.data.transpose(-2, -1)):
         print("Warning: W_E and W_U are not tied")
+        tied_weights = False
     batch_size = 1
-    n_instances = model.config.n_instances
-    n_features = model.config.n_features
+    batch_idx = 0
+    n_instances = target_model.config.n_instances
+    n_features = target_model.config.n_features
     batch = torch.zeros(batch_size, n_instances, n_features, device=device)
     batch[:, instance_idx, feature_idx] = 1
-    out = model(batch)[0][0, instance_idx, :].cpu().detach()
-    W_E = model.W_E[instance_idx]
-    W_U = model.W_U[instance_idx]
-    target_resid = np.zeros(model.config.n_features)
-    target_resid[feature_idx] = 1
-    ax.plot(out, color="C0", label="Model output")
-    ax.scatter(feature_idx, 2, color="C0", label="Model target")
-    W_EU = einops.einsum(W_E, W_U, "f1 d_mlp, d_mlp f2 -> f1 f2").detach().cpu()[feature_idx, :]
-    ax.plot(W_EU, color="C1", label="Resid pass-through (W_E W_U)")
-    ax.scatter(feature_idx, 1, color="C1", label="Resid target")
+    # Target model full output
+    out = target_model(batch)[0][batch_idx, instance_idx, :].cpu().detach()
+    # Target model residual stream contribution
+    W_E = target_model.W_E[instance_idx].cpu().detach()
+    W_U = target_model.W_U[instance_idx].cpu().detach()
+    W_EU = einops.einsum(W_E, W_U, "f1 d_mlp, d_mlp f2 -> f1 f2")[feature_idx, :]
+    # Compute MLP-out
+    mlp_out = out - W_EU
+    # Mask for noise & correlation
     mask = torch.ones_like(out).bool()
     mask[feature_idx] = False
+    noise_out = F.mse_loss(out[mask], torch.zeros_like(out[mask])).item()
+    corr = np.corrcoef(mlp_out[mask], W_EU[mask])[0, 1]
+    ax.axhline(0, color="grey", linestyle="-", lw=0.5)
+    ax.plot([], [], c="white", label=f"Full target model noise level ~ {noise_out:.2e}")
+    ax.plot(
+        mlp_out,
+        color="C0",
+        label=f"Target MLP output.\n"
+        f"Corr w/ resid (excluding feature {feature_idx}): {corr:.2f}",
+        lw=2,
+    )
+    noise_W_EU = F.mse_loss(W_EU[mask], torch.zeros_like(W_EU[mask])).item()
+    ax.plot(
+        W_EU,
+        color="C1",
+        label=f"Target resid contribution (W_E W_U)\n" f"Noise level ~ {noise_W_EU:.2e}",
+    )
     # If topk_model_fn is provided, use it to get the SPD model output
     if topk_model_fn is not None:
+        # Get the SPD resid contribution by running with no subnetworks. This should be equivalent
+        # to W_E W_U and but doesn't require access to the ResidMLP SPD model.
         topk_mask = torch.zeros_like(batch)
-        topk_mask[:, :, subnet_indices] = 1
-        out_topk = (
-            topk_model_fn(batch, topk_mask).spd_topk_model_output[0, instance_idx, :].detach().cpu()
+        spd_WEU = topk_model_fn(batch, topk_mask).spd_topk_model_output[batch_idx, instance_idx, :]
+        spd_WEU = spd_WEU.detach().cpu()
+        if tied_weights:
+            assert torch.allclose(spd_WEU, W_EU), "Tied weights but W_EU != SPD resid contribution"
+        else:
+            ax.plot(
+                spd_WEU,
+                color="C4",
+                label="SPD resid contribution (no subnets).\n"
+                "Note that embeddings are untied and numbers in legend are not applicable",
+                ls=":",
+            )
+        # Get SPD forward pass, either from subnet_indices or attribution-based topk_mask
+        if subnet_indices is None:
+            topk_mask = None
+        else:
+            topk_mask = torch.zeros_like(batch)
+            topk_mask[:, :, subnet_indices] = 1
+        topk_out = topk_model_fn(batch, topk_mask).spd_topk_model_output[batch_idx, instance_idx, :]
+        topk_mlp_out = topk_out.detach().cpu() - spd_WEU
+        topk_mlp_out_mse = F.mse_loss(topk_mlp_out, mlp_out).item()
+        corr = np.corrcoef(topk_mlp_out[mask], W_EU[mask])[0, 1]
+        ax.plot(
+            topk_mlp_out,
+            color="C2",
+            label=f"SPD MLP output (topk) MSE: {topk_mlp_out_mse:.1e}.\n"
+            f"Corr w/ resid (excluding feature {feature_idx}): {corr:.2f}",
+            ls="--",
         )
-        ax.plot(out_topk, color="C2", label="SPD model output")
-    # Correlation between model output and model resid, excluding the feature of interest
-    corr_unmasked = np.corrcoef(out.cpu().detach().numpy(), W_EU.cpu().detach().numpy())[0, 1]
-    out_without_feature = out[mask].cpu().detach().numpy()
-    W_EU_without_feature = W_EU[mask].cpu().detach().numpy()
-    corr_masked = np.corrcoef(out_without_feature, W_EU_without_feature)[0, 1]
-    ax.plot([], [], color="k", label=f"Correlation (excluding f{feature_idx}) {corr_masked:.2f}")
-    ax.plot([], [], color="k", label=f"Correlation (including f{feature_idx}) {corr_unmasked:.2f}")
+        # Full forward pass
+        topk_mask = torch.ones_like(batch)
+        full_out = topk_model_fn(batch, topk_mask).spd_topk_model_output[batch_idx, instance_idx, :]
+        full_mlp_out = full_out.detach().cpu() - spd_WEU
+        full_mlp_out_mse = F.mse_loss(full_mlp_out, mlp_out).item()
+        corr = np.corrcoef(full_mlp_out[mask], W_EU[mask])[0, 1]
+        ax.plot(
+            full_mlp_out,
+            color="C3",
+            label=f"SPD MLP output (full) MSE: {full_mlp_out_mse:.1e}.\n"
+            f"Corr w/ resid (excluding feature {feature_idx}): {corr:.2f}",
+            ls=":",
+        )
     # Can we scale W_EU by a scalar to make it match the model output in mask?
     # def difference(alpha):
     #     return F.mse_loss( float(alpha) * W_EU[mask], out[mask])
     # from scipy.optimize import minimize
     # res = minimize(difference, x0=0.1, method="Nelder-Mead")
     # ax.plot(W_EU * float(res.x[0]), color="C2", label="Scaled W_E W_U")
-    ax.legend(ncols=3)
+    ax.legend()
     ax.set_title(f"Instance {instance_idx}, feature {feature_idx}")
+
+
+def plot_feature_response_with_subnets(
+    topk_model_fn: Callable[
+        [Float[Tensor, "batch n_instances n_features"], Float[Tensor, "batch n_instances k"]],
+        SPDOutputs,
+    ],
+    device: str,
+    model_config: ResidualMLPConfig | ResidualMLPSPDRankPenaltyConfig,
+    feature_idx: int = 0,
+    # subnet_idx: int = 0, #TODO for non-hardcoded runs
+    instance_idx: int = 0,
+    subtract_inputs: bool = True,
+    ax: plt.Axes | None = None,
+    batch_size: int | None = None,
+):
+    n_instances = model_config.n_instances
+    n_features = model_config.n_features
+    batch_size = batch_size or n_features
+
+    if ax is None:
+        fig, ax = plt.subplots(constrained_layout=True)
+    else:
+        fig = ax.figure
+
+    cmap_blues = plt.get_cmap("Blues")
+    cmap_reds = plt.get_cmap("Reds")
+
+    batch = torch.zeros(batch_size, n_instances, n_features, device=device)
+    batch[:, instance_idx, feature_idx] = 1
+    topk_mask_blue = torch.zeros_like(batch[:, :, :])
+    topk_mask_red = torch.zeros_like(batch[:, :, :])
+    topk_mask_blue[:, :, feature_idx] = 1
+    for s in range(batch_size):
+        choice = torch.randperm(n_features - 1)[:s]
+        # Exclude feature_idx from choice
+        choice[choice >= feature_idx] += 1
+        topk_mask_blue[s, :, choice] = 1
+        topk_mask_red[s, :, choice] = 1
+    assert torch.allclose(
+        topk_mask_blue[:, :, feature_idx], torch.ones_like(topk_mask_blue[:, :, feature_idx])
+    )
+    assert torch.allclose(
+        topk_mask_red[:, :, feature_idx], torch.zeros_like(topk_mask_red[:, :, feature_idx])
+    )
+    zero_topk_mask = torch.zeros_like(batch[:, :, :])
+    out_WE_WU_only = topk_model_fn(batch, zero_topk_mask).spd_topk_model_output[:, instance_idx, :]
+
+    out_red = topk_model_fn(batch, topk_mask_red)
+    out_blue = topk_model_fn(batch, topk_mask_blue)
+    mlp_out_blue_spd = out_blue.spd_topk_model_output[:, instance_idx, :] - out_WE_WU_only
+    mlp_out_red_spd = out_red.spd_topk_model_output[:, instance_idx, :] - out_WE_WU_only
+    mlp_out_target = out_blue.target_model_output[:, instance_idx, :] - out_WE_WU_only
+
+    x = torch.arange(n_features)
+    for s in range(batch_size):
+        y = mlp_out_blue_spd[s, :].detach().cpu()
+        ax.plot(x, y, color=cmap_blues(s / batch_size), lw=0.3)
+        y = mlp_out_red_spd[s, :].detach().cpu()
+        ax.plot(x, y, color=cmap_reds(s / batch_size), lw=0.3)
+    ax.set_ylabel("MLP output (forward pass minus W_E W_U contribution)")
+    ax.set_xlabel("Output index")
+    ax.plot([], [], color="blue", label="SPD with right subnet")
+    ax.plot([], [], color="red", label="SPD without right subnet")
+    ax.scatter(
+        x, mlp_out_target[0, :].detach().cpu(), color="wheat", label="Target", marker=".", zorder=-1
+    )
+    ax.set_title(f"SPD model output for increasing number of subnets, feature {feature_idx}")
+    ax.legend()
+    return {"feature_response_with_subnets": fig}

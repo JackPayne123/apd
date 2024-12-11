@@ -68,7 +68,7 @@ fig.suptitle(f"Model {path}")
 for i in range(nrows):
     ax = axs[i]  # type: ignore
     plot_resid_vs_mlp_out(
-        model=model, device=device, ax=ax, instance_idx=instance_idx, feature_idx=i
+        target_model=model, device=device, ax=ax, instance_idx=instance_idx, feature_idx=i
     )
 plt.show()
 
