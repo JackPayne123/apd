@@ -12,7 +12,7 @@ import numpy as np
 import torch
 import wandb
 import yaml
-from jaxtyping import Float
+from jaxtyping import Bool, Float
 from matplotlib.colors import CenteredNorm
 from torch import Tensor
 from tqdm import tqdm
@@ -63,6 +63,16 @@ def get_run_name(config: Config, n_features: int, n_layers: int, d_resid: int, d
         run_suffix = get_common_run_name_suffix(config)
         run_suffix += f"ft{n_features}_lay{n_layers}_resid{d_resid}_mlp{d_mlp}"
     return config.wandb_run_name_prefix + run_suffix
+
+
+def calc_dead_subnets(
+    model: ResidualMLPSPDRankPenaltyModel, cutoff: float = 1e-2
+) -> Bool[Tensor, "n_instances k"]:
+    """We consider a subnet dead if it has a linear2 L2 of < cutoff."""
+    linear1_l2 = (
+        model.all_subnetwork_params()["layers.0.linear2"][:, :, :, :].pow(2).sum(dim=(-1, -2))
+    )
+    return linear1_l2 < cutoff
 
 
 def plot_subnetwork_attributions(
@@ -202,6 +212,13 @@ def resid_mlp_plot_results_fn(
 ) -> dict[str, plt.Figure]:
     assert isinstance(config.task_config, ResidualMLPTaskConfig)
     fig_dict = {}
+
+    # Save the number of dead subnets to wandb
+    dead_subnets = calc_dead_subnets(model, cutoff=1e-2)
+    n_dead_subnets: int | list[int] = dead_subnets.sum(dim=-1).detach().cpu().tolist()
+    if config.wandb_project:
+        wandb.log({"n_dead_subnets": n_dead_subnets}, step=step)
+    logger.info(f"Number of dead subnets at step {step}: {n_dead_subnets}")
 
     ############################################################################################
     # Feature contributions
@@ -442,14 +459,10 @@ def main(
         "wandb:spd-resid-mlp/runs/fstzjcl7"
     )
     first_pass_model.to(device)
-    # We consider a subnet dead if it has a linear2 L2 of < 1e-2
-    # Assumes n_instances = 1
-    linear1_l2 = (
-        first_pass_model.all_subnetwork_params()["layers.0.linear2"][:, :, :, :]
-        .pow(2)
-        .sum(dim=(-1, -2))
+
+    dead_subnets: Bool[Tensor, "n_instances k"] | Bool[Tensor, " k"] = calc_dead_subnets(
+        first_pass_model, cutoff=1e-2
     )
-    dead_subnets: Float[Tensor, "n_instances k"] | Float[Tensor, " k"] = linear1_l2 < 1e-2
 
     # Copy over the alive subnets from first_pass_model to SPD model
     for i in range(model.config.n_layers):
