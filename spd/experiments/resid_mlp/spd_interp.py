@@ -11,22 +11,25 @@ from torch import Tensor
 from spd.experiments.resid_mlp.models import ResidualMLPModel, ResidualMLPSPDRankPenaltyModel
 from spd.experiments.resid_mlp.plotting import (
     analyze_per_feature_performance,
+    plot_feature_response_with_subnets,
     plot_individual_feature_response,
+    plot_resid_vs_mlp_out,
     plot_spd_relu_contribution,
     plot_virtual_weights_target_spd,
     spd_calculate_virtual_weights,
 )
 from spd.experiments.resid_mlp.resid_mlp_dataset import ResidualMLPDataset
 from spd.run_spd import ResidualMLPTaskConfig, calc_recon_mse
-from spd.utils import run_spd_forward_pass, set_seed
+from spd.utils import SPDOutputs, run_spd_forward_pass, set_seed
 
 # %% Loading
 device = "cuda" if torch.cuda.is_available() else "cpu"
 print(f"Using device: {device}")
 set_seed(0)  # You can change this seed if needed
-wandb_path = "wandb:spd-resid-mlp/runs/67hocvd9"
+# path = "wandb:spd-resid-mlp/runs/knmzdsjg"  # broken, got overwritten due to bug
+path = "wandb:spd-resid-mlp/runs/81njc20h"
 # Load the pretrained SPD model
-model, config, label_coeffs = ResidualMLPSPDRankPenaltyModel.from_pretrained(wandb_path)
+model, config, label_coeffs = ResidualMLPSPDRankPenaltyModel.from_pretrained(path)
 assert isinstance(config.task_config, ResidualMLPTaskConfig)
 # Path must be local
 target_model, target_model_train_config_dict, target_label_coeffs = (
@@ -75,6 +78,62 @@ print(f"Topk recon loss: {np.array(topk_recon_loss.detach().cpu())}")
 # Print param shapes for model
 for name, param in model.named_parameters():
     print(f"{name}: {param.shape}")
+
+if torch.allclose(model.W_U.data, model.W_E.data.transpose(-2, -1)):
+    print("W_E and W_U are tied")
+else:
+    print("W_E and W_U are not tied")
+
+# %% Linearity test: Enable one subnet after the other
+
+
+def topk_model_fn(
+    batch: Float[Tensor, "batch n_instances n_features"],
+    topk_mask: Float[Tensor, "batch n_instances k"],
+) -> SPDOutputs:
+    topk_mask = topk_mask.to(device)
+    assert config.topk is not None
+    return run_spd_forward_pass(
+        spd_model=model,
+        target_model=target_model,
+        input_array=batch,
+        attribution_type=config.attribution_type,
+        batch_topk=config.batch_topk,
+        topk=config.topk,
+        distil_from_target=config.distil_from_target,
+        topk_mask=topk_mask,
+    )
+
+
+instance_idx = 0
+nrows = 1
+feature_idx = 15
+fig, ax = plt.subplots(nrows=1, ncols=1, constrained_layout=True, figsize=(10, 1 + 3 * nrows))
+fig.suptitle(f"Model {path}")
+plot_resid_vs_mlp_out(
+    model=target_model,
+    device=device,
+    ax=ax,
+    instance_idx=instance_idx,
+    feature_idx=feature_idx,
+    topk_model_fn=topk_model_fn,
+    subnet_indices=torch.tensor([feature_idx]),
+)
+
+n_features = model.config.n_features
+j = 15
+subtract_inputs = True
+fig = plot_feature_response_with_subnets(
+    topk_model_fn=topk_model_fn,
+    device=device,
+    model_config=model.config,
+    feature_idx=j,
+    batch_size=20,
+    subtract_inputs=subtract_inputs,
+)["feature_response_with_subnets"]
+if fig is not None:
+    fig.suptitle(f"Model {path}")
+    plt.show()
 
 
 # %% Feature-relu contribution plots

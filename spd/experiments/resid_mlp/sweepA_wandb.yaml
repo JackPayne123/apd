@@ -6,6 +6,8 @@ metric:
 parameters:
   seed:
     values: [0, 1, 2, 3, 4]
+  hardcode_topk_mask_step:
+    values: [0, 5000]
 command:
 - ${env}
 - ${interpreter}

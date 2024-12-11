@@ -1,5 +1,6 @@
 import json
 import os
+from typing import Literal
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -24,6 +25,7 @@ def train_on_test_data(
     d_mlp: int,
     fixed_random_embedding: bool,
     fixed_identity_embedding: bool,
+    loss_type: Literal["readoff", "resid"],
 ) -> dict[int, float]:
     device = "cuda" if torch.cuda.is_available() else "cpu"
     config = ResidMLPTrainConfig(
@@ -40,6 +42,7 @@ def train_on_test_data(
             in_bias=bias,
             out_bias=bias,
         ),
+        loss_type=loss_type,
         feature_probability=p,
         importance_val=None,
         batch_size=256,
@@ -88,16 +91,17 @@ if __name__ == "__main__":
     out_dir = REPO_ROOT / "spd/experiments/resid_mlp/out"
     os.makedirs(out_dir, exist_ok=True)
     n_instances = 20
-    n_features = 20
-    d_mlp = 10
+    n_features = 100
+    d_mlp = 50
     d_embed = None
     n_steps = None
     # Scale d_embed
-    p = 0.05
+    p = 0.01
     fig, axes = plt.subplots(nrows=2, ncols=2, figsize=(10, 10), constrained_layout=True)
     fig.suptitle(f"Loss scaling with d_embed. Using {n_instances} instances")
-    d_embeds = [10_000, 5_000, 2_000, 1000, 500, 200, 100, 50]
-    for bias in [False, True]:
+    d_embeds = [2_000, 1000, 500, 200, 100, 50]
+    bias = False
+    for h, loss_type in enumerate(["readoff", "resid"]):
         for i, embed in enumerate(["random", "trained"]):
             print(f"Quadrant {bias=} and {embed=}")
             losses = {}
@@ -117,12 +121,13 @@ if __name__ == "__main__":
                         d_mlp=d_mlp,
                         fixed_random_embedding=fixed_random_embedding,
                         fixed_identity_embedding=fixed_identity_embedding,
+                        loss_type=loss_type,  # type: ignore
                     )
-            title_str = f"W_E={embed}_{bias=}_{n_features=}_{d_mlp=}_{p=}"
+            title_str = f"W_E={embed}_{bias=}_{n_features=}_{d_mlp=}_{p=}_{loss_type=}"
             with open(out_dir / f"losses_scale_embed_{title_str}.json", "w") as f:
                 json.dump(losses, f)
             # Make plot
-            ax = axes[int(bias), i]  # type: ignore
+            ax = axes[h, i]  # type: ignore
             ax.set_title(title_str, fontsize=8)
             naive_losses = naive_loss(n_features, d_mlp, p, bias, embed)
             ax.axhline(
@@ -141,6 +146,7 @@ if __name__ == "__main__":
 
     # Scale p
     d_embed = 10 * n_features
+    loss_type = "readoff"
     fig, axes = plt.subplots(nrows=2, ncols=2, figsize=(10, 10), constrained_layout=True)
     fig.suptitle(f"Loss scaling with p. Using {n_instances} instances")
     ps = np.array([0.01, 0.03, 0.05, 0.075, 0.1, 0.5, 1.0])
@@ -164,8 +170,9 @@ if __name__ == "__main__":
                         d_mlp=d_mlp,
                         fixed_random_embedding=fixed_random_embedding,
                         fixed_identity_embedding=fixed_identity_embedding,
+                        loss_type=loss_type,
                     )
-            title_str = f"W_E={embed}_{bias=}_{n_features=}_{d_mlp=}_{d_embed=}"
+            title_str = f"W_E={embed}_{bias=}_{n_features=}_{d_mlp=}_{d_embed=}_{loss_type=}"
             with open(out_dir / f"losses_scale_p_{title_str}.json", "w") as f:
                 json.dump(losses, f)
             # Make plot

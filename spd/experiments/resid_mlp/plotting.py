@@ -18,6 +18,7 @@ from spd.experiments.resid_mlp.models import (
     ResidualMLPSPDRankPenaltyConfig,
     ResidualMLPSPDRankPenaltyModel,
 )
+from spd.utils import SPDOutputs
 
 
 def plot_individual_feature_response(
@@ -76,6 +77,86 @@ def plot_individual_feature_response(
     ax.set_xlabel("Output feature index")
     ax.set_ylabel("Output (all inputs superimposed)")
     return fig
+
+
+def plot_feature_response_with_subnets(
+    topk_model_fn: Callable[
+        [Float[Tensor, "batch n_instances n_features"], Float[Tensor, "batch n_instances k"]],
+        SPDOutputs,
+    ],
+    device: str,
+    model_config: ResidualMLPConfig | ResidualMLPSPDRankPenaltyConfig,
+    feature_idx: int = 0,
+    instance_idx: int = 0,
+    subtract_inputs: bool = True,
+    ax: plt.Axes | None = None,
+    batch_size: int | None = None,
+):
+    n_instances = model_config.n_instances
+    n_features = model_config.n_features
+    batch_size = batch_size or n_features
+
+    if ax is None:
+        fig, ax = plt.subplots(constrained_layout=True)
+    else:
+        fig = ax.figure
+
+    cmap_blues = plt.get_cmap("Blues")
+    cmap_reds = plt.get_cmap("Reds")
+
+    batch = torch.zeros(batch_size, n_instances, n_features, device=device)
+    batch[:, instance_idx, feature_idx] = 1
+    # blue: feature_idx is on, others random
+    # red: feature_idx is off, others random
+    topk_mask_blue = torch.zeros_like(batch[:, :, :])
+    topk_mask_red = torch.zeros_like(batch[:, :, :])
+    topk_mask_blue[:, :, feature_idx] = 1
+    # Set up batches like this:
+    # Sample 1: 1 feature active
+    # Sample 2: 2 features active ...
+    # red minus 1
+
+    for s in range(batch_size):
+        # Select s random features
+        # Draw without replacement
+        choice = torch.randperm(n_features - 1)[:s]
+        choice[choice >= feature_idx] += 1
+        topk_mask_blue[s, :, choice] = 1
+        topk_mask_red[s, :, choice] = 1
+    assert torch.allclose(
+        topk_mask_blue[:, :, feature_idx], torch.ones_like(topk_mask_blue[:, :, feature_idx])
+    )
+    assert torch.allclose(
+        topk_mask_red[:, :, feature_idx], torch.zeros_like(topk_mask_red[:, :, feature_idx])
+    )
+
+    out_red = topk_model_fn(batch, topk_mask_red)
+    out_blue = topk_model_fn(batch, topk_mask_blue)
+    out_blue_spd = out_blue.spd_topk_model_output[:, instance_idx, :]
+    out_red_spd = out_red.spd_topk_model_output[:, instance_idx, :]
+    out_target = out_blue.target_model_output[:, instance_idx, :]
+
+    if subtract_inputs:
+        out_blue_spd = out_blue_spd - batch[:, instance_idx, :]
+        out_red_spd = out_red_spd - batch[:, instance_idx, :]
+        out_target = out_target - batch[:, instance_idx, :]
+
+    x = torch.arange(n_features)
+    for s in range(batch_size):
+        y = out_blue_spd[s, :].detach().cpu()
+        ax.plot(x, y, color=cmap_blues(s / batch_size), lw=0.5)
+        y = out_red_spd[s, :].detach().cpu()
+        ax.plot(x, y, color=cmap_reds(s / batch_size), lw=0.5)
+    ax.plot([], [], color="blue", label="SPD with right subnet")
+    ax.plot([], [], color="red", label="SPD without right subnet")
+    ax.scatter(
+        x, out_target[0, :].detach().cpu(), color="wheat", label="Target", marker=".", zorder=-1
+    )
+    ax.set_xlabel("Output index")
+    ax.set_ylabel("Output")
+    ax.set_title(f"SPD model output for increasing number of subnets, feature {feature_idx}")
+    ax.legend()
+    return {"feature_response_with_subnets": fig}
 
 
 def _calculate_snr(
@@ -519,3 +600,60 @@ def plot_virtual_weights_target_spd(
             norm=norm,
         )
     return fig
+
+
+def plot_resid_vs_mlp_out(
+    model: ResidualMLPModel,
+    device: str,
+    ax: plt.Axes,
+    topk_model_fn: Callable[
+        [Float[Tensor, "batch n_instances n_features"], Float[Tensor, "batch n_instances k"]],
+        SPDOutputs,
+    ]
+    | None = None,
+    subnet_indices: Float[Tensor, " k"] | None = None,
+    instance_idx: int = 0,
+    feature_idx: int = 0,
+):
+    if not torch.allclose(model.W_U.data, model.W_E.data.transpose(-2, -1)):
+        print("Warning: W_E and W_U are not tied")
+    batch_size = 1
+    n_instances = model.config.n_instances
+    n_features = model.config.n_features
+    batch = torch.zeros(batch_size, n_instances, n_features, device=device)
+    batch[:, instance_idx, feature_idx] = 1
+    out = model(batch)[0][0, instance_idx, :].cpu().detach()
+    W_E = model.W_E[instance_idx]
+    W_U = model.W_U[instance_idx]
+    target_resid = np.zeros(model.config.n_features)
+    target_resid[feature_idx] = 1
+    ax.plot(out, color="C0", label="Model output")
+    ax.scatter(feature_idx, 2, color="C0", label="Model target")
+    W_EU = einops.einsum(W_E, W_U, "f1 d_mlp, d_mlp f2 -> f1 f2").detach().cpu()[feature_idx, :]
+    ax.plot(W_EU, color="C1", label="Resid pass-through (W_E W_U)")
+    ax.scatter(feature_idx, 1, color="C1", label="Resid target")
+    mask = torch.ones_like(out).bool()
+    mask[feature_idx] = False
+    # If topk_model_fn is provided, use it to get the SPD model output
+    if topk_model_fn is not None:
+        topk_mask = torch.zeros_like(batch)
+        topk_mask[:, :, subnet_indices] = 1
+        out_topk = (
+            topk_model_fn(batch, topk_mask).spd_topk_model_output[0, instance_idx, :].detach().cpu()
+        )
+        ax.plot(out_topk, color="C2", label="SPD model output")
+    # Correlation between model output and model resid, excluding the feature of interest
+    corr_unmasked = np.corrcoef(out.cpu().detach().numpy(), W_EU.cpu().detach().numpy())[0, 1]
+    out_without_feature = out[mask].cpu().detach().numpy()
+    W_EU_without_feature = W_EU[mask].cpu().detach().numpy()
+    corr_masked = np.corrcoef(out_without_feature, W_EU_without_feature)[0, 1]
+    ax.plot([], [], color="k", label=f"Correlation (excluding f{feature_idx}) {corr_masked:.2f}")
+    ax.plot([], [], color="k", label=f"Correlation (including f{feature_idx}) {corr_unmasked:.2f}")
+    # Can we scale W_EU by a scalar to make it match the model output in mask?
+    # def difference(alpha):
+    #     return F.mse_loss( float(alpha) * W_EU[mask], out[mask])
+    # from scipy.optimize import minimize
+    # res = minimize(difference, x0=0.1, method="Nelder-Mead")
+    # ax.plot(W_EU * float(res.x[0]), color="C2", label="Scaled W_E W_U")
+    ax.legend(ncols=3)
+    ax.set_title(f"Instance {instance_idx}, feature {feature_idx}")

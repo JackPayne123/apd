@@ -12,6 +12,7 @@ from spd.experiments.resid_mlp.plotting import (
     calculate_virtual_weights,
     plot_2d_snr,
     plot_individual_feature_response,
+    plot_resid_vs_mlp_out,
     relu_contribution_plot,
 )
 from spd.experiments.resid_mlp.resid_mlp_dataset import ResidualMLPDataset
@@ -20,9 +21,11 @@ from spd.types import ModelPath
 from spd.utils import set_seed
 
 # %% Load model and config
-path: ModelPath = "wandb:spd-train-resid-mlp/runs/zyvoilmr"
+
+
 set_seed(0)
 device = "cuda" if torch.cuda.is_available() else "cpu"
+path: ModelPath = "wandb:spd-train-resid-mlp/runs/qbpuju4j"
 model, train_config_dict, label_coeffs = ResidualMLPModel.from_pretrained(path)
 model = model.to(device)
 train_config = ResidMLPTrainConfig(**train_config_dict)
@@ -54,6 +57,21 @@ fig = plot_individual_feature_response(
     sweep=True,
 )
 plt.show()
+
+# %%
+
+
+instance_idx = 0
+nrows = 10
+fig, axs = plt.subplots(nrows=nrows, ncols=1, constrained_layout=True, figsize=(10, 3 + 4 * nrows))
+fig.suptitle(f"Model {path}")
+for i in range(nrows):
+    ax = axs[i]  # type: ignore
+    plot_resid_vs_mlp_out(
+        model=model, device=device, ax=ax, instance_idx=instance_idx, feature_idx=i
+    )
+plt.show()
+
 
 # %% Show connection strength between ReLUs and features
 virtual_weights = calculate_virtual_weights(model=model, device=device)
