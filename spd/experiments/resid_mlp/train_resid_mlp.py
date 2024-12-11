@@ -1,6 +1,7 @@
 """Trains a residual linear model on one-hot input vectors."""
 
 import json
+from datetime import datetime
 from pathlib import Path
 from typing import Literal, Self
 
@@ -113,7 +114,7 @@ def train(
         yaml.dump(config.model_dump(mode="json"), f, indent=2)
     logger.info(f"Saved config to {config_path}")
     if config.wandb_project:
-        wandb.save(str(config_path), base_path=out_dir)
+        wandb.save(str(config_path), base_path=out_dir, policy="now")
 
     # Save the coefficients used to generate the labels
     assert isinstance(dataloader.dataset, ResidualMLPDataset)
@@ -124,7 +125,7 @@ def train(
         json.dump(label_coeffs, f)
     logger.info(f"Saved label coefficients to {label_coeffs_path}")
     if config.wandb_project:
-        wandb.save(str(label_coeffs_path), base_path=out_dir)
+        wandb.save(str(label_coeffs_path), base_path=out_dir, policy="now")
 
     optimizer = torch.optim.AdamW(trainable_params, lr=config.lr, weight_decay=0.01)
 
@@ -163,7 +164,7 @@ def train(
     model_path = out_dir / "resid_mlp.pth"
     torch.save(model.state_dict(), model_path)
     if config.wandb_project:
-        wandb.save(str(model_path), base_path=out_dir)
+        wandb.save(str(model_path), base_path=out_dir, policy="now")
     print(f"Saved model to {model_path}")
 
     # Calculate final losses by averaging many batches
@@ -191,7 +192,8 @@ def run_train(config: ResidMLPTrainConfig, device: str) -> Float[Tensor, " n_ins
         f"identity_embedding_{config.fixed_identity_embedding}_bias_{model_cfg.in_bias}_"
         f"{model_cfg.out_bias}_loss{config.loss_type}"
     )
-    out_dir = Path(__file__).parent / "out" / run_name
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")[:-3]
+    out_dir = Path(__file__).parent / "out" / f"{run_name}_{timestamp}"
 
     model = ResidualMLPModel(config=model_cfg).to(device)
 

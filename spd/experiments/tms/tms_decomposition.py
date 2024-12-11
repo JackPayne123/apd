@@ -4,6 +4,7 @@ Note that the first instance index is fixed to the identity matrix. This is done
 the losses of the "correct" solution during training.
 """
 
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -276,8 +277,8 @@ def save_target_model_info(
         yaml.dump(tms_model_train_config_dict, f, indent=2)
 
     if save_to_wandb:
-        wandb.save(str(out_dir / "tms.pth"), base_path=out_dir)
-        wandb.save(str(out_dir / "tms_train_config.yaml"), base_path=out_dir)
+        wandb.save(str(out_dir / "tms.pth"), base_path=out_dir, policy="now")
+        wandb.save(str(out_dir / "tms_train_config.yaml"), base_path=out_dir, policy="now")
 
 
 def main(
@@ -305,13 +306,14 @@ def main(
     if config.wandb_project:
         assert wandb.run, "wandb.run must be initialized before training"
         wandb.run.name = run_name
-    out_dir = Path(__file__).parent / "out" / run_name
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")[:-3]
+    out_dir = Path(__file__).parent / "out" / f"{run_name}_{timestamp}"
     out_dir.mkdir(parents=True, exist_ok=True)
 
     with open(out_dir / "final_config.yaml", "w") as f:
         yaml.dump(config.model_dump(mode="json"), f, indent=2)
     if config.wandb_project:
-        wandb.save(str(out_dir / "final_config.yaml"), base_path=out_dir)
+        wandb.save(str(out_dir / "final_config.yaml"), base_path=out_dir, policy="now")
 
     save_target_model_info(
         save_to_wandb=config.wandb_project is not None,

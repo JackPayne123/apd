@@ -1,6 +1,7 @@
 """Residual Linear decomposition script."""
 
 import json
+from datetime import datetime
 from functools import partial
 from pathlib import Path
 from typing import Any
@@ -368,9 +369,9 @@ def save_target_model_info(
         json.dump(label_coeffs.detach().cpu().tolist(), f, indent=2)
 
     if save_to_wandb:
-        wandb.save(str(out_dir / "resid_mlp.pth"), base_path=out_dir)
-        wandb.save(str(out_dir / "resid_mlp_train_config.yaml"), base_path=out_dir)
-        wandb.save(str(out_dir / "label_coeffs.json"), base_path=out_dir)
+        wandb.save(str(out_dir / "resid_mlp.pth"), base_path=out_dir, policy="now")
+        wandb.save(str(out_dir / "resid_mlp_train_config.yaml"), base_path=out_dir, policy="now")
+        wandb.save(str(out_dir / "label_coeffs.json"), base_path=out_dir, policy="now")
 
 
 def main(
@@ -404,14 +405,15 @@ def main(
     if config.wandb_project:
         assert wandb.run, "wandb.run must be initialized before training"
         wandb.run.name = run_name
-    out_dir = Path(__file__).parent / "out" / run_name
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")[:-3]
+    out_dir = Path(__file__).parent / "out" / f"{run_name}_{timestamp}"
     out_dir.mkdir(parents=True, exist_ok=True)
 
     # Save config
     with open(out_dir / "final_config.yaml", "w") as f:
         yaml.dump(config.model_dump(mode="json"), f, indent=2)
     if config.wandb_project:
-        wandb.save(str(out_dir / "final_config.yaml"), base_path=out_dir)
+        wandb.save(str(out_dir / "final_config.yaml"), base_path=out_dir, policy="now")
 
     save_target_model_info(
         save_to_wandb=config.wandb_project is not None,
@@ -433,6 +435,8 @@ def main(
     # Use the target_model's embedding matrix and don't train it further
     model.W_E.data[:, :] = target_model.W_E.data.detach().clone()
     model.W_E.requires_grad = False
+    model.W_U.data[:, :] = target_model.W_U.data.detach().clone()
+    model.W_U.requires_grad = False
 
     # Copy the biases from the target model to the SPD model and set requires_grad to False
     for i in range(target_model.config.n_layers):

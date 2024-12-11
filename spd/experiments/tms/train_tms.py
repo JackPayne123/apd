@@ -4,6 +4,7 @@ https://colab.research.google.com/github/anthropics/toy-models-of-superposition/
 
 import warnings
 from collections.abc import Callable
+from datetime import datetime
 from pathlib import Path
 from typing import Literal, Self
 
@@ -202,13 +203,14 @@ def run_train(config: TMSTrainConfig, device: str) -> None:
     run_name = (
         f"tms_n-features{model_cfg.n_features}_n-hidden{model_cfg.n_hidden}_"
         f"n-hidden-layers{model_cfg.n_hidden_layers}_n-instances{model_cfg.n_instances}_"
-        f"seed{config.seed}"
+        f"feat_prob{config.feature_probability}_seed{config.seed}"
     )
     if config.fixed_identity_hidden_layers:
         run_name += "_fixed-identity"
     elif config.fixed_random_hidden_layers:
         run_name += "_fixed-random"
-    out_dir = Path(__file__).parent / "out" / run_name
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")[:-3]
+    out_dir = Path(__file__).parent / "out" / f"{run_name}_{timestamp}"
     out_dir.mkdir(parents=True, exist_ok=True)
 
     if config.wandb_project:
@@ -219,7 +221,7 @@ def run_train(config: TMSTrainConfig, device: str) -> None:
     with open(config_path, "w") as f:
         yaml.dump(config.model_dump(mode="json"), f, indent=2)
     if config.wandb_project:
-        wandb.save(str(config_path), base_path=out_dir)
+        wandb.save(str(config_path), base_path=out_dir, policy="now")
     logger.info(f"Saved config to {config_path}")
 
     train(
@@ -232,7 +234,7 @@ def run_train(config: TMSTrainConfig, device: str) -> None:
     model_path = out_dir / "tms.pth"
     torch.save(model.state_dict(), model_path)
     if config.wandb_project:
-        wandb.save(str(model_path), base_path=out_dir)
+        wandb.save(str(model_path), base_path=out_dir, policy="now")
     logger.info(f"Saved model to {model_path}")
 
     if model_cfg.n_hidden == 2:
@@ -249,10 +251,10 @@ if __name__ == "__main__":
     config = TMSTrainConfig(
         wandb_project="spd-train-tms",
         tms_model_config=TMSModelConfig(
-            n_features=5,
-            n_hidden=2,
-            n_hidden_layers=1,
-            n_instances=12,
+            n_features=50,
+            n_hidden=20,
+            n_hidden_layers=0,
+            n_instances=6,
             device=device,
         ),
         feature_probability=0.05,
@@ -261,7 +263,7 @@ if __name__ == "__main__":
         seed=0,
         lr=5e-3,
         data_generation_type="at_least_zero_active",
-        fixed_identity_hidden_layers=True,
+        fixed_identity_hidden_layers=False,
         fixed_random_hidden_layers=False,
     )
 

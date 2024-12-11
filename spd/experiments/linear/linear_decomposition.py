@@ -1,5 +1,6 @@
 """Linear decomposition script."""
 
+from datetime import datetime
 from pathlib import Path
 
 import fire
@@ -66,13 +67,14 @@ def main(
     if config.wandb_project:
         assert wandb.run, "wandb.run must be initialized before training"
         wandb.run.name = run_name
-    out_dir = Path(__file__).parent / "out" / run_name
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")[:-3]
+    out_dir = Path(__file__).parent / "out" / f"{run_name}_{timestamp}"
     out_dir.mkdir(parents=True, exist_ok=True)
 
     with open(out_dir / "final_config.yaml", "w") as f:
         yaml.dump(config.model_dump(mode="json"), f, indent=2)
     if config.wandb_project:
-        wandb.save(str(out_dir / "final_config.yaml"), base_path=out_dir)
+        wandb.save(str(out_dir / "final_config.yaml"), base_path=out_dir, policy="now")
 
     if config.spd_type == "full_rank":
         dlc_model = DeepLinearComponentFullRankModel(
