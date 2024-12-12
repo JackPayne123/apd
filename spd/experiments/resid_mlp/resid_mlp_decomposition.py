@@ -64,7 +64,9 @@ def get_run_name(
         run_suffix = config.wandb_run_name
     else:
         run_suffix = get_common_run_name_suffix(config)
-        run_suffix += f"ft{n_features}_lay{n_layers}_resid{d_resid}_mlp{d_mlp}_k{k}_m{m}"
+        run_suffix += f"ft{n_features}_lay{n_layers}_resid{d_resid}_mlp{d_mlp}_k{k}"
+        if m is not None:
+            run_suffix += f"_m{m}"
     return config.wandb_run_name_prefix + run_suffix
 
 
@@ -497,14 +499,16 @@ def main(
     model.W_U.data[:, :] = target_model.W_U.data.detach().clone()
     model.W_U.requires_grad = False
 
-    # # ############ COPY ALIVE SUBNETS FROM FIRST PASS MODEL
+    # ############ COPY ALIVE SUBNETS FROM FIRST PASS MODEL
     # first_pass_model, _, _ = ResidualMLPSPDRankPenaltyModel.from_pretrained(
-    #     "wandb:spd-resid-mlp/runs/igfxwtmt"
+    #     # "wandb:spd-resid-mlp/runs/igfxwtmt"
+    #     "wandb:spd-resid-mlp/runs/cg60411u"
+    #     # "wandb:spd-resid-mlp/runs/igfxwtmt"
     # )
     # first_pass_model.to(device)
 
     # n_active_features_per_subnet = calc_n_active_features_per_subnet(
-    #     first_pass_model, cutoff=1e-2, device=device
+    #     first_pass_model, cutoff=5e-2, device=device
     # )
     # dead_subnets = (n_active_features_per_subnet == 0).bool()
 
@@ -530,7 +534,7 @@ def main(
     #         model.layers[i].linear2.B.data[:, :, :, :],
     #         first_pass_model.layers[i].linear2.B.data[:, :, :, :],
     #     )
-    # # ############
+    # ############
 
     # Copy the biases from the target model to the SPD model and set requires_grad to False
     for i in range(target_model.config.n_layers):
