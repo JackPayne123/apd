@@ -74,17 +74,20 @@ def plot_loss_curve(ax: plt.Axes, losses: dict[int, dict[int, float]], label: st
 
 def naive_loss(n_features: int, d_mlp: int, p: float, bias: bool, embed: str) -> float:
     if embed == "random":
-        if bias:
-            return (n_features - d_mlp) * (8 - 3 * p) * p / 48
+        if bias:  # noqa: SIM108
+            loss = (n_features - d_mlp) * (8 - 3 * p) * p / 48
         else:
-            return (n_features - d_mlp) * p / 6
+            # d_mlp features perfectly (loss 0), the others not at all (loss 1/6
+            # because 0.5*\int_0^1 x^2 = 1/3 if active) so (n_features - d_mlp) * 1/6 * p
+            loss = (n_features - d_mlp) * p / 6
     elif embed == "trained":
-        if bias:
-            return (n_features - d_mlp) * (4 - 3 * p) * p / 48
+        if bias:  # noqa: SIM108
+            loss = (n_features - d_mlp) * (4 - 3 * p) * p / 48
         else:
-            return (n_features - d_mlp) * p / 12
+            loss = (n_features - d_mlp) * p / 12
     else:
         raise ValueError(f"Unknown embedding type {embed}")
+    return loss / n_features
 
 
 if __name__ == "__main__":

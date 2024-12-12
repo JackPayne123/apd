@@ -8,7 +8,9 @@ import matplotlib.pyplot as plt
 import numpy as np
 import torch
 from jaxtyping import Float
+from pydantic import PositiveFloat
 from torch import Tensor
+from tqdm import tqdm
 
 from spd.experiments.resid_mlp.models import ResidualMLPModel, ResidualMLPSPDRankPenaltyModel
 from spd.experiments.resid_mlp.plotting import (
@@ -22,6 +24,7 @@ from spd.experiments.resid_mlp.plotting import (
     spd_calculate_virtual_weights,
 )
 from spd.experiments.resid_mlp.resid_mlp_dataset import ResidualMLPDataset
+from spd.experiments.resid_mlp.scaling_resid_mlp_training import naive_loss
 from spd.run_spd import ResidualMLPTaskConfig, calc_recon_mse
 from spd.utils import SPDOutputs, run_spd_forward_pass, set_seed
 
@@ -29,8 +32,8 @@ from spd.utils import SPDOutputs, run_spd_forward_pass, set_seed
 device = "cuda" if torch.cuda.is_available() else "cpu"
 print(f"Using device: {device}")
 set_seed(0)  # You can change this seed if needed
-path = "wandb:spd-resid-mlp/runs/8st8rale"  # Dan's R1
-# path = "wandb:spd-resid-mlp/runs/kkstog7o"  # Dan's R2
+# path = "wandb:spd-resid-mlp/runs/8st8rale"  # Dan's R1
+path = "wandb:spd-resid-mlp/runs/kkstog7o"  # Dan's R2
 # path = "wandb:spd-resid-mlp/runs/2ala9kjy"  # Stefan's initial try
 # path = "wandb:spd-resid-mlp/runs/qmio77cl"  # Stefan's run with initial-hardcoded topk
 # Load the pretrained SPD model
@@ -61,7 +64,7 @@ data_generation_types: list[
 ] = ["at_least_zero_active", "exactly_one_active", "exactly_two_active"]
 for data_generation_type in data_generation_types:
     batch_size = 10_000
-    dataset = ResidualMLPDataset(
+    test_dataset = ResidualMLPDataset(
         n_instances=model.config.n_instances,
         n_features=model.config.n_features,
         feature_probability=config.task_config.feature_probability,
@@ -70,7 +73,7 @@ for data_generation_type in data_generation_types:
         data_generation_type=data_generation_type,
     )
     instance_idx = 0
-    batch, labels = dataset.generate_batch(batch_size)
+    batch, labels = test_dataset.generate_batch(batch_size)
     batch = batch.to(device)
     labels = labels.to(device)
     target_model_output, _, _ = target_model(batch)
@@ -212,6 +215,8 @@ fig.show()
 
 # %% Observe how well the model reconstructs the noise
 
+# Or bar chart (red/blue) for SPD/target, diff from goal (one-hot)
+
 instance_idx = 0
 nrows = 1
 feature_idx = 15
@@ -228,7 +233,8 @@ plot_resid_vs_mlp_out(
 )
 
 # %% Linearity test: Enable one subnet after the other
-
+# This could be little-violins
+# Or fill_betweens
 n_features = model.config.n_features
 feature_idx = 15
 subtract_inputs = True  # TODO TRUE subnet
@@ -245,23 +251,20 @@ if fig is not None:
     plt.show()
 
 
-# %% Feature-relu contribution plots
-
-fig1, fig2 = plot_spd_relu_contribution(model, target_model, device, k_plot_limit=3)
-fig1.suptitle("How much does each ReLU contribute to each feature?")
-fig2.suptitle("How much does each feature route through each ReLU?")
-
-
-# %% Individual feature response
-def spd_model_fn(batch: Float[Tensor, "batch n_instances"]):
+# %% Causal Scrubbing-esque test
+def spd_model_fn(
+    batch: Float[Tensor, "batch n_instances n_features"],
+    topk: PositiveFloat = config.topk,
+    batch_topk: bool = config.batch_topk,
+) -> Float[Tensor, "batch n_instances n_features"]:
     assert config.topk is not None
     return run_spd_forward_pass(
         spd_model=model,
         target_model=target_model,
         input_array=batch,
         attribution_type=config.attribution_type,
-        batch_topk=config.batch_topk,
-        topk=config.topk,
+        batch_topk=batch_topk,
+        topk=topk,
         distil_from_target=config.distil_from_target,
     ).spd_topk_model_output
 
@@ -269,6 +272,119 @@ def spd_model_fn(batch: Float[Tensor, "batch n_instances"]):
 def target_model_fn(batch: Float[Tensor, "batch n_instances"]):
     return target_model(batch)[0]
 
+
+for data_generation_type in data_generation_types:
+    batch_size = 5_000
+    n_batches = 20
+    dataset = ResidualMLPDataset(
+        n_instances=model.config.n_instances,
+        n_features=model.config.n_features,
+        feature_probability=config.task_config.feature_probability,
+        device=device,
+        calc_labels=False,  # Our labels will be the output of the target model
+        data_generation_type=data_generation_type,
+    )
+
+    # Initialize tensors to store all losses
+    all_loss_scrubbed = []
+    all_loss_antiscrubbed = []
+    all_loss_random = []
+    all_loss_spd = []
+    all_loss_zero = []
+
+    for _ in tqdm(range(n_batches)):
+        batch, labels = dataset.generate_batch(batch_size)
+        batch = batch.to(device)
+        active_features = torch.where(batch != 0)
+        # Randomly assign 0 or 1 to topk mask
+        random_topk_mask = torch.randint(
+            0, 2, (batch_size, model.config.n_instances, model.config.k)
+        )
+        scrubbed_topk_mask = torch.randint(
+            0, 2, (batch_size, model.config.n_instances, model.config.k)
+        )
+        antiscrubbed_topk_mask = torch.randint(
+            0, 2, (batch_size, model.config.n_instances, model.config.k)
+        )
+        for b, i, f in zip(*active_features, strict=False):
+            s = subnet_indices[f.item()]
+            scrubbed_topk_mask[b, i, s] = 1
+            antiscrubbed_topk_mask[b, i, s] = 0
+        if data_generation_type == "at_least_zero_active":
+            topk = config.topk
+            batch_topk = config.batch_topk
+        elif data_generation_type == "exactly_one_active":
+            topk = 1
+            batch_topk = True
+        elif data_generation_type == "exactly_two_active":
+            topk = 2
+            batch_topk = True
+        else:
+            raise ValueError(f"Unknown data generation type: {data_generation_type}")
+        out_spd = spd_model_fn(batch, topk=topk, batch_topk=batch_topk)
+        out_random = top1_model_fn(batch, random_topk_mask).spd_topk_model_output
+        out_scrubbed = top1_model_fn(batch, scrubbed_topk_mask).spd_topk_model_output
+        out_antiscrubbed = top1_model_fn(batch, antiscrubbed_topk_mask).spd_topk_model_output
+        out_target = target_model_fn(batch)
+        # Calc MSE losses
+        all_loss_scrubbed.append(
+            ((out_scrubbed - out_target) ** 2).mean(dim=-1).flatten().detach().cpu()
+        )
+        all_loss_antiscrubbed.append(
+            ((out_antiscrubbed - out_target) ** 2).mean(dim=-1).flatten().detach().cpu()
+        )
+        all_loss_random.append(
+            ((out_random - out_target) ** 2).mean(dim=-1).flatten().detach().cpu()
+        )
+        all_loss_spd.append(((out_spd - out_target) ** 2).mean(dim=-1).flatten().detach().cpu())
+        all_loss_zero.append(
+            ((torch.zeros_like(out_target) - out_target) ** 2).mean(dim=-1).flatten().detach().cpu()
+        )
+
+    # Concatenate all batches
+    loss_scrubbed = torch.cat(all_loss_scrubbed)
+    loss_antiscrubbed = torch.cat(all_loss_antiscrubbed)
+    loss_random = torch.cat(all_loss_random)
+    loss_spd = torch.cat(all_loss_spd)
+    loss_zero = torch.cat(all_loss_zero)
+
+    # Print & plot the above
+    loss_naive = naive_loss(
+        n_features=model.config.n_features,
+        d_mlp=model.config.d_mlp,
+        p=config.task_config.feature_probability,
+        bias=model.layers[0].linear1.bias is not None,
+        embed="random",
+    )
+
+    print(f"Loss SPD:           {loss_spd.mean().item():.6f}")
+    print(f"Loss scrubbed:      {loss_scrubbed.mean().item():.6f}")
+    print(f"Loss antiscrubbed:  {loss_antiscrubbed.mean().item():.6f}")
+    print(f"Loss naive:         {loss_naive:.6f}")
+    print(f"Loss random:        {loss_random.mean().item():.6f}")
+    print(f"Loss zero:          {loss_zero.mean().item():.6f}")
+
+    # TODO re-run all with "exactly_one" to address orange bump: maybe SPD is using 2 subnets for some
+    # features
+    # Would explain scrubbed and antiscrubbed bimodality
+    # And random (which is just scrubbed + antiscrubbed)
+
+    fig, ax = plt.subplots(figsize=(15, 5))
+    log_bins = np.geomspace(1e-7, loss_zero.max().item(), 50).tolist()
+    ax.hist(loss_spd, bins=log_bins, label="SPD", alpha=0.5)
+    ax.hist(loss_scrubbed, bins=log_bins, label="Scrubbed", histtype="step")
+    ax.hist(loss_antiscrubbed, bins=log_bins, label="Antiscrubbed", histtype="step")
+    ax.hist(loss_random, bins=log_bins, label="Random", histtype="step")
+    ax.hist(loss_zero, bins=log_bins, label="Zero", histtype="step")
+    ax.axvline(loss_naive, color="black", linestyle="--", label="Naive")
+    ax.legend()
+    ax.set_ylabel(f"Count (out of {batch_size})")
+    ax.set_xlabel("Recon loss")
+    ax.set_xscale("log")
+    fig.suptitle(f"Losses for {data_generation_type}")
+    fig.show()
+
+# %% Individual feature response
 
 fig, axes = plt.subplots(nrows=2, ncols=2, figsize=(15, 15), constrained_layout=True)
 axes = np.atleast_2d(axes)  # type: ignore
@@ -333,6 +449,12 @@ analyze_per_feature_performance(
 )
 ax.legend()
 fig.show()
+
+# %% Feature-relu contribution plots
+
+fig1, fig2 = plot_spd_relu_contribution(model, target_model, device, k_plot_limit=3)
+fig1.suptitle("How much does each ReLU contribute to each feature?")
+fig2.suptitle("How much does each feature route through each ReLU?")
 
 
 # %% Virtual weights
