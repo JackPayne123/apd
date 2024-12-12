@@ -209,7 +209,7 @@ def plot_multiple_subnetwork_params(
 
 def plot_subnet_categories(model: ResidualMLPSPDRankPenaltyModel, device: str) -> plt.Figure:
     n_active_features_per_subnet = calc_n_active_features_per_subnet(
-        model, cutoff=1e-2, device=device
+        model, cutoff=5e-2, device=device
     )
     n_dead_subnets = (n_active_features_per_subnet == 0).sum(dim=-1).detach().cpu().tolist()
     n_monosemantic_subnets = (n_active_features_per_subnet == 1).sum(dim=-1).detach().cpu().tolist()
