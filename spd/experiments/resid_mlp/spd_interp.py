@@ -3,9 +3,10 @@
 
 from typing import Literal
 
-import einops
 import matplotlib.pyplot as plt
 import numpy as np
+import pandas as pd
+import seaborn as sns
 import torch
 from jaxtyping import Float
 from pydantic import PositiveFloat
@@ -21,7 +22,6 @@ from spd.experiments.resid_mlp.plotting import (
     plot_resid_vs_mlp_out,
     plot_spd_relu_contribution,
     plot_virtual_weights_target_spd,
-    spd_calculate_virtual_weights,
 )
 from spd.experiments.resid_mlp.resid_mlp_dataset import ResidualMLPDataset
 from spd.experiments.resid_mlp.scaling_resid_mlp_training import naive_loss
@@ -33,8 +33,8 @@ device = "cuda" if torch.cuda.is_available() else "cpu"
 print(f"Using device: {device}")
 set_seed(0)  # You can change this seed if needed
 # path = "wandb:spd-resid-mlp/runs/8st8rale"  # Dan's R1
-path = "wandb:spd-resid-mlp/runs/kkstog7o"  # Dan's R2
-# path = "wandb:spd-resid-mlp/runs/2ala9kjy"  # Stefan's initial try
+# path = "wandb:spd-resid-mlp/runs/kkstog7o"  # Dan's R2
+path = "wandb:spd-resid-mlp/runs/2ala9kjy"  # Stefan's initial try
 # path = "wandb:spd-resid-mlp/runs/qmio77cl"  # Stefan's run with initial-hardcoded topk
 # Load the pretrained SPD model
 model, config, label_coeffs = ResidualMLPSPDRankPenaltyModel.from_pretrained(path)
@@ -173,6 +173,7 @@ def top1_model_fn(
     batch: Float[Tensor, "batch n_instances n_features"],
     topk_mask: Float[Tensor, "batch n_instances k"] | None,
 ) -> SPDOutputs:
+    """Top1 if topk_mask is None, else just use provided topk_mask"""
     topk_mask = topk_mask.to(device) if topk_mask is not None else None
     assert config.topk is not None
     return run_spd_forward_pass(
@@ -187,11 +188,10 @@ def top1_model_fn(
     )
 
 
+# %% Measure polysemanticity:
+
 # Dictionary feature_idx -> subnet_idx
 subnet_indices = get_feature_subnet_map(top1_model_fn, device, model.config, instance_idx=0)
-
-
-# %% Measure polysemanticity:
 
 duplicity = {}  # subnet_idx -> number of features that use it
 for subnet_idx in range(model.config.k):
@@ -214,8 +214,7 @@ fig.suptitle(f"Polysemanticity of model: {path}")
 fig.show()
 
 # %% Observe how well the model reconstructs the noise
-
-# Or bar chart (red/blue) for SPD/target, diff from goal (one-hot)
+# TODO: Or bar chart for SPD/target, diff from goal (one-hot)
 
 instance_idx = 0
 nrows = 1
@@ -233,8 +232,12 @@ plot_resid_vs_mlp_out(
 )
 
 # %% Linearity test: Enable one subnet after the other
-# This could be little-violins
-# Or fill_betweens
+# TODO This could be little-violins. Or fill_betweens
+
+
+# Dictionary feature_idx -> subnet_idx
+subnet_indices = get_feature_subnet_map(top1_model_fn, device, model.config, instance_idx=0)
+
 n_features = model.config.n_features
 feature_idx = 15
 subtract_inputs = True  # TODO TRUE subnet
@@ -273,10 +276,13 @@ def target_model_fn(batch: Float[Tensor, "batch n_instances"]):
     return target_model(batch)[0]
 
 
+# Dictionary feature_idx -> subnet_idx
+subnet_indices = get_feature_subnet_map(top1_model_fn, device, model.config, instance_idx=0)
+
 for data_generation_type in data_generation_types:
     batch_size = 5_000
     n_batches = 20
-    dataset = ResidualMLPDataset(
+    test_dataset = ResidualMLPDataset(
         n_instances=model.config.n_instances,
         n_features=model.config.n_features,
         feature_probability=config.task_config.feature_probability,
@@ -293,7 +299,7 @@ for data_generation_type in data_generation_types:
     all_loss_zero = []
 
     for _ in tqdm(range(n_batches)):
-        batch, labels = dataset.generate_batch(batch_size)
+        batch, labels = test_dataset.generate_batch(batch_size)
         batch = batch.to(device)
         active_features = torch.where(batch != 0)
         # Randomly assign 0 or 1 to topk mask
@@ -364,10 +370,9 @@ for data_generation_type in data_generation_types:
     print(f"Loss random:        {loss_random.mean().item():.6f}")
     print(f"Loss zero:          {loss_zero.mean().item():.6f}")
 
-    # TODO re-run all with "exactly_one" to address orange bump: maybe SPD is using 2 subnets for some
-    # features
-    # Would explain scrubbed and antiscrubbed bimodality
-    # And random (which is just scrubbed + antiscrubbed)
+    # TODO orange bump: maybe SPD is using 2 subnets for some
+    # features? Would explain scrubbed and antiscrubbed bimodality,
+    # and random (which is just scrubbed + antiscrubbed) too.
 
     fig, ax = plt.subplots(figsize=(15, 5))
     log_bins = np.geomspace(1e-7, loss_zero.max().item(), 50).tolist()
@@ -383,6 +388,161 @@ for data_generation_type in data_generation_types:
     ax.set_xscale("log")
     fig.suptitle(f"Losses for {data_generation_type}")
     fig.show()
+
+
+# %% "Forgetting"-style test for Lee. Let's say we want to ablate performance for all odd features,
+# while preserving performance for even features.
+
+batch_size = 1000
+# target_model_train_config_dict
+test_dataset = ResidualMLPDataset(
+    n_instances=model.config.n_instances,
+    n_features=model.config.n_features,
+    feature_probability=config.task_config.feature_probability,
+    device=device,
+    calc_labels=True,  # Our labels will be the output of the target model
+    label_type=target_model_train_config_dict["label_type"],
+    act_fn_name=target_model_train_config_dict["resid_mlp_config"]["act_fn_name"],
+    label_fn_seed=target_model_train_config_dict["label_fn_seed"],
+    label_coeffs=target_label_coeffs,
+    data_generation_type="at_least_zero_active",
+)
+batch, labels = test_dataset.generate_batch(batch_size)
+batch = batch.to(device)
+labels = labels.to(device)
+instance_idx = 0
+
+# Dictionary feature_idx -> subnet_idx
+subnet_indices = get_feature_subnet_map(top1_model_fn, device, model.config, instance_idx=0)
+
+subnets_corresponding_to_even_features = [
+    subnet_indices[f] for f in range(model.config.n_features) if f % 2 == 0
+]
+topk_mask = torch.zeros_like(batch)
+for subnet_idx in subnets_corresponding_to_even_features:
+    topk_mask[:, instance_idx, subnet_idx] = 1
+
+out_spd = spd_model_fn(batch)
+
+out = top1_model_fn(batch, topk_mask=topk_mask)
+out_target = target_model_fn(batch)
+out_ablated = out.spd_topk_model_output
+label_loss_target = (out_target - labels) ** 2
+label_loss_spd = (out_spd - labels) ** 2
+label_loss_ablated = (out_ablated - labels) ** 2
+target_loss_spd = (out_target - out_spd) ** 2
+target_loss_ablated = (out_target - out_ablated) ** 2
+# Find samples in batch that contain only odd features
+# odd_features = [i for i in range(model.config.n_features) if i % 2 == 1]
+# even_features = [i for i in range(model.config.n_features) if i % 2 == 0]
+odd_samples = torch.where(batch[:, instance_idx, 0::2].sum(dim=-1) != 0)[0].cpu().detach()
+even_samples = torch.where(batch[:, instance_idx, 1::2].sum(dim=-1) != 0)[0].cpu().detach()
+# Exclude samples containing both odd and even features
+
+both_odd_and_even_samples = np.intersect1d(odd_samples.numpy(), even_samples.numpy())
+only_odd_samples = np.setdiff1d(odd_samples.numpy(), both_odd_and_even_samples)
+only_even_samples = np.setdiff1d(even_samples.numpy(), both_odd_and_even_samples)
+
+label_loss_target_odd = (
+    label_loss_target[only_odd_samples].mean(dim=-1).flatten().detach().cpu().numpy()
+)  # noqa: E501
+label_loss_spd_odd = label_loss_spd[only_odd_samples].mean(dim=-1).flatten().detach().cpu().numpy()  # noqa: E501
+label_loss_ablated_odd = (
+    label_loss_ablated[only_odd_samples].mean(dim=-1).flatten().detach().cpu().numpy()
+)  # noqa: E501
+label_loss_target_even = (
+    label_loss_target[only_even_samples].mean(dim=-1).flatten().detach().cpu().numpy()
+)  # noqa: E501
+label_loss_spd_even = (
+    label_loss_spd[only_even_samples].mean(dim=-1).flatten().detach().cpu().numpy()
+)  # noqa: E501
+label_loss_ablated_even = (
+    label_loss_ablated[only_even_samples].mean(dim=-1).flatten().detach().cpu().numpy()
+)  # noqa: E501
+target_loss_spd_odd = (
+    target_loss_spd[only_odd_samples].mean(dim=-1).flatten().detach().cpu().numpy()
+)  # noqa: E501
+target_loss_spd_even = (
+    target_loss_spd[only_even_samples].mean(dim=-1).flatten().detach().cpu().numpy()
+)  # noqa: E501
+target_loss_ablated_odd = (
+    target_loss_ablated[only_odd_samples].mean(dim=-1).flatten().detach().cpu().numpy()
+)  # noqa: E501
+target_loss_ablated_even = (
+    target_loss_ablated[only_even_samples].mean(dim=-1).flatten().detach().cpu().numpy()
+)  # noqa: E501
+target_loss_target_odd = torch.zeros_like(torch.tensor(target_loss_ablated_odd)).numpy()
+target_loss_target_even = torch.zeros_like(torch.tensor(target_loss_ablated_even)).numpy()
+# Boxplot chart
+# Create a dataframe for seaborn
+data = pd.DataFrame(
+    {
+        "Label Loss": np.concatenate(
+            [
+                label_loss_target_odd,
+                label_loss_spd_odd,
+                label_loss_ablated_odd,
+                label_loss_target_even,
+                label_loss_spd_even,
+                label_loss_ablated_even,
+            ]
+        ),
+        "Target Loss": np.concatenate(
+            [
+                target_loss_target_odd,
+                target_loss_spd_odd,
+                target_loss_ablated_odd,
+                target_loss_target_even,
+                target_loss_spd_even,
+                target_loss_ablated_even,
+            ]
+        ),
+        "Model": np.repeat(
+            ["Target", "APD", "Ablated", "Target", "APD", "Ablated"],
+            [
+                len(label_loss_target_odd),
+                len(label_loss_spd_odd),
+                len(label_loss_ablated_odd),
+                len(label_loss_target_even),
+                len(label_loss_spd_even),
+                len(label_loss_ablated_even),
+            ],
+        ),
+        "Sample Type": np.repeat(
+            ["Odd", "Odd", "Odd", "Even", "Even", "Even"],
+            [
+                len(label_loss_target_odd),
+                len(label_loss_ablated_odd),
+                len(label_loss_spd_odd),
+                len(label_loss_target_even),
+                len(label_loss_ablated_even),
+                len(label_loss_spd_even),
+            ],
+        ),
+    }
+)
+
+fig, axes = plt.subplots(ncols=2, figsize=(10, 3))
+axes = np.atleast_1d(axes)  # type: ignore
+ax = axes[0]
+sns.boxplot(data=data, x="Sample Type", y="Label Loss", hue="Model", ax=ax)
+ax.set_yscale("log")
+ax.set_ylim(bottom=1e-5)
+ax.set_title("Label loss")
+ax.set_ylabel("")
+# ax.axhline(y=loss_naive, color="k", linestyle="--", label="Monosemantic neuron solution", alpha=0.5)
+ax.legend(bbox_to_anchor=(0.5, -0.05), loc="upper center", bbox_transform=fig.transFigure, ncol=3)
+
+ax = axes[1]
+sns.boxplot(data=data, x="Sample Type", y="Target Loss", hue="Model", ax=ax)
+ax.set_yscale("log")
+ax.set_ylim(bottom=1e-6)
+ax.set_title("Target loss")
+ax.set_ylabel("")
+ax.legend().remove()
+fig.savefig("ablation_story.png", bbox_inches="tight", dpi=300)
+fig.show()
+
 
 # %% Individual feature response
 
@@ -460,43 +620,3 @@ fig2.suptitle("How much does each feature route through each ReLU?")
 # %% Virtual weights
 fig = plot_virtual_weights_target_spd(target_model, model, device)
 fig.show()
-
-# %% Analysis of one feature / subnetwork, picking feature 1 because it looks sketch.
-
-# Subnet combinations relevant for feature 1
-virtual_weights = spd_calculate_virtual_weights(model, device)
-in_conns: Float[Tensor, "k1 n_features1 d_mlp"] = virtual_weights["in_conns"][0]
-out_conns: Float[Tensor, "k2 d_mlp n_features2"] = virtual_weights["out_conns"][0]
-relu_conns_sum: Float[Tensor, "k1 k2 f1 f2"] = einops.einsum(
-    in_conns, out_conns, "k1 f1 d_mlp, k2 d_mlp f2 -> k1 k2 f1 f2"
-)
-plt.matshow(relu_conns_sum[:, :, 1, 1].detach().cpu())
-plt.title("Subnet combinations relevant for feature 1")
-plt.show()
-
-# Per-neuron contribution to feature 1
-relu_conns: Float[Tensor, "k1 k2 f1 f2"] = einops.einsum(
-    in_conns, out_conns, "k1 f1 d_mlp, k2 d_mlp f2 -> k1 k2 f1 f2 d_mlp"
-)
-plt.plot(relu_conns[1, 1, 1, 1, :].detach().cpu(), label="Subnet 1 of W_in and W_out")
-plt.plot(
-    relu_conns[:, :, 1, 1, :].sum(dim=(0, 1)).detach().cpu(),
-    label="All subnets (i,j) of W_in and W_out",
-)
-plt.plot(
-    relu_conns[:, :, 1, 1, :].sum(dim=(0, 1)).detach().cpu()
-    - relu_conns[1, 1, 1, 1, :].detach().cpu(),
-    label="All subnets (i,j) != (1,1) of W_in and W_out",
-)
-plt.title("Per-neuron contribution to feature 1")
-plt.xlabel("Neuron")
-plt.ylabel("Weight")
-plt.legend()
-plt.show()
-
-# Which subnets contain the neuron-45 contribution to feature 1?
-plt.matshow(relu_conns[:, :, 1, 1, 45].detach().cpu())
-plt.title("Which subnets contain the neuron-45 contribution to feature 1?")
-print("Seems to be the diagonal k1=95, k2=95 term", relu_conns[:, :, 1, 1, 45].argmax())
-
-# %%
