@@ -214,7 +214,7 @@ def plot_subnet_categories(model: ResidualMLPSPDRankPenaltyModel, device: str) -
     n_dead_subnets = (n_active_features_per_subnet == 0).sum(dim=-1).detach().cpu().tolist()
     n_monosemantic_subnets = (n_active_features_per_subnet == 1).sum(dim=-1).detach().cpu().tolist()
     n_duosemantic_subnets = (n_active_features_per_subnet == 2).sum(dim=-1).detach().cpu().tolist()
-    n_polysemantic_subnets = (n_active_features_per_subnet > 1).sum(dim=-1).detach().cpu().tolist()
+    n_polysemantic_subnets = (n_active_features_per_subnet > 2).sum(dim=-1).detach().cpu().tolist()
 
     n_instances = len(n_dead_subnets)
     fig, ax = plt.subplots(
