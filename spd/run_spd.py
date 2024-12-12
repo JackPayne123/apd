@@ -249,6 +249,8 @@ def get_common_run_name_suffix(config: Config) -> str:
         run_suffix += f"topkrecon{config.topk_recon_coeff:.2e}_"
     if config.topk_l2_coeff is not None:
         run_suffix += f"topkl2_{config.topk_l2_coeff:.2e}_"
+    if config.schatten_pnorm is not None:
+        run_suffix += f"schatp{config.schatten_pnorm:.2e}_"
     if config.schatten_coeff is not None:
         run_suffix += f"schatten{config.schatten_coeff:.2e}_"
     if config.act_recon_coeff is not None:
@@ -399,7 +401,7 @@ def calc_schatten_loss(
         As_and_Bs_vals: List of tuples containing A and B matrices for each layer
         mask: The mask to use for the Schatten p-norm penalty. May be a binary mask (if topk) or
             a float mask (if lp sparsity).
-        p: The Schatten p-norm to use (from config.pnorm)
+        p: The Schatten p-norm to use (from config.schatten_pnorm)
         n_params: The number of parameters in the model
     Returns:
         The Schatten p-norm penalty for the topk subnetworks
@@ -871,12 +873,15 @@ def optimize(
         act_recon_loss = None
         if config.act_recon_coeff is not None:
             assert layer_acts_topk is not None
-            post_acts_after_relu = {
-                "layers.0.linear1": torch.nn.functional.relu(post_acts["layers.0.linear1"])
-            }
-            layer_acts_topk_after_relu = {
-                "layers.0.linear1": torch.nn.functional.relu(layer_acts_topk["layers.0.linear1"])
-            }
+            post_acts_after_relu = {}
+            layer_acts_topk_after_relu = {}
+            for i in range(len(model.layers)):
+                post_acts_after_relu[f"layers.{i}.linear1"] = torch.nn.functional.relu(
+                    post_acts[f"layers.{i}.linear1"]
+                )
+                layer_acts_topk_after_relu[f"layers.{i}.linear1"] = torch.nn.functional.relu(
+                    layer_acts_topk[f"layers.{i}.linear1"]
+                )
             act_recon_loss = calc_act_recon(
                 target_post_acts=post_acts_after_relu, layer_acts=layer_acts_topk_after_relu
             )
@@ -1000,7 +1005,7 @@ def optimize(
             plot_results_fn is not None
             and config.image_freq is not None
             and step % config.image_freq == 0
-            # and step > 0
+            and step > 0
         ):
             fig_dict = plot_results_fn(
                 model=model,
