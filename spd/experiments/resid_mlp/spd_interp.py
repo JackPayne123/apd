@@ -1,6 +1,8 @@
 # %% Imports
 
 
+from typing import Literal
+
 import einops
 import matplotlib.pyplot as plt
 import numpy as np
@@ -11,6 +13,7 @@ from torch import Tensor
 from spd.experiments.resid_mlp.models import ResidualMLPModel, ResidualMLPSPDRankPenaltyModel
 from spd.experiments.resid_mlp.plotting import (
     analyze_per_feature_performance,
+    get_feature_subnet_map,
     plot_feature_response_with_subnets,
     plot_individual_feature_response,
     plot_resid_vs_mlp_out,
@@ -26,8 +29,10 @@ from spd.utils import SPDOutputs, run_spd_forward_pass, set_seed
 device = "cuda" if torch.cuda.is_available() else "cpu"
 print(f"Using device: {device}")
 set_seed(0)  # You can change this seed if needed
-# path = "wandb:spd-resid-mlp/runs/2ala9kjy" #natural
-path = "wandb:spd-resid-mlp/runs/qmio77cl"  # hardcode
+path = "wandb:spd-resid-mlp/runs/8st8rale"  # Dan's R1
+# path = "wandb:spd-resid-mlp/runs/kkstog7o"  # Dan's R2
+# path = "wandb:spd-resid-mlp/runs/2ala9kjy"  # Stefan's initial try
+# path = "wandb:spd-resid-mlp/runs/qmio77cl"  # Stefan's run with initial-hardcoded topk
 # Load the pretrained SPD model
 model, config, label_coeffs = ResidualMLPSPDRankPenaltyModel.from_pretrained(path)
 assert isinstance(config.task_config, ResidualMLPTaskConfig)
@@ -37,6 +42,7 @@ target_model, target_model_train_config_dict, target_label_coeffs = (
 )
 # Print some basic information about the model
 print(f"Number of features: {model.config.n_features}")
+print(f"Feature probability: {config.task_config.feature_probability}")
 print(f"Embedding dimension: {model.config.d_embed}")
 print(f"MLP dimension: {model.config.d_mlp}")
 print(f"Number of layers: {model.config.n_layers}")
@@ -47,36 +53,77 @@ target_model = target_model.to(device)
 target_label_coeffs = target_label_coeffs.to(device)
 assert torch.allclose(target_label_coeffs, torch.tensor(label_coeffs))
 
-for data_generation_type in ["at_least_zero_active", "exactly_one_active", "exactly_two_active"]:
+
+# %% Check performance for different numbers of active features
+
+data_generation_types: list[
+    Literal["at_least_zero_active", "exactly_one_active", "exactly_two_active"]
+] = ["at_least_zero_active", "exactly_one_active", "exactly_two_active"]
+for data_generation_type in data_generation_types:
+    batch_size = 10_000
     dataset = ResidualMLPDataset(
         n_instances=model.config.n_instances,
         n_features=model.config.n_features,
         feature_probability=config.task_config.feature_probability,
         device=device,
         calc_labels=False,  # Our labels will be the output of the target model
-        data_generation_type=config.task_config.data_generation_type,
+        data_generation_type=data_generation_type,
     )
-    batch, labels = dataset.generate_batch(config.batch_size)
+    instance_idx = 0
+    batch, labels = dataset.generate_batch(batch_size)
     batch = batch.to(device)
     labels = labels.to(device)
     target_model_output, _, _ = target_model(batch)
     assert config.topk is not None
-    spd_outputs = run_spd_forward_pass(
-        spd_model=model,
-        target_model=target_model,
-        input_array=batch,
-        attribution_type=config.attribution_type,
-        batch_topk=config.batch_topk,
-        topk=config.topk,
-        distil_from_target=config.distil_from_target,
-    )
-    topk_recon_loss = calc_recon_mse(
-        spd_outputs.spd_topk_model_output, target_model_output, has_instance_dim=True
-    )
-    print(f"Topk recon loss for {data_generation_type}: {np.array(topk_recon_loss.detach().cpu())}")
+    batch_topk = data_generation_type == "at_least_zero_active"
+    print(f"Topk recon loss for {data_generation_type} (batch_topk={batch_topk}):")
+    topk_recon_losses = []
+    feature_subnet_correlations = []
+    topks = [config.topk, 1, 2, 3]
+    for topk in topks:
+        spd_outputs = run_spd_forward_pass(
+            spd_model=model,
+            target_model=target_model,
+            input_array=batch,
+            attribution_type=config.attribution_type,
+            batch_topk=batch_topk,
+            topk=topk,
+            distil_from_target=config.distil_from_target,
+        )
+        topk_recon_loss: Float[Tensor, " batch"] = (
+            (spd_outputs.spd_topk_model_output - target_model_output) ** 2
+        ).mean(dim=(-2, -1))
+        topk_recon_losses.append(topk_recon_loss)
+        print(f"Top-k with k={topk}: {topk_recon_loss.mean().item():.6f}")
+    # Histograms
+    fig, ax = plt.subplots(figsize=(15, 5))
+    for i, topk_recon_loss in enumerate(topk_recon_losses):
+        # Get min/max in log space for bins
+        topk_recon_loss_nonzero = topk_recon_loss[topk_recon_loss > 0]
+        bins = list(
+            np.geomspace(
+                topk_recon_loss_nonzero.min().item(),
+                topk_recon_loss_nonzero.max().item(),
+                100,
+            )
+        )
+        ax.hist(
+            topk_recon_loss.detach().cpu(),
+            bins=bins,
+            alpha=1 if i > 0 else 0.5,
+            label=f"k={topks[i]}",
+            histtype="step" if i > 0 else "bar",
+        )
+    ax.set_title(f"Topk recon loss for {data_generation_type} (batch_topk={batch_topk})")
+    ax.set_xlabel("Recon loss")
+    ax.set_ylabel("Frequency")
+    ax.legend()
+    ax.set_xscale("log")
+    fig.show()
+    plt.close(fig)
+
 
 # %%
-
 dataset = ResidualMLPDataset(
     n_instances=model.config.n_instances,
     n_features=model.config.n_features,
@@ -116,8 +163,10 @@ else:
     print("W_E and W_U are not tied")
 
 
-# %% Observe how well the model reconstructs the noise
-def topk_model_fn(
+# %% Find subnet-feature-map
+
+
+def top1_model_fn(
     batch: Float[Tensor, "batch n_instances n_features"],
     topk_mask: Float[Tensor, "batch n_instances k"] | None,
 ) -> SPDOutputs:
@@ -135,6 +184,34 @@ def topk_model_fn(
     )
 
 
+# Dictionary feature_idx -> subnet_idx
+subnet_indices = get_feature_subnet_map(top1_model_fn, device, model.config, instance_idx=0)
+
+
+# %% Measure polysemanticity:
+
+duplicity = {}  # subnet_idx -> number of features that use it
+for subnet_idx in range(model.config.k):
+    duplicity[subnet_idx] = len([f for f, s in subnet_indices.items() if s == subnet_idx])
+duplicity_vals = np.array(list(duplicity.values()))
+fig, ax = plt.subplots(figsize=(15, 5))
+ax.hist(duplicity_vals, bins=[*np.arange(0, 10, 1)])
+counts = np.bincount(duplicity_vals)
+for i, count in enumerate(counts):
+    if i == 0:
+        name = "Dead"
+    elif i == 1:
+        name = "Monosemantic: "
+    elif i == 2:
+        name = "Duosemantic: "
+    else:
+        name = f"{i}-semantic: "
+    ax.text(i + 0.5, count, name + str(count), ha="center", va="bottom")
+fig.suptitle(f"Polysemanticity of model: {path}")
+fig.show()
+
+# %% Observe how well the model reconstructs the noise
+
 instance_idx = 0
 nrows = 1
 feature_idx = 15
@@ -146,7 +223,7 @@ plot_resid_vs_mlp_out(
     ax=ax,
     instance_idx=instance_idx,
     feature_idx=feature_idx,
-    topk_model_fn=topk_model_fn,
+    topk_model_fn=top1_model_fn,
     subnet_indices=None,
 )
 
@@ -156,12 +233,12 @@ n_features = model.config.n_features
 feature_idx = 15
 subtract_inputs = True  # TODO TRUE subnet
 fig = plot_feature_response_with_subnets(
-    topk_model_fn=topk_model_fn,
+    topk_model_fn=top1_model_fn,
     device=device,
     model_config=model.config,
     feature_idx=feature_idx,
-    batch_size=99,
-    subtract_inputs=subtract_inputs,
+    subnet_idx=subnet_indices[feature_idx],
+    batch_size=100,
 )["feature_response_with_subnets"]
 if fig is not None:
     fig.suptitle(f"Model {path}")

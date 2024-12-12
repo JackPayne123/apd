@@ -527,7 +527,10 @@ def plot_resid_vs_mlp_out(
     device: str,
     ax: plt.Axes,
     topk_model_fn: Callable[
-        [Float[Tensor, "batch n_instances n_features"], Float[Tensor, "batch n_instances k"]],
+        [
+            Float[Tensor, "batch n_instances n_features"],
+            Float[Tensor, "batch n_instances k"] | None,
+        ],
         SPDOutputs,
     ]
     | None = None,
@@ -638,9 +641,8 @@ def plot_feature_response_with_subnets(
     device: str,
     model_config: ResidualMLPConfig | ResidualMLPSPDRankPenaltyConfig,
     feature_idx: int = 0,
-    # subnet_idx: int = 0, #TODO for non-hardcoded runs
+    subnet_idx: int = 0,
     instance_idx: int = 0,
-    subtract_inputs: bool = True,
     ax: plt.Axes | None = None,
     batch_size: int | None = None,
 ):
@@ -660,18 +662,18 @@ def plot_feature_response_with_subnets(
     batch[:, instance_idx, feature_idx] = 1
     topk_mask_blue = torch.zeros_like(batch[:, :, :])
     topk_mask_red = torch.zeros_like(batch[:, :, :])
-    topk_mask_blue[:, :, feature_idx] = 1
+    topk_mask_blue[:, :, subnet_idx] = 1
     for s in range(batch_size):
         choice = torch.randperm(n_features - 1)[:s]
         # Exclude feature_idx from choice
-        choice[choice >= feature_idx] += 1
+        choice[choice >= subnet_idx] += 1
         topk_mask_blue[s, :, choice] = 1
         topk_mask_red[s, :, choice] = 1
     assert torch.allclose(
-        topk_mask_blue[:, :, feature_idx], torch.ones_like(topk_mask_blue[:, :, feature_idx])
+        topk_mask_blue[:, :, subnet_idx], torch.ones_like(topk_mask_blue[:, :, subnet_idx])
     )
     assert torch.allclose(
-        topk_mask_red[:, :, feature_idx], torch.zeros_like(topk_mask_red[:, :, feature_idx])
+        topk_mask_red[:, :, subnet_idx], torch.zeros_like(topk_mask_red[:, :, subnet_idx])
     )
     zero_topk_mask = torch.zeros_like(batch[:, :, :])
     out_WE_WU_only = topk_model_fn(batch, zero_topk_mask).spd_topk_model_output[:, instance_idx, :]
@@ -690,11 +692,37 @@ def plot_feature_response_with_subnets(
         ax.plot(x, y, color=cmap_reds(s / batch_size), lw=0.3)
     ax.set_ylabel("MLP output (forward pass minus W_E W_U contribution)")
     ax.set_xlabel("Output index")
-    ax.plot([], [], color="blue", label="SPD with right subnet")
-    ax.plot([], [], color="red", label="SPD without right subnet")
+    ax.plot([], [], color="blue", label=f"SPD with right subnet ({subnet_idx})")
+    ax.plot([], [], color="red", label=f"SPD without right subnet ({subnet_idx})")
     ax.scatter(
         x, mlp_out_target[0, :].detach().cpu(), color="wheat", label="Target", marker=".", zorder=-1
     )
     ax.set_title(f"SPD model output for increasing number of subnets, feature {feature_idx}")
     ax.legend()
     return {"feature_response_with_subnets": fig}
+
+
+def get_feature_subnet_map(
+    top1_model_fn: Callable[
+        [
+            Float[Tensor, "batch n_instances n_features"],
+            Float[Tensor, "batch n_instances k"] | None,
+        ],
+        SPDOutputs,
+    ],
+    device: str,
+    model_config: ResidualMLPConfig | ResidualMLPSPDRankPenaltyConfig,
+    instance_idx: int = 0,
+) -> dict[int, int]:
+    n_instances = model_config.n_instances
+    n_features = model_config.n_features
+    batch_size = n_features
+    batch = torch.zeros(batch_size, n_instances, n_features, device=device)
+    batch[torch.arange(n_features), instance_idx, torch.arange(n_features)] = 1
+    top1_out = top1_model_fn(batch, None)
+    top1_mask = top1_out.topk_mask[:, instance_idx, :]
+    subnet_indices = {
+        int(feature_idx.item()): int(subnet_idx.item())
+        for feature_idx, subnet_idx in top1_mask.nonzero()
+    }
+    return subnet_indices
