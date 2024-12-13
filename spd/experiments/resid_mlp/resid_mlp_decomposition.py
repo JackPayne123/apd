@@ -487,7 +487,18 @@ def main(
     # Create the SPD model
     if config.spd_type == "rank_penalty":
         model_config = ResidualMLPSPDRankPenaltyConfig(
-            **target_model.config.model_dump(mode="json"), k=config.task_config.k, m=config.m
+            n_instances=target_model.config.n_instances,
+            n_features=target_model.config.n_features,
+            d_embed=target_model.config.d_embed,
+            d_mlp=target_model.config.d_mlp,
+            n_layers=target_model.config.n_layers,
+            act_fn_name=target_model.config.act_fn_name,
+            apply_output_act_fn=target_model.config.apply_output_act_fn,
+            in_bias=target_model.config.in_bias,
+            out_bias=target_model.config.out_bias,
+            init_scale=config.task_config.init_scale,
+            k=config.task_config.k,
+            m=config.m,
         )
         model = ResidualMLPSPDRankPenaltyModel(config=model_config).to(device)
     else:
