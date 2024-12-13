@@ -28,6 +28,7 @@ def plot_individual_feature_response(
     sweep: bool = False,
     subtract_inputs: bool = True,
     instance_idx: int = 0,
+    plot_type: Literal["line", "scatter"] = "scatter",  # for Lee
     ax: plt.Axes | None = None,
 ):
     """Plot the response of the model to a single feature being active.
@@ -60,14 +61,24 @@ def plot_individual_feature_response(
     for f in range(n_features):
         x = torch.arange(n_features)
         y = out[f, :].detach().cpu()
-        ax.plot(x, y, color=cmap_viridis(f / n_features))
+        if plot_type == "line":
+            ax.plot(x, y, color=cmap_viridis(f / n_features))
+        elif plot_type == "scatter":
+            ax.scatter(x, y, c=cmap_viridis(f / n_features))
+        else:
+            raise ValueError("Unknown plot_type")
     # Plot labels
     label_fn = F.relu if model_config.act_fn_name == "relu" else F.gelu
     inputs = batch[torch.arange(n_features), instance_idx, torch.arange(n_features)].detach().cpu()
     targets = label_fn(inputs) if subtract_inputs else inputs + label_fn(inputs)
-    ax.plot(torch.arange(n_features), targets.cpu().detach(), color="red", label="Target")
     baseline = torch.zeros(n_features) if subtract_inputs else inputs
-    ax.plot(torch.arange(n_features), baseline, color="red", linestyle=":", label="Baseline")
+    if plot_type == "line":
+        ax.plot(torch.arange(n_features), targets.cpu().detach(), color="red", label="Target ($x+\\text{{ReLU}}(x)$)")
+        ax.plot(torch.arange(n_features), baseline, color="red", linestyle=":", label="Baseline (Identity)")
+    elif plot_type == "scatter":
+        ax.scatter(torch.arange(n_features), targets.cpu().detach(), color="red", label="Target ($x+\\text{{ReLU}}(x)$)", marker="x")
+    else:
+        raise ValueError("Unknown plot_type")
     ax.legend()
     # Colorbar
     sm = plt.cm.ScalarMappable(cmap=cmap_viridis, norm=plt.Normalize(0, n_features))
@@ -86,6 +97,7 @@ def plot_single_feature_response(
     subtract_inputs: bool = True,
     instance_idx: int = 0,
     feature_idx: int = 15,
+    plot_type: Literal["line", "scatter"] = "scatter",  # for Lee
     ax: plt.Axes | None = None,
 ):
     """Plot the response of the model to a single feature being active.
@@ -109,12 +121,17 @@ def plot_single_feature_response(
         out = out - batch[:, instance_idx, :]
     x = torch.arange(n_features)
     y = out[batch_idx, :].detach().cpu()
-    ax.plot(x, y, color=cmap_viridis(feature_idx / n_features), label="Model")
-    # Plot labels
     label_fn = F.relu if model_config.act_fn_name == "relu" else F.gelu
     inputs = batch[torch.arange(n_features), instance_idx, torch.arange(n_features)].detach().cpu()
     targets = label_fn(inputs) if subtract_inputs else inputs + label_fn(inputs)
-    ax.plot(torch.arange(n_features), targets.cpu().detach(), color="red", label="Labels")
+    if plot_type == "line":
+        ax.plot(x, y, color=cmap_viridis(feature_idx / n_features), label="Model")
+        ax.plot(torch.arange(n_features), targets.cpu().detach(), color="red", label="Labels")
+    elif plot_type == "scatter":
+        ax.scatter(x, y, c=cmap_viridis(feature_idx / n_features), label="Model")
+        ax.scatter(torch.arange(n_features), targets.cpu().detach(), c="red", label="Labels", marker="x")
+    else:
+        raise ValueError("Unknown plot_type")
     ax.legend()
     ax.set_xlabel("Output index")
     ax.set_ylabel("Output value")
