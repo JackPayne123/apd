@@ -67,15 +67,35 @@ plot_single_feature_response(
     device=device,
     subtract_inputs=False,
     feature_idx=15,
-
+    ax=ax1
 )
-fig = plot_individual_feature_response(
+plot_single_relu_curve(
+    lambda batch: model(batch)[0],
+    model_config=train_config.resid_mlp_config,
+    device=device,
+    subtract_inputs=False,
+    feature_idx=15,
+    ax=ax2
+)
+
+
+fig, [ax1, ax2] = plt.subplots(ncols=2, figsize=(10, 5), constrained_layout=True, sharey=True)
+plot_individual_feature_response(
     lambda batch: model(batch)[0],
     model_config=train_config.resid_mlp_config,
     device=device,
     sweep=False,
-    subtract_inputs=False
+    subtract_inputs=False,
+    ax=ax1
 )
+plot_all_relu_curves(
+    lambda batch: model(batch)[0],
+    model_config=train_config.resid_mlp_config,
+    device=device,
+    subtract_inputs=False,
+    ax=ax2
+)
+
 
 # %%
 

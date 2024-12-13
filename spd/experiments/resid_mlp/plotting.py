@@ -139,6 +139,62 @@ def plot_single_feature_response(
     return fig
 
 
+
+def plot_single_relu_curve(
+    model_fn: Callable[[Tensor], Tensor],
+    device: str,
+    model_config: ResidualMLPConfig | ResidualMLPSPDRankPenaltyConfig,
+    subtract_inputs: bool = True,
+    instance_idx: int = 0,
+    feature_idx: int = 15,
+    ax: plt.Axes | None = None,
+):
+    n_instances = model_config.n_instances
+    n_features = model_config.n_features
+    batch_size = 1000
+    x = torch.arange(-1, 1, batch_size)
+    batch = torch.zeros(batch_size, n_instances, n_features, device=device)
+    batch[:, instance_idx, feature_idx] = x
+    out = model_fn(batch)
+    out = out[:, instance_idx, :]
+    cmap_viridis = plt.get_cmap("viridis")
+    fig, ax = plt.subplots(constrained_layout=True) if ax is None else (ax.figure, ax)
+    if subtract_inputs:
+        out = out - batch[:, instance_idx, :]
+
+    y = out[:, feature_idx].detach().cpu()
+    label_fn = F.relu if model_config.act_fn_name == "relu" else F.gelu
+    targets = label_fn(x) if subtract_inputs else x + label_fn(x)
+    ax.plot(x, y, color=cmap_viridis(feature_idx / n_features), label="Model")
+    ax.plot(x, targets.cpu().detach(), color="red", label="Labels")
+    ax.legend()
+    ax.set_xlabel(f"Input value $x_{{{feature_idx}}}$")
+    ax.set_ylabel(f"Output value $y_{{{feature_idx}}}$")
+    ax.set_title(f"Input-output response for feature {feature_idx}")
+    return fig
+
+def plot_all_relu_curves(
+    model_fn: Callable[[Tensor], Tensor],
+    device: str,
+    model_config: ResidualMLPConfig | ResidualMLPSPDRankPenaltyConfig,
+    subtract_inputs: bool = True,
+    instance_idx: int = 0,
+    ax: plt.Axes | None = None,
+):
+    n_features = model_config.n_features
+    for feature_idx in range(n_features):
+        fig = plot_single_relu_curve(
+            model_fn=model_fn,
+            device=device,
+            model_config=model_config,
+            subtract_inputs=subtract_inputs,
+            instance_idx=instance_idx,
+            feature_idx=feature_idx,
+            ax=ax,
+        )
+    return fig
+
+
 def _calculate_snr(
     model: ResidualMLPModel, device: str, input_values: tuple[float, float]
 ) -> Tensor:
