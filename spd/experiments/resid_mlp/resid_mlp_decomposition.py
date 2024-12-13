@@ -56,7 +56,14 @@ wandb.require("core")
 
 
 def get_run_name(
-    config: Config, n_features: int, n_layers: int, d_resid: int, d_mlp: int, k: int, m: int | None
+    config: Config,
+    n_features: int,
+    n_layers: int,
+    d_resid: int,
+    d_mlp: int,
+    k: int,
+    m: int | None,
+    init_scale: float,
 ) -> str:
     """Generate a run name based on the config."""
     run_suffix = ""
@@ -64,7 +71,9 @@ def get_run_name(
         run_suffix = config.wandb_run_name
     else:
         run_suffix = get_common_run_name_suffix(config)
-        run_suffix += f"ft{n_features}_lay{n_layers}_resid{d_resid}_mlp{d_mlp}_k{k}"
+        run_suffix += (
+            f"scale{init_scale}_ft{n_features}_lay{n_layers}_resid{d_resid}_mlp{d_mlp}_k{k}"
+        )
         if m is not None:
             run_suffix += f"_m{m}"
     return config.wandb_run_name_prefix + run_suffix
@@ -232,10 +241,23 @@ def plot_subnet_categories(model: ResidualMLPSPDRankPenaltyModel, device: str) -
             n_duosemantic_subnets[i],
             n_polysemantic_subnets[i],
         ]
-        axs[i].bar(categories, counts)
+        bars = axs[i].bar(categories, counts)
         axs[i].set_xlabel("Category")
         axs[i].set_ylabel("Count")
         axs[i].set_title(f"Subnet Categories (Instance {i})")
+
+        # Add numbers in the middle of the bars
+        for bar, count in zip(bars, counts, strict=False):
+            height = bar.get_height()
+            axs[i].text(
+                bar.get_x() + bar.get_width() / 2.0,
+                height / 2.0,
+                f"{count}",
+                ha="center",
+                va="center",
+                color="white",
+                fontsize=10,
+            )
 
     return fig
 
@@ -462,6 +484,7 @@ def main(
         d_mlp=target_model.config.d_mlp,
         k=config.task_config.k,
         m=config.m,
+        init_scale=config.task_config.init_scale,
     )
     if config.wandb_project:
         assert wandb.run, "wandb.run must be initialized before training"
