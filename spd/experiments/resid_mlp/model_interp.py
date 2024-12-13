@@ -58,6 +58,25 @@ fig = plot_individual_feature_response(
 )
 plt.show()
 
+# %% Simple plot for paper appendix
+
+fig, [ax1, ax2] = plt.subplots(ncols=2, figsize=(10, 5), constrained_layout=True, sharey=True)
+plot_single_feature_response(
+    lambda batch: model(batch)[0],
+    model_config=train_config.resid_mlp_config,
+    device=device,
+    subtract_inputs=False,
+    feature_idx=15,
+
+)
+fig = plot_individual_feature_response(
+    lambda batch: model(batch)[0],
+    model_config=train_config.resid_mlp_config,
+    device=device,
+    sweep=False,
+    subtract_inputs=False
+)
+
 # %%
 
 

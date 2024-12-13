@@ -79,6 +79,49 @@ def plot_individual_feature_response(
     return fig
 
 
+def plot_single_feature_response(
+    model_fn: Callable[[Tensor], Tensor],
+    device: str,
+    model_config: ResidualMLPConfig | ResidualMLPSPDRankPenaltyConfig,
+    subtract_inputs: bool = True,
+    instance_idx: int = 0,
+    feature_idx: int = 15,
+    ax: plt.Axes | None = None,
+):
+    """Plot the response of the model to a single feature being active.
+
+    If sweep is False then the amplitude of the active feature is 1.
+    If sweep is True then the amplitude of the active feature is swept from -1 to 1. This is an
+    arbitrary choice (choosing feature 0 to be the one where we test x=-1 etc) made for convenience.
+    """
+    n_instances = model_config.n_instances
+    n_features = model_config.n_features
+    batch_size = 1
+    batch_idx = 0
+    batch = torch.zeros(batch_size, n_instances, n_features, device=device)
+    batch[batch_idx, instance_idx, feature_idx] = 1
+    out = model_fn(batch)
+
+    out = out[:, instance_idx, :]
+    cmap_viridis = plt.get_cmap("viridis")
+    fig, ax = plt.subplots(constrained_layout=True) if ax is None else (ax.figure, ax)
+    if subtract_inputs:
+        out = out - batch[:, instance_idx, :]
+    x = torch.arange(n_features)
+    y = out[batch_idx, :].detach().cpu()
+    ax.plot(x, y, color=cmap_viridis(feature_idx / n_features), label="Model")
+    # Plot labels
+    label_fn = F.relu if model_config.act_fn_name == "relu" else F.gelu
+    inputs = batch[torch.arange(n_features), instance_idx, torch.arange(n_features)].detach().cpu()
+    targets = label_fn(inputs) if subtract_inputs else inputs + label_fn(inputs)
+    ax.plot(torch.arange(n_features), targets.cpu().detach(), color="red", label="Labels")
+    ax.legend()
+    ax.set_xlabel("Output index")
+    ax.set_ylabel("Output value")
+    ax.set_title(f"Output for a single input $x_{{{feature_idx}}}=1$")
+    return fig
+
+
 def _calculate_snr(
     model: ResidualMLPModel, device: str, input_values: tuple[float, float]
 ) -> Tensor:
