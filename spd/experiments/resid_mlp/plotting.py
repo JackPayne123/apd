@@ -705,6 +705,7 @@ def plot_feature_response_with_subnets(
     instance_idx: int = 0,
     ax: plt.Axes | None = None,
     batch_size: int | None = None,
+    plot_type: Literal["line", "scatter"] = "scatter",  # for Lee
 ):
     n_instances = model_config.n_instances
     n_features = model_config.n_features
@@ -715,8 +716,8 @@ def plot_feature_response_with_subnets(
     else:
         fig = ax.figure
 
-    cmap_blues = plt.get_cmap("Blues")
-    cmap_reds = plt.get_cmap("Reds")
+    cmap_blues = plt.get_cmap("Purples")
+    cmap_reds = plt.get_cmap("Oranges")
 
     batch = torch.zeros(batch_size, n_instances, n_features, device=device)
     batch[:, instance_idx, feature_idx] = 1
@@ -746,14 +747,28 @@ def plot_feature_response_with_subnets(
 
     x = torch.arange(n_features)
     for s in range(batch_size):
-        y = mlp_out_blue_spd[s, :].detach().cpu()
-        ax.plot(x, y, color=cmap_blues(s / batch_size), lw=0.3)
-        y = mlp_out_red_spd[s, :].detach().cpu()
-        ax.plot(x, y, color=cmap_reds(s / batch_size), lw=0.3)
+        yb = mlp_out_blue_spd[s, :].detach().cpu()
+        yr = mlp_out_red_spd[s, :].detach().cpu()
+        if plot_type == "line":
+            ax.plot(x, yb, color=cmap_blues(s / batch_size), lw=0.3)
+            ax.plot(x, yr, color=cmap_reds(s / batch_size), lw=0.3)
+        elif plot_type == "scater":
+            ax.scatter(x, yb, c=cmap_blues(s / batch_size), lw=0.3)
+            ax.scatter(x, yr, c=cmap_reds(s / batch_size), lw=0.3)
+        else:
+            raise ValueError("Unknown plot_type")
+    if plot_type == "line":
+        yt = mlp_out_target[0, :].detach().cpu()
+        ax.plot(x, yt, color="red", lw=0.5, label="Target model")
+    elif plot_type == "scater":
+        ax.scatter(x, yt, marker="x", lw=0.5, label="Target model")
+    else:
+        raise ValueError("Unknown plot_type")
+
     ax.set_ylabel("MLP output (forward pass minus W_E W_U contribution)")
     ax.set_xlabel("Output index")
-    ax.plot([], [], color="blue", label=f"SPD with right subnet ({subnet_idx})")
-    ax.plot([], [], color="red", label=f"SPD without right subnet ({subnet_idx})")
+    ax.plot([], [], color=cmap_blues(0), label=f"SPD with right subnet ({subnet_idx})")
+    ax.plot([], [], color=cmap_reds(0), label=f"SPD without right subnet ({subnet_idx})")
     ax.scatter(
         x, mlp_out_target[0, :].detach().cpu(), color="wheat", label="Target", marker=".", zorder=-1
     )
