@@ -11,8 +11,11 @@ from spd.experiments.resid_mlp.models import (
 from spd.experiments.resid_mlp.plotting import (
     calculate_virtual_weights,
     plot_2d_snr,
+    plot_all_relu_curves,
     plot_individual_feature_response,
     plot_resid_vs_mlp_out,
+    plot_single_feature_response,
+    plot_single_relu_curve,
     relu_contribution_plot,
 )
 from spd.experiments.resid_mlp.resid_mlp_dataset import ResidualMLPDataset
@@ -24,7 +27,7 @@ from spd.utils import set_seed
 
 
 set_seed(0)
-device = "cuda" if torch.cuda.is_available() else "cpu"
+device = "cpu" if torch.cuda.is_available() else "cpu"
 path: ModelPath = "wandb:spd-train-resid-mlp/runs/qbpuju4j"
 model, train_config_dict, label_coeffs = ResidualMLPModel.from_pretrained(path)
 model = model.to(device)
@@ -49,12 +52,14 @@ fig = plot_individual_feature_response(
     model_config=train_config.resid_mlp_config,
     device=device,
     sweep=False,
+    plot_type="line",
 )
 fig = plot_individual_feature_response(
     lambda batch: model(batch)[0],
     model_config=train_config.resid_mlp_config,
     device=device,
     sweep=True,
+    plot_type="line",
 )
 plt.show()
 
@@ -67,7 +72,7 @@ plot_single_feature_response(
     device=device,
     subtract_inputs=False,
     feature_idx=15,
-    ax=ax1
+    ax=ax1,
 )
 plot_single_relu_curve(
     lambda batch: model(batch)[0],
@@ -75,9 +80,9 @@ plot_single_relu_curve(
     device=device,
     subtract_inputs=False,
     feature_idx=15,
-    ax=ax2
+    ax=ax2,
 )
-
+fig.savefig("feature_response_single.png", bbox_inches="tight", dpi=300)
 
 fig, [ax1, ax2] = plt.subplots(ncols=2, figsize=(10, 5), constrained_layout=True, sharey=True)
 plot_individual_feature_response(
@@ -86,16 +91,26 @@ plot_individual_feature_response(
     device=device,
     sweep=False,
     subtract_inputs=False,
-    ax=ax1
+    ax=ax1,
+    cbar=False,
 )
+ax1.set_title("Outputs for any one-hot input (coloured by input index)")
 plot_all_relu_curves(
     lambda batch: model(batch)[0],
     model_config=train_config.resid_mlp_config,
     device=device,
     subtract_inputs=False,
-    ax=ax2
+    ax=ax2,
 )
-
+# Colorbar
+cmap_viridis = plt.get_cmap("viridis")
+sm = plt.cm.ScalarMappable(
+    cmap=cmap_viridis, norm=plt.Normalize(0, train_config.resid_mlp_config.n_features)
+)
+sm.set_array([])
+cbar = plt.colorbar(sm, ax=ax2, orientation="vertical")
+cbar.set_label("Active input feature index")
+fig.savefig("feature_response_multi.png", bbox_inches="tight", dpi=300)
 
 # %%
 

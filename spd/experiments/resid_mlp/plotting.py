@@ -30,6 +30,7 @@ def plot_individual_feature_response(
     instance_idx: int = 0,
     plot_type: Literal["line", "scatter"] = "scatter",  # for Lee
     ax: plt.Axes | None = None,
+    cbar: bool = True,
 ):
     """Plot the response of the model to a single feature being active.
 
@@ -73,20 +74,38 @@ def plot_individual_feature_response(
     targets = label_fn(inputs) if subtract_inputs else inputs + label_fn(inputs)
     baseline = torch.zeros(n_features) if subtract_inputs else inputs
     if plot_type == "line":
-        ax.plot(torch.arange(n_features), targets.cpu().detach(), color="red", label="Target ($x+\\text{{ReLU}}(x)$)")
-        ax.plot(torch.arange(n_features), baseline, color="red", linestyle=":", label="Baseline (Identity)")
+        ax.plot(
+            torch.arange(n_features),
+            targets.cpu().detach(),
+            color="red",
+            label="Target ($x+\mathrm{ReLU}(x)$)",
+        )
+        ax.plot(
+            torch.arange(n_features),
+            baseline,
+            color="red",
+            linestyle=":",
+            label="Baseline (Identity)",
+        )
     elif plot_type == "scatter":
-        ax.scatter(torch.arange(n_features), targets.cpu().detach(), color="red", label="Target ($x+\\text{{ReLU}}(x)$)", marker="x")
+        ax.scatter(
+            torch.arange(n_features),
+            targets.cpu().detach(),
+            color="red",
+            label="Target ($x+\mathrm{ReLU}(x)$)",
+            marker="x",
+        )
     else:
         raise ValueError("Unknown plot_type")
     ax.legend()
-    # Colorbar
-    sm = plt.cm.ScalarMappable(cmap=cmap_viridis, norm=plt.Normalize(0, n_features))
-    sm.set_array([])
-    cbar = plt.colorbar(sm, ax=ax, orientation="vertical")
-    cbar.set_label("Active input feature index")
-    ax.set_xlabel("Output feature index")
-    ax.set_ylabel("Output (all inputs superimposed)")
+    if cbar:
+        # Colorbar
+        sm = plt.cm.ScalarMappable(cmap=cmap_viridis, norm=plt.Normalize(0, n_features))
+        sm.set_array([])
+        cbar = plt.colorbar(sm, ax=ax, orientation="vertical")
+        cbar.set_label("Active input feature index")
+    ax.set_xlabel("Output index")
+    ax.set_ylabel("Output values $y_i$ (superimposed)")
     return fig
 
 
@@ -121,23 +140,24 @@ def plot_single_feature_response(
         out = out - batch[:, instance_idx, :]
     x = torch.arange(n_features)
     y = out[batch_idx, :].detach().cpu()
+    inputs = batch[batch_idx, instance_idx, :].detach().cpu()
     label_fn = F.relu if model_config.act_fn_name == "relu" else F.gelu
-    inputs = batch[torch.arange(n_features), instance_idx, torch.arange(n_features)].detach().cpu()
     targets = label_fn(inputs) if subtract_inputs else inputs + label_fn(inputs)
     if plot_type == "line":
         ax.plot(x, y, color=cmap_viridis(feature_idx / n_features), label="Model")
         ax.plot(torch.arange(n_features), targets.cpu().detach(), color="red", label="Labels")
     elif plot_type == "scatter":
         ax.scatter(x, y, c=cmap_viridis(feature_idx / n_features), label="Model")
-        ax.scatter(torch.arange(n_features), targets.cpu().detach(), c="red", label="Labels", marker="x")
+        ax.scatter(
+            torch.arange(n_features), targets.cpu().detach(), c="red", label="Labels", marker="x"
+        )
     else:
         raise ValueError("Unknown plot_type")
     ax.legend()
     ax.set_xlabel("Output index")
-    ax.set_ylabel("Output value")
+    ax.set_ylabel(f"Output value $y_{{{feature_idx}}}$")
     ax.set_title(f"Output for a single input $x_{{{feature_idx}}}=1$")
     return fig
-
 
 
 def plot_single_relu_curve(
@@ -148,11 +168,12 @@ def plot_single_relu_curve(
     instance_idx: int = 0,
     feature_idx: int = 15,
     ax: plt.Axes | None = None,
+    label: bool = True,
 ):
     n_instances = model_config.n_instances
     n_features = model_config.n_features
     batch_size = 1000
-    x = torch.arange(-1, 1, batch_size)
+    x = torch.linspace(-1, 1, batch_size)
     batch = torch.zeros(batch_size, n_instances, n_features, device=device)
     batch[:, instance_idx, feature_idx] = x
     out = model_fn(batch)
@@ -165,13 +186,14 @@ def plot_single_relu_curve(
     y = out[:, feature_idx].detach().cpu()
     label_fn = F.relu if model_config.act_fn_name == "relu" else F.gelu
     targets = label_fn(x) if subtract_inputs else x + label_fn(x)
-    ax.plot(x, y, color=cmap_viridis(feature_idx / n_features), label="Model")
-    ax.plot(x, targets.cpu().detach(), color="red", label="Labels")
+    ax.plot(x, y, color=cmap_viridis(feature_idx / n_features), label="Model" if label else None)
+    ax.plot(x, targets.cpu().detach(), color="red", label="Labels" if label else None)
     ax.legend()
     ax.set_xlabel(f"Input value $x_{{{feature_idx}}}$")
     ax.set_ylabel(f"Output value $y_{{{feature_idx}}}$")
     ax.set_title(f"Input-output response for feature {feature_idx}")
     return fig
+
 
 def plot_all_relu_curves(
     model_fn: Callable[[Tensor], Tensor],
@@ -191,7 +213,12 @@ def plot_all_relu_curves(
             instance_idx=instance_idx,
             feature_idx=feature_idx,
             ax=ax,
+            label=False,
         )
+    ax.set_title(f"Input-output response for all {n_features} features")
+    ax.set_xlabel("Input values $x_i$")
+    # ax.set_ylabel("Output values $y_i$ (superimposed)")
+    ax.set_ylabel("")
     return fig
 
 
@@ -808,16 +835,16 @@ def plot_feature_response_with_subnets(
         if plot_type == "line":
             ax.plot(x, yb, color=cmap_blues(s / batch_size), lw=0.3)
             ax.plot(x, yr, color=cmap_reds(s / batch_size), lw=0.3)
-        elif plot_type == "scater":
-            ax.scatter(x, yb, c=cmap_blues(s / batch_size), lw=0.3)
-            ax.scatter(x, yr, c=cmap_reds(s / batch_size), lw=0.3)
+        elif plot_type == "scatter":
+            ax.scatter(x, yb, c=cmap_blues(s / batch_size), lw=0.3, marker=".")
+            ax.scatter(x, yr, c=cmap_reds(s / batch_size), lw=0.3, marker=".")
         else:
             raise ValueError("Unknown plot_type")
+    yt = mlp_out_target[0, :].detach().cpu()
     if plot_type == "line":
-        yt = mlp_out_target[0, :].detach().cpu()
         ax.plot(x, yt, color="red", lw=0.5, label="Target model")
-    elif plot_type == "scater":
-        ax.scatter(x, yt, marker="x", lw=0.5, label="Target model")
+    elif plot_type == "scatter":
+        ax.scatter(x, yt, marker="x", lw=0.5, label="Target model", c="r")
     else:
         raise ValueError("Unknown plot_type")
 
