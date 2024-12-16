@@ -104,7 +104,7 @@ class InstancesMLPComponentsRankPenalty(nn.Module):
         act_fn: Callable[[Tensor], Tensor],
         in_bias: bool,
         out_bias: bool,
-        m: int | None = None,
+        m: int | None,
     ):
         super().__init__()
         self.act_fn = act_fn
@@ -402,6 +402,7 @@ class ResidualMLPSPDRankPenaltyModel(SPDRankPenaltyModel):
                     in_bias=config.in_bias,
                     out_bias=config.out_bias,
                     act_fn=self.act_fn,
+                    m=self.m,
                 )
                 for _ in range(config.n_layers)
             ]
