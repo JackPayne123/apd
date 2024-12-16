@@ -533,43 +533,6 @@ def main(
     model.W_U.data[:, :] = target_model.W_U.data.detach().clone()
     model.W_U.requires_grad = False
 
-    # ############ COPY ALIVE SUBNETS FROM FIRST PASS MODEL
-    # first_pass_model, _, _ = ResidualMLPSPDRankPenaltyModel.from_pretrained(
-    #     # "wandb:spd-resid-mlp/runs/igfxwtmt"
-    #     "wandb:spd-resid-mlp/runs/cg60411u"
-    #     # "wandb:spd-resid-mlp/runs/igfxwtmt"
-    # )
-    # first_pass_model.to(device)
-
-    # n_active_features_per_subnet = calc_n_active_features_per_subnet(
-    #     first_pass_model, cutoff=5e-2, device=device
-    # )
-    # dead_subnets = (n_active_features_per_subnet == 0).bool()
-
-    # # Copy over the alive subnets from first_pass_model to SPD model
-    # for i in range(model.config.n_layers):
-    #     model.layers[i].linear1.A.data[:, :, :, :] = torch.where(
-    #         dead_subnets[:, :, None, None],
-    #         model.layers[i].linear1.A.data[:, :, :, :],
-    #         first_pass_model.layers[i].linear1.A.data[:, :, :, :],
-    #     )
-    #     model.layers[i].linear1.B.data[:, :, :, :] = torch.where(
-    #         dead_subnets[:, :, None, None],
-    #         model.layers[i].linear1.B.data[:, :, :, :],
-    #         first_pass_model.layers[i].linear1.B.data[:, :, :, :],
-    #     )
-    #     model.layers[i].linear2.A.data[:, :, :, :] = torch.where(
-    #         dead_subnets[:, :, None, None],
-    #         model.layers[i].linear2.A.data[:, :, :, :],
-    #         first_pass_model.layers[i].linear2.A.data[:, :, :, :],
-    #     )
-    #     model.layers[i].linear2.B.data[:, :, :, :] = torch.where(
-    #         dead_subnets[:, :, None, None],
-    #         model.layers[i].linear2.B.data[:, :, :, :],
-    #         first_pass_model.layers[i].linear2.B.data[:, :, :, :],
-    #     )
-    # ############
-
     # Copy the biases from the target model to the SPD model and set requires_grad to False
     for i in range(target_model.config.n_layers):
         if target_model.config.in_bias:
