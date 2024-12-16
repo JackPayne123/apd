@@ -17,6 +17,7 @@ from spd.experiments.resid_mlp.plotting import (
     spd_calculate_virtual_weights,
 )
 from spd.experiments.resid_mlp.resid_mlp_dataset import ResidualMLPDataset
+from spd.experiments.resid_mlp.resid_mlp_decomposition import plot_subnet_categories
 from spd.run_spd import ResidualMLPTaskConfig, calc_recon_mse
 from spd.utils import run_spd_forward_pass, set_seed
 
@@ -24,10 +25,16 @@ from spd.utils import run_spd_forward_pass, set_seed
 device = "cuda" if torch.cuda.is_available() else "cpu"
 print(f"Using device: {device}")
 set_seed(0)  # You can change this seed if needed
-wandb_path = "wandb:spd-resid-mlp/runs/j68hf36u"
+# wandb_path = "wandb:spd-resid-mlp/runs/j68hf36u"
+wandb_path = "wandb:spd-resid-mlp/runs/kkstog7o"
 # Load the pretrained SPD model
 model, config, label_coeffs = ResidualMLPSPDRankPenaltyModel.from_pretrained(wandb_path)
 assert isinstance(config.task_config, ResidualMLPTaskConfig)
+# %%
+fig = plot_subnet_categories(model, device)
+fig.show()
+# %%
+
 # Path must be local
 target_model, target_model_train_config_dict, target_label_coeffs = (
     ResidualMLPModel.from_pretrained(config.task_config.pretrained_model_path)

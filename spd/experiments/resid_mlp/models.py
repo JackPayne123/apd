@@ -100,6 +100,7 @@ class InstancesMLPComponentsRankPenalty(nn.Module):
         d_embed: int,
         d_mlp: int,
         k: int,
+        init_type: Literal["kaiming_uniform", "xavier_normal"],
         init_scale: float,
         act_fn: Callable[[Tensor], Tensor],
         in_bias: bool,
@@ -114,6 +115,7 @@ class InstancesMLPComponentsRankPenalty(nn.Module):
             out_dim=d_mlp,
             k=k,
             bias=in_bias,
+            init_type=init_type,
             init_scale=init_scale,
             m=m,
         )
@@ -123,6 +125,7 @@ class InstancesMLPComponentsRankPenalty(nn.Module):
             out_dim=d_embed,
             k=k,
             bias=out_bias,
+            init_type=init_type,
             init_scale=init_scale,
             m=m,
         )
@@ -368,6 +371,7 @@ class ResidualMLPSPDRankPenaltyConfig(BaseModel):
     init_scale: float
     k: PositiveInt
     m: PositiveInt | None = None
+    init_type: Literal["kaiming_uniform", "xavier_normal"] = "xavier_normal"
 
 
 class ResidualMLPSPDRankPenaltyModel(SPDRankPenaltyModel):
@@ -386,8 +390,8 @@ class ResidualMLPSPDRankPenaltyModel(SPDRankPenaltyModel):
 
         self.W_E = nn.Parameter(torch.empty(config.n_instances, config.n_features, config.d_embed))
         self.W_U = nn.Parameter(torch.empty(config.n_instances, config.d_embed, config.n_features))
-        init_param_(self.W_E)
-        init_param_(self.W_U)
+        init_param_(self.W_E, init_type=config.init_type)
+        init_param_(self.W_U, init_type=config.init_type)
 
         self.m = min(config.d_embed, config.d_mlp) if config.m is None else config.m
 
@@ -398,6 +402,7 @@ class ResidualMLPSPDRankPenaltyModel(SPDRankPenaltyModel):
                     d_embed=config.d_embed,
                     d_mlp=config.d_mlp,
                     k=config.k,
+                    init_type=config.init_type,
                     init_scale=config.init_scale,
                     in_bias=config.in_bias,
                     out_bias=config.out_bias,

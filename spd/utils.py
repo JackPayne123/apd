@@ -152,10 +152,17 @@ def replace_pydantic_model(model: BaseModelType, *updates: dict[str, Any]) -> Ba
     return model.__class__(**deep_update(model.model_dump(), *updates))
 
 
-def init_param_(param: torch.Tensor, scale: float = 1.0) -> None:
-    torch.nn.init.kaiming_uniform_(param)
-    with torch.no_grad():
-        param.mul_(scale)
+def init_param_(
+    param: torch.Tensor,
+    scale: float = 1.0,
+    init_type: Literal["kaiming_uniform", "xavier_normal"] = "kaiming_uniform",
+) -> None:
+    if init_type == "kaiming_uniform":
+        torch.nn.init.kaiming_uniform_(param)
+        with torch.no_grad():
+            param.mul_(scale)
+    elif init_type == "xavier_normal":
+        torch.nn.init.xavier_normal_(param, gain=scale)
 
 
 class DatasetGeneratedDataLoader(DataLoader[Q], Generic[Q]):
