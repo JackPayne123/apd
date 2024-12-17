@@ -271,12 +271,19 @@ def feature_contribution_plot(
     for i in range(n_features):
         ax.scatter([i] * d_mlp * n_layers, diag_relu_conns[i, :], alpha=0.3, marker=".", c="k")
         ax.axvline(i + 0.5, color="k", linestyle="--", alpha=0.3, lw=0.5)
+        n_labelled_neurons = 0
         for j in range(d_mlp * n_layers):
             if diag_relu_conns[i, j].item() > 0.1:
                 cmap_label = plt.get_cmap("hsv")
+                # Make the neuron label alternate between left and right (-0.1, 0.1)
                 ax.text(
-                    i, diag_relu_conns[i, j].item(), str(j), color=cmap_label(j / d_mlp / n_layers)
+                    i,
+                    diag_relu_conns[i, j].item(),
+                    str(j),
+                    color=cmap_label(j / d_mlp / n_layers),
+                    ha="left" if (n_labelled_neurons + 1) % 2 == 0 else "right",
                 )
+                n_labelled_neurons += 1
     ax.axhline(0, color="k", linestyle="--", alpha=0.3)
     ax.set_xlim(-0.5, n_features - 0.5)
     ax.set_xlabel("Features")

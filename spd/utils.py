@@ -613,8 +613,8 @@ class SparseFeatureDataset(
         data_generation_type: Literal[
             "exactly_one_active",
             "exactly_two_active",
+            "exactly_three_active",
             "exactly_four_active",
-            "exactly_eight_active",
             "at_least_zero_active",
         ] = "at_least_zero_active",
         value_range: tuple[float, float] = (0.0, 1.0),
@@ -640,8 +640,8 @@ class SparseFeatureDataset(
         number_map = {
             "exactly_one_active": 1,
             "exactly_two_active": 2,
+            "exactly_three_active": 3,
             "exactly_four_active": 4,
-            "exactly_eight_active": 8,
         }
         if self.data_generation_type in number_map:
             n = number_map[self.data_generation_type]

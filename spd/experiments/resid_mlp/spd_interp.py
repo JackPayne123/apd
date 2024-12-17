@@ -27,9 +27,10 @@ from spd.utils import run_spd_forward_pass, set_seed
 device = "cuda" if torch.cuda.is_available() else "cpu"
 print(f"Using device: {device}")
 set_seed(0)  # You can change this seed if needed
-# wandb_path = "wandb:spd-resid-mlp/runs/j68hf36u"
-# wandb_path = "wandb:spd-resid-mlp/runs/kkstog7o"
-wandb_path = "wandb:spd-resid-mlp/runs/sf5xinvq"
+
+n_layers = 1
+wandb_path = "wandb:spd-resid-mlp/runs/ordxt3iy"  # 1 layer (40k steps. 15 cross 97 mono)
+# wandb_path = "wandb:spd-resid-mlp/runs/sf5xinvq" # 2 layer
 # Load the pretrained SPD model
 model, config, label_coeffs = ResidualMLPSPDRankPenaltyModel.from_pretrained(wandb_path)
 assert isinstance(config.task_config, ResidualMLPTaskConfig)
@@ -61,59 +62,87 @@ fig = plot_spd_feature_contributions_truncated(
 fig.show()
 # Save the figure
 out_dir = REPO_ROOT / "spd/experiments/resid_mlp/out"
-fig.savefig(out_dir / "spd_feature_contributions.png")
-print(f"Saved figure to {out_dir / 'spd_feature_contributions.png'}")
+fig.savefig(out_dir / f"resid_mlp_weights_{n_layers}layers.png")
+print(f"Saved figure to {out_dir / f'resid_mlp_weights_{n_layers}layers.png'}")
 # %%
 # Get the entries for the main loss table in the paper
-batch_size = 100
-dataset = ResidualMLPDataset(
-    n_instances=model.config.n_instances,
-    n_features=model.config.n_features,
-    feature_probability=config.task_config.feature_probability,
-    device=device,
-    calc_labels=True,
-    label_type=target_model_train_config_dict["label_type"],
-    act_fn_name=target_model.config.act_fn_name,
-    label_coeffs=target_label_coeffs,
-    data_generation_type="exactly_one_active",
-)
-batch, labels = dataset.generate_batch(batch_size)
-batch = batch.to(device)
-labels = labels.to(device)
-# Print some basic information about the model
-print(f"Number of features: {model.config.n_features}")
-print(f"Embedding dimension: {model.config.d_embed}")
-print(f"MLP dimension: {model.config.d_mlp}")
-print(f"Number of layers: {model.config.n_layers}")
-print(f"Number of subnetworks (k): {model.config.k}")
+results = {"target": [], "spd": [], "baseline": []}
+gen_types = [
+    "exactly_one_active",
+    "exactly_two_active",
+    "exactly_three_active",
+    "exactly_four_active",
+    "at_least_zero_active",
+]
+batch_size = 1000
+for gen_type in gen_types:
+    dataset = ResidualMLPDataset(
+        n_instances=model.config.n_instances,
+        n_features=model.config.n_features,
+        feature_probability=config.task_config.feature_probability,
+        device=device,
+        calc_labels=True,
+        label_type=target_model_train_config_dict["label_type"],
+        act_fn_name=target_model.config.act_fn_name,
+        label_coeffs=target_label_coeffs,
+        data_generation_type=gen_type,  # type: ignore
+    )
+    batch, labels = dataset.generate_batch(batch_size)
+    batch = batch.to(device)
+    labels = labels.to(device)
+    # # Print some basic information about the model
+    # print(f"Number of features: {model.config.n_features}")
+    # print(f"Embedding dimension: {model.config.d_embed}")
+    # print(f"MLP dimension: {model.config.d_mlp}")
+    # print(f"Number of layers: {model.config.n_layers}")
+    # print(f"Number of subnetworks (k): {model.config.k}")
 
-target_model_output, _, _ = target_model(batch)
+    target_model_output, _, _ = target_model(batch)
 
-assert config.topk is not None
-spd_outputs = run_spd_forward_pass(
-    spd_model=model,
-    target_model=target_model,
-    input_array=batch,
-    attribution_type=config.attribution_type,
-    batch_topk=config.batch_topk,
-    topk=config.topk,
-    distil_from_target=config.distil_from_target,
-)
-topk_recon_loss = (
-    calc_recon_mse(spd_outputs.spd_topk_model_output, target_model_output, has_instance_dim=True)
-    * batch_size
-)
-print(f"Topk recon loss to target model: {np.array(topk_recon_loss.detach().cpu())}")
-topk_recon_loss_labels = (
-    calc_recon_mse(spd_outputs.spd_topk_model_output, labels, has_instance_dim=True) * batch_size
-)
-print(f"Topk recon loss to labels: {np.array(topk_recon_loss_labels.detach().cpu())}")
-recon_loss = calc_recon_mse(target_model_output, labels, has_instance_dim=True) * batch_size
-print(f"Recon loss to labels: {np.array(recon_loss.detach().cpu())}")
+    assert config.topk is not None
+    spd_outputs = run_spd_forward_pass(
+        spd_model=model,
+        target_model=target_model,
+        input_array=batch,
+        attribution_type=config.attribution_type,
+        batch_topk=config.batch_topk,
+        topk=config.topk,
+        distil_from_target=config.distil_from_target,
+    )
+    topk_recon_loss_labels = (
+        calc_recon_mse(spd_outputs.spd_topk_model_output, labels, has_instance_dim=True)
+        * batch_size
+    )
+    recon_loss = calc_recon_mse(target_model_output, labels, has_instance_dim=True) * batch_size
+    baseline_loss = calc_recon_mse(batch, labels, has_instance_dim=True) * batch_size
 
-baseline_loss = calc_recon_mse(batch, labels, has_instance_dim=True) * batch_size
-print(f"Baseline loss: {np.array(baseline_loss.detach().cpu())}")
+    # Store results
+    results["target"].append(float(recon_loss.detach().cpu()))
+    results["spd"].append(float(topk_recon_loss_labels.detach().cpu()))
+    results["baseline"].append(float(baseline_loss.detach().cpu()))
 
+# %%
+# Create line plot of results
+fig, ax = plt.subplots(figsize=(10, 6))
+label_map = {"target": "Target model", "spd": "APD model", "baseline": "Baseline (f(x) = x)"}
+x = range(1, 5)
+for model_type in ["target", "spd", "baseline"]:
+    ax.plot(x, results[model_type], marker="o", label=label_map[model_type])
+
+ax.set_xlabel("Number of active features")
+ax.set_ylabel("MSE between model output and true labels")
+ax.set_xticks(x)
+ax.grid(True, alpha=0.3)
+ax.legend()
+
+ax.spines["top"].set_visible(False)
+ax.spines["right"].set_visible(False)
+
+plt.tight_layout()
+plt.show()
+# Save the figure
+fig.savefig(out_dir / f"resid_mlp_mse_{n_layers}layers.png")
+print(f"Saved figure to {out_dir / f'resid_mlp_mse_{n_layers}layers.png'}")
 
 # %%
 dataset = ResidualMLPDataset(
