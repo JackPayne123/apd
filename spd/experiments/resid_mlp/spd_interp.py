@@ -12,6 +12,7 @@ from spd.experiments.resid_mlp.models import ResidualMLPModel, ResidualMLPSPDRan
 from spd.experiments.resid_mlp.plotting import (
     analyze_per_feature_performance,
     plot_individual_feature_response,
+    plot_spd_feature_contributions_truncated,
     plot_spd_relu_contribution,
     plot_virtual_weights_target_spd,
     spd_calculate_virtual_weights,
@@ -19,6 +20,7 @@ from spd.experiments.resid_mlp.plotting import (
 from spd.experiments.resid_mlp.resid_mlp_dataset import ResidualMLPDataset
 from spd.experiments.resid_mlp.resid_mlp_decomposition import plot_subnet_categories
 from spd.run_spd import ResidualMLPTaskConfig, calc_recon_mse
+from spd.settings import REPO_ROOT
 from spd.utils import run_spd_forward_pass, set_seed
 
 # %% Loading
@@ -26,13 +28,15 @@ device = "cuda" if torch.cuda.is_available() else "cpu"
 print(f"Using device: {device}")
 set_seed(0)  # You can change this seed if needed
 # wandb_path = "wandb:spd-resid-mlp/runs/j68hf36u"
-wandb_path = "wandb:spd-resid-mlp/runs/kkstog7o"
+# wandb_path = "wandb:spd-resid-mlp/runs/kkstog7o"
+wandb_path = "wandb:spd-resid-mlp/runs/sf5xinvq"
 # Load the pretrained SPD model
 model, config, label_coeffs = ResidualMLPSPDRankPenaltyModel.from_pretrained(wandb_path)
 assert isinstance(config.task_config, ResidualMLPTaskConfig)
 # %%
 fig = plot_subnet_categories(model, device)
 fig.show()
+
 # %%
 
 # Path must be local
@@ -44,6 +48,74 @@ label_coeffs = label_coeffs.to(device)
 target_model = target_model.to(device)
 target_label_coeffs = target_label_coeffs.to(device)
 assert torch.allclose(target_label_coeffs, torch.tensor(label_coeffs))
+
+
+# %%
+# Plot the main truncated feature contributions figure for the paper
+fig = plot_spd_feature_contributions_truncated(
+    spd_model=model,
+    target_model=target_model,
+    device=device,
+    n_features=10,
+)
+fig.show()
+# Save the figure
+out_dir = REPO_ROOT / "spd/experiments/resid_mlp/out"
+fig.savefig(out_dir / "spd_feature_contributions.png")
+print(f"Saved figure to {out_dir / 'spd_feature_contributions.png'}")
+# %%
+# Get the entries for the main loss table in the paper
+batch_size = 100
+dataset = ResidualMLPDataset(
+    n_instances=model.config.n_instances,
+    n_features=model.config.n_features,
+    feature_probability=config.task_config.feature_probability,
+    device=device,
+    calc_labels=True,
+    label_type=target_model_train_config_dict["label_type"],
+    act_fn_name=target_model.config.act_fn_name,
+    label_coeffs=target_label_coeffs,
+    data_generation_type="exactly_one_active",
+)
+batch, labels = dataset.generate_batch(batch_size)
+batch = batch.to(device)
+labels = labels.to(device)
+# Print some basic information about the model
+print(f"Number of features: {model.config.n_features}")
+print(f"Embedding dimension: {model.config.d_embed}")
+print(f"MLP dimension: {model.config.d_mlp}")
+print(f"Number of layers: {model.config.n_layers}")
+print(f"Number of subnetworks (k): {model.config.k}")
+
+target_model_output, _, _ = target_model(batch)
+
+assert config.topk is not None
+spd_outputs = run_spd_forward_pass(
+    spd_model=model,
+    target_model=target_model,
+    input_array=batch,
+    attribution_type=config.attribution_type,
+    batch_topk=config.batch_topk,
+    topk=config.topk,
+    distil_from_target=config.distil_from_target,
+)
+topk_recon_loss = (
+    calc_recon_mse(spd_outputs.spd_topk_model_output, target_model_output, has_instance_dim=True)
+    * batch_size
+)
+print(f"Topk recon loss to target model: {np.array(topk_recon_loss.detach().cpu())}")
+topk_recon_loss_labels = (
+    calc_recon_mse(spd_outputs.spd_topk_model_output, labels, has_instance_dim=True) * batch_size
+)
+print(f"Topk recon loss to labels: {np.array(topk_recon_loss_labels.detach().cpu())}")
+recon_loss = calc_recon_mse(target_model_output, labels, has_instance_dim=True) * batch_size
+print(f"Recon loss to labels: {np.array(recon_loss.detach().cpu())}")
+
+baseline_loss = calc_recon_mse(batch, labels, has_instance_dim=True) * batch_size
+print(f"Baseline loss: {np.array(baseline_loss.detach().cpu())}")
+
+
+# %%
 dataset = ResidualMLPDataset(
     n_instances=model.config.n_instances,
     n_features=model.config.n_features,

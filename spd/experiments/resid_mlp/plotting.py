@@ -257,6 +257,31 @@ def relu_contribution_plot(
     ax2.set_xlim(-0.5, d_mlp * n_layers - 0.5)
 
 
+def feature_contribution_plot(
+    ax: plt.Axes,
+    all_diag_relu_conns: Float[Tensor, "n_features d_mlp"],
+    model: ResidualMLPModel | ResidualMLPSPDRankPenaltyModel,
+    n_features: int,
+):
+    diag_relu_conns: Float[Tensor, "n_features d_mlp"] = all_diag_relu_conns.cpu().detach()
+    d_mlp = model.config.d_mlp
+    n_layers = model.config.n_layers
+
+    ax.axvline(-0.5, color="k", linestyle="--", alpha=0.3, lw=0.5)
+    for i in range(n_features):
+        ax.scatter([i] * d_mlp * n_layers, diag_relu_conns[i, :], alpha=0.3, marker=".", c="k")
+        ax.axvline(i + 0.5, color="k", linestyle="--", alpha=0.3, lw=0.5)
+        for j in range(d_mlp * n_layers):
+            if diag_relu_conns[i, j].item() > 0.1:
+                cmap_label = plt.get_cmap("hsv")
+                ax.text(
+                    i, diag_relu_conns[i, j].item(), str(j), color=cmap_label(j / d_mlp / n_layers)
+                )
+    ax.axhline(0, color="k", linestyle="--", alpha=0.3)
+    ax.set_xlim(-0.5, n_features - 0.5)
+    ax.set_xlabel("Features")
+
+
 def spd_calculate_virtual_weights(
     model: ResidualMLPSPDRankPenaltyModel, device: str
 ) -> dict[str, Tensor]:
@@ -370,7 +395,6 @@ def plot_spd_relu_contribution(
     spd_model: ResidualMLPSPDRankPenaltyModel,
     target_model: ResidualMLPModel,
     device: str = "cuda",
-    k_select: int | Literal["sum_before", "sum_nocrossterms", "sum_onlycrossterms"] = 0,
     k_plot_limit: int | None = None,
 ):
     offset = 4
@@ -414,6 +438,56 @@ def plot_spd_relu_contribution(
             axes1[k + offset].set_xlabel("")
             axes2[k + offset].set_xlabel("")
     return fig1, fig2
+
+
+def plot_spd_feature_contributions_truncated(
+    spd_model: ResidualMLPSPDRankPenaltyModel,
+    target_model: ResidualMLPModel,
+    device: str = "cuda",
+    n_features: int | None = 10,
+):
+    assert spd_model.config.n_instances == 1, "Only one instance supported for now"
+
+    n_features = n_features or spd_model.config.n_features
+    fig1, axes1 = plt.subplots(2, 1, figsize=(10, 7), constrained_layout=True)
+    axes1 = np.atleast_1d(axes1)  # type: ignore
+
+    # First plot: Target model
+    virtual_weights = calculate_virtual_weights(target_model, device)
+    relu_conns: Float[Tensor, "n_features d_mlp"] = virtual_weights["diag_relu_conns"][
+        0, :n_features, :
+    ]
+    feature_contribution_plot(axes1[0], relu_conns, model=target_model, n_features=n_features)
+    axes1[0].set_ylabel("Neuron size")
+    axes1[0].set_xlabel("Input feature index")
+    axes1[0].set_title("Target model")
+    axes1[0].set_xticks(range(n_features))  # Ensure all xticks have labels
+
+    # Second plot: SPD model (without cross terms)
+    spd_relu_conns: Float[Tensor, "n_features d_mlp"] = spd_calculate_diag_relu_conns(
+        spd_model, device, k_select="sum_nocrossterms"
+    )[0, :n_features, :]
+    feature_contribution_plot(axes1[1], spd_relu_conns, model=spd_model, n_features=n_features)
+    axes1[1].set_ylabel("Neuron size")
+    axes1[1].set_xlabel("Parameter component index")
+    axes1[1].set_title("Individual APD parameter components")
+    axes1[1].set_xticks(range(n_features))
+
+    # Set the same y-axis limits for both plots
+    y_min = min(axes1[0].get_ylim()[0], axes1[1].get_ylim()[0])
+    y_max = max(axes1[0].get_ylim()[1], axes1[1].get_ylim()[1])
+    axes1[0].set_ylim(y_min, y_max)
+    axes1[1].set_ylim(y_min, y_max)
+
+    # Label the x axis with k indices. These are the subnets with the largest sum of neurons for
+    # each feature
+    diag_relu_conns: Float[Tensor, "k n_features d_mlp"] = spd_calculate_virtual_weights(
+        spd_model, device
+    )["diag_relu_conns"][0, :, :n_features, :]
+    k_indices = diag_relu_conns.sum(dim=-1).argmax(dim=0).tolist()
+    axes1[1].set_xticklabels(k_indices)  # Labels are the subnet indices
+
+    return fig1
 
 
 def analyze_per_feature_performance(
