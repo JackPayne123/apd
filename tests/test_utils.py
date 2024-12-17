@@ -1,4 +1,5 @@
 from pathlib import Path
+from typing import Literal
 
 import pytest
 import torch
@@ -243,55 +244,35 @@ def test_dataset_at_least_zero_active():
     ), f"Expected proportion {feature_probability}, but got {non_zero_proportion}"
 
 
-def test_dataset_exactly_one_active():
+@pytest.mark.parametrize("n", [1, 2, 4, 8])
+def test_dataset_exactly_n_active(n: int):
     n_instances = 3
-    n_features = 5
-    feature_probability = 0.5  # This won't be used when data_generation_type="exactly_one_active"
-    device = "cpu"
-    batch_size = 10
-    value_range = (-1.0, 3.0)
-
-    dataset = SparseFeatureDataset(
-        n_instances=n_instances,
-        n_features=n_features,
-        feature_probability=feature_probability,
-        device=device,
-        data_generation_type="exactly_one_active",
-        value_range=value_range,
-    )
-
-    batch, _ = dataset.generate_batch(batch_size)
-
-    # Check shape
-    assert batch.shape == (batch_size, n_instances, n_features), "Incorrect batch shape"
-
-    # Check that there's exactly one non-zero value per sample and instance
-    for sample in batch:
-        for instance in sample:
-            non_zero_count = torch.count_nonzero(instance)
-            assert non_zero_count == 1, f"Expected 1 non-zero value, but found {non_zero_count}"
-
-    # Check that the non-zero values are in the value_range
-    non_zero_values = batch[batch != 0]
-    assert torch.all(
-        (non_zero_values >= value_range[0]) & (non_zero_values <= value_range[1])
-    ), f"Non-zero values should be between {value_range[0]} and {value_range[1]}"
-
-
-def test_dataset_exactly_two_active():
-    n_instances = 3
-    n_features = 5
+    n_features = 10
     feature_probability = 0.5  # This won't be used when data_generation_type="exactly_one_active"
     device = "cpu"
     batch_size = 10
     value_range = (0.0, 1.0)
 
+    n_map: dict[
+        int,
+        Literal[
+            "exactly_one_active",
+            "exactly_two_active",
+            "exactly_four_active",
+            "exactly_eight_active",
+        ],
+    ] = {
+        1: "exactly_one_active",
+        2: "exactly_two_active",
+        4: "exactly_four_active",
+        8: "exactly_eight_active",
+    }
     dataset = SparseFeatureDataset(
         n_instances=n_instances,
         n_features=n_features,
         feature_probability=feature_probability,
         device=device,
-        data_generation_type="exactly_two_active",
+        data_generation_type=n_map[n],
         value_range=value_range,
     )
 
@@ -304,7 +285,7 @@ def test_dataset_exactly_two_active():
     for sample in batch:
         for instance in sample:
             non_zero_count = torch.count_nonzero(instance)
-            assert non_zero_count == 2, f"Expected 2 non-zero values, but found {non_zero_count}"
+            assert non_zero_count == n, f"Expected {n} non-zero values, but found {non_zero_count}"
 
     # Check that the non-zero values are in the value_range
     non_zero_values = batch[batch != 0]
