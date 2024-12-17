@@ -65,7 +65,20 @@ def plot_individual_feature_response(
         if plot_type == "line":
             ax.plot(x, y, color=cmap_viridis(f / n_features))
         elif plot_type == "scatter":
-            ax.scatter(x, y, c=cmap_viridis(f / n_features))
+            s = torch.ones_like(x)
+            alpha = torch.ones_like(x) * 0.33
+            s[f] = 20
+            alpha[f] = 1
+            # Permute order to make zorder random
+            order = torch.randperm(n_features)
+            ax.scatter(
+                x[order],
+                y[order],
+                c=cmap_viridis(f / n_features),
+                marker=".",
+                s=s[order],
+                alpha=alpha[order],
+            )
         else:
             raise ValueError("Unknown plot_type")
     # Plot labels
@@ -94,6 +107,7 @@ def plot_individual_feature_response(
             color="red",
             label="Target ($x+\mathrm{ReLU}(x)$)",
             marker="x",
+            s=5,
         )
     else:
         raise ValueError("Unknown plot_type")
@@ -145,11 +159,16 @@ def plot_single_feature_response(
     targets = label_fn(inputs) if subtract_inputs else inputs + label_fn(inputs)
     if plot_type == "line":
         ax.plot(x, y, color=cmap_viridis(feature_idx / n_features), label="Model")
-        ax.plot(torch.arange(n_features), targets.cpu().detach(), color="red", label="Labels")
+        ax.plot(torch.arange(n_features), targets.cpu().detach(), color="red", label="Target")
     elif plot_type == "scatter":
-        ax.scatter(x, y, c=cmap_viridis(feature_idx / n_features), label="Model")
+        ax.scatter(x, y, c=cmap_viridis(feature_idx / n_features), label="Model", marker=".", s=20)
         ax.scatter(
-            torch.arange(n_features), targets.cpu().detach(), c="red", label="Labels", marker="x"
+            torch.arange(n_features),
+            targets.cpu().detach(),
+            c="red",
+            label="Target",
+            marker="x",
+            s=5,
         )
     else:
         raise ValueError("Unknown plot_type")
@@ -187,7 +206,7 @@ def plot_single_relu_curve(
     label_fn = F.relu if model_config.act_fn_name == "relu" else F.gelu
     targets = label_fn(x) if subtract_inputs else x + label_fn(x)
     ax.plot(x, y, color=cmap_viridis(feature_idx / n_features), label="Model" if label else None)
-    ax.plot(x, targets.cpu().detach(), color="red", label="Labels" if label else None)
+    ax.plot(x, targets.cpu().detach(), color="red", label="Target" if label else None, ls="--")
     ax.legend()
     ax.set_xlabel(f"Input value $x_{{{feature_idx}}}$")
     ax.set_ylabel(f"Output value $y_{{{feature_idx}}}$")
