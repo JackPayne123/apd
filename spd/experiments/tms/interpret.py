@@ -5,6 +5,9 @@ import torch
 from jaxtyping import Float
 from torch import Tensor
 
+from spd.experiments.tms.models import TMSSPDRankPenaltyModel
+from spd.settings import REPO_ROOT
+
 
 def plot_vectors(
     subnets: Float[Tensor, "n_instances n_subnets n_features n_hidden"],
@@ -196,7 +199,7 @@ def plot_networks(
                     label = "Sum of subnets" if subnet_idx == 0 else f"Subnet {subnet_idx - 1}"
                     ax.text(
                         0.5,
-                        0,
+                        -0.1,
                         label,
                         ha="center",
                         va="center",
@@ -204,7 +207,7 @@ def plot_networks(
                     )
                 if subnet_idx == 0 and n_instances > 1:
                     ax.text(
-                        -0.1,
+                        -0.05,
                         0.5,
                         f"Instance {instance_idx}",
                         ha="center",
@@ -216,48 +219,19 @@ def plot_networks(
     return fig
 
 
-# # %%
-# if __name__ == "__main__":
-#     # pretrained_path = REPO_ROOT / "spd/experiments/tms/demo_spd_model/model_30000.pth"
-#     pretrained_path = (
-#         REPO_ROOT
-#         # / "spd/experiments/tms/out/fr_topk2.80e-01_topkrecon1.00e+01_topkl2_1.00e+00_sd0_attr-gra_lr1.00e-02_bs2048_ft5_hid2/model_20000.pth"
-#         / "spd/experiments/tms/out/fr_p8.00e-01_topk2.50e-01_topkrecon1.00e+01_schatten3.00e+00_sd0_attr-gra_lr1.00e-03_bs2048_ft5_hid2/model_30000.pth"
-#     )
-
-#     with open(pretrained_path.parent / "final_config.yaml") as f:
-#         config = Config(**yaml.safe_load(f))
-
-#     # assert config.full_rank, "This script only works for full rank models"
-#     model = torch.load(pretrained_path, map_location="cpu", weights_only=True)
-#     # W = torch.einsum("ikfm,ikmh->ikfh", model["A"], model["B"])
-#     # %%
-
-#     # subnets = model["subnetwork_params"]
-#     # bias = model["b_final"]
-#     # fig1 = plot_vectors(subnets, n_instances=1)
-#     # fig1.savefig(pretrained_path.parent / "polygon_diagram.png", bbox_inches="tight", dpi=200)
-#     # print(f"Saved figure to {pretrained_path.parent / 'polygon_diagram.png'}")
-
-#     # fig2 = plot_networks(subnets, n_instances=1, has_labels=False)
-#     # fig2.savefig(pretrained_path.parent / "network_diagram.png", bbox_inches="tight", dpi=200)
-#     # print(f"Saved figure to {pretrained_path.parent / 'network_diagram.png'}")
-
-
 # %%
-# from spd.experiments.resid_mlp.models import ResidualMLPSPDRankPenaltyModel
-from spd.experiments.tms.models import TMSSPDRankPenaltyModel
+path = "wandb:spd-tms/runs/bft0pgi8"  # Old run with attributions from spd model
 
-model, spd_config = TMSSPDRankPenaltyModel.from_pretrained(
-    # "wandb:apollo-interp/spd-tms/runs/iv2mwssf"
-    # "wandb:apollo-interp/spd-tms/runs/6avu1crx"
-    # "wandb:apollo-interp/spd-tms/runs/1an9c01t"
-    "wandb:apollo-interp/spd-tms/runs/353croa9"
-)
-# model, config_dict, label_coeffs = ResidualMLPSPDRankPenaltyModel.from_pretrained(
-#     "wandb:spd-resid-mlp/runs/svih4aik"
-# )
-print(model)
-# print(spd_config)
+# Plot showing polygons for each subnet
+model, spd_config = TMSSPDRankPenaltyModel.from_pretrained(path)
+subnets = model.all_subnetwork_params()["W"].detach().cpu()
 
-# %%
+out_dir = REPO_ROOT / "spd/experiments/tms/out"
+fig = plot_vectors(subnets, n_instances=1)
+fig.savefig(out_dir / "polygon_diagram.png", bbox_inches="tight", dpi=200)
+print(f"Saved figure to {out_dir / 'polygon_diagram.png'}")
+
+# Plot network diagrams for each subnet
+fig = plot_networks(subnets, n_instances=1)
+fig.savefig(out_dir / "network_diagram.png", bbox_inches="tight", dpi=200)
+print(f"Saved figure to {out_dir / 'network_diagram.png'}")
