@@ -262,18 +262,24 @@ def feature_contribution_plot(
     all_diag_relu_conns: Float[Tensor, "n_features d_mlp"],
     model: ResidualMLPModel | ResidualMLPSPDRankPenaltyModel,
     n_features: int,
-):
+    pre_labelled_neurons: dict[int, list[int]] | None = None,
+) -> dict[int, list[int]]:
     diag_relu_conns: Float[Tensor, "n_features d_mlp"] = all_diag_relu_conns.cpu().detach()
     d_mlp = model.config.d_mlp
     n_layers = model.config.n_layers
+
+    labelled_neurons: dict[int, list[int]] = {i: [] for i in range(n_features)}
 
     ax.axvline(-0.5, color="k", linestyle="--", alpha=0.3, lw=0.5)
     for i in range(n_features):
         ax.scatter([i] * d_mlp * n_layers, diag_relu_conns[i, :], alpha=0.3, marker=".", c="k")
         ax.axvline(i + 0.5, color="k", linestyle="--", alpha=0.3, lw=0.5)
-        n_labelled_neurons = 0
         for j in range(d_mlp * n_layers):
-            if diag_relu_conns[i, j].item() > 0.1:
+            # Label the neuron if it's in the pre-labelled set or if no pre-labelled set is provided
+            # and the neuron has a connection strength greater than 0.1
+            if (pre_labelled_neurons is not None and j in pre_labelled_neurons[i]) or (
+                pre_labelled_neurons is None and diag_relu_conns[i, j].item() > 0.1
+            ):
                 cmap_label = plt.get_cmap("hsv")
                 # Make the neuron label alternate between left and right (-0.1, 0.1)
                 ax.text(
@@ -281,12 +287,13 @@ def feature_contribution_plot(
                     diag_relu_conns[i, j].item(),
                     str(j),
                     color=cmap_label(j / d_mlp / n_layers),
-                    ha="left" if (n_labelled_neurons + 1) % 2 == 0 else "right",
+                    ha="left" if (len(labelled_neurons[i]) + 1) % 2 == 0 else "right",
                 )
-                n_labelled_neurons += 1
+                labelled_neurons[i].append(j)
     ax.axhline(0, color="k", linestyle="--", alpha=0.3)
     ax.set_xlim(-0.5, n_features - 0.5)
     ax.set_xlabel("Features")
+    return labelled_neurons
 
 
 def spd_calculate_virtual_weights(
@@ -464,7 +471,12 @@ def plot_spd_feature_contributions_truncated(
     relu_conns: Float[Tensor, "n_features d_mlp"] = virtual_weights["diag_relu_conns"][
         0, :n_features, :
     ]
-    feature_contribution_plot(axes1[0], relu_conns, model=target_model, n_features=n_features)
+    labelled_neurons = feature_contribution_plot(
+        axes1[0],
+        relu_conns,
+        model=target_model,
+        n_features=n_features,
+    )
     axes1[0].set_ylabel("Neuron size")
     axes1[0].set_xlabel("Input feature index")
     axes1[0].set_title("Target model")
@@ -474,7 +486,13 @@ def plot_spd_feature_contributions_truncated(
     spd_relu_conns: Float[Tensor, "n_features d_mlp"] = spd_calculate_diag_relu_conns(
         spd_model, device, k_select="sum_nocrossterms"
     )[0, :n_features, :]
-    feature_contribution_plot(axes1[1], spd_relu_conns, model=spd_model, n_features=n_features)
+    feature_contribution_plot(
+        axes1[1],
+        spd_relu_conns,
+        model=spd_model,
+        n_features=n_features,
+        pre_labelled_neurons=labelled_neurons,
+    )
     axes1[1].set_ylabel("Neuron size")
     axes1[1].set_xlabel("Parameter component index")
     axes1[1].set_title("Individual APD parameter components")
