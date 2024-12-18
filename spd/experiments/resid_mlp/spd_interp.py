@@ -248,9 +248,11 @@ fig = plot_feature_response_with_subnets(
     feature_idx=feature_idx,
     subnet_idx=subnet_indices[feature_idx],
     batch_size=100,
+    plot_type="errorbar",
 )["feature_response_with_subnets"]
 if fig is not None:
     fig.suptitle(f"Model {path}")
+    fig.savefig(f"feature_response_with_subnets_{feature_idx}.png", bbox_inches="tight", dpi=300)
     plt.show()
 
 

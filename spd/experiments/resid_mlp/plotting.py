@@ -28,7 +28,7 @@ def plot_individual_feature_response(
     sweep: bool = False,
     subtract_inputs: bool = True,
     instance_idx: int = 0,
-    plot_type: Literal["line", "scatter"] = "scatter",  # for Lee
+    plot_type: Literal["line", "scatter"] = "scatter",
     ax: plt.Axes | None = None,
     cbar: bool = True,
 ):
@@ -130,7 +130,7 @@ def plot_single_feature_response(
     subtract_inputs: bool = True,
     instance_idx: int = 0,
     feature_idx: int = 15,
-    plot_type: Literal["line", "scatter"] = "scatter",  # for Lee
+    plot_type: Literal["line", "scatter"] = "scatter",
     ax: plt.Axes | None = None,
 ):
     """Plot the response of the model to a single feature being active.
@@ -807,19 +807,16 @@ def plot_feature_response_with_subnets(
     instance_idx: int = 0,
     ax: plt.Axes | None = None,
     batch_size: int | None = None,
-    plot_type: Literal["line", "scatter"] = "scatter",  # for Lee
+    plot_type: Literal["line", "errorbar"] = "errorbar",
 ):
     n_instances = model_config.n_instances
     n_features = model_config.n_features
     batch_size = batch_size or n_features
 
     if ax is None:
-        fig, ax = plt.subplots(constrained_layout=True)
+        fig, ax = plt.subplots(constrained_layout=True, figsize=(10, 5))
     else:
         fig = ax.figure
-
-    cmap_blues = plt.get_cmap("Purples")
-    cmap_reds = plt.get_cmap("Oranges")
 
     batch = torch.zeros(batch_size, n_instances, n_features, device=device)
     batch[:, instance_idx, feature_idx] = 1
@@ -848,32 +845,55 @@ def plot_feature_response_with_subnets(
     mlp_out_target = out_blue.target_model_output[:, instance_idx, :] - out_WE_WU_only
 
     x = torch.arange(n_features)
-    for s in range(batch_size):
-        yb = mlp_out_blue_spd[s, :].detach().cpu()
-        yr = mlp_out_red_spd[s, :].detach().cpu()
-        if plot_type == "line":
-            ax.plot(x, yb, color=cmap_blues(s / batch_size), lw=0.3)
-            ax.plot(x, yr, color=cmap_reds(s / batch_size), lw=0.3)
-        elif plot_type == "scatter":
-            ax.scatter(x, yb, c=cmap_blues(s / batch_size), lw=0.3, marker=".")
-            ax.scatter(x, yr, c=cmap_reds(s / batch_size), lw=0.3, marker=".")
-        else:
-            raise ValueError("Unknown plot_type")
-    yt = mlp_out_target[0, :].detach().cpu()
-    if plot_type == "line":
+
+    if plot_type == "errorbar":
+        # Calculate means and stds across batch dimension
+        blue_mean = mlp_out_blue_spd.mean(dim=0).detach().cpu()
+        blue_std = mlp_out_blue_spd.std(dim=0).detach().cpu()
+        red_mean = mlp_out_red_spd.mean(dim=0).detach().cpu()
+        red_std = mlp_out_red_spd.std(dim=0).detach().cpu()
+
+        # Plot errorbars
+        ax.errorbar(
+            x,
+            blue_mean,
+            yerr=blue_std,
+            color="tab:purple",
+            label=f"SPD with right subnet ({subnet_idx})",
+            fmt="o",
+            markersize=2,
+        )
+        ax.errorbar(
+            x,
+            red_mean,
+            yerr=red_std,
+            color="tab:orange",
+            label=f"SPD without right subnet ({subnet_idx})",
+            fmt="o",
+            markersize=2,
+        )
+
+        # Plot target model output
+        yt = mlp_out_target[0, :].detach().cpu()
+        ax.scatter(x, yt, color="red", label="Target model", marker="x", s=10)
+    elif plot_type == "line":
+        cmap1 = plt.get_cmap("Purples")
+        cmap2 = plt.get_cmap("Oranges")
+        for s in range(batch_size):
+            yb = mlp_out_blue_spd[s, :].detach().cpu()
+            yr = mlp_out_red_spd[s, :].detach().cpu()
+            if plot_type == "line":
+                ax.plot(x, yb, color=cmap1(s / batch_size), lw=0.3)
+                ax.plot(x, yr, color=cmap2(s / batch_size), lw=0.3)
+        ax.plot([], [], color=cmap1(0), label="SPD with right subnet (scrubbed)")
+        ax.plot([], [], color=cmap2(0), label="SPD without right subnet (anti-scrubbed)")
+        yt = mlp_out_target[0, :].detach().cpu()
         ax.plot(x, yt, color="red", lw=0.5, label="Target model")
-    elif plot_type == "scatter":
-        ax.scatter(x, yt, marker="x", lw=0.5, label="Target model", c="r")
     else:
-        raise ValueError("Unknown plot_type")
+        raise ValueError(f"Invalid plot type: {plot_type}")
 
     ax.set_ylabel("MLP output (forward pass minus W_E W_U contribution)")
     ax.set_xlabel("Output index")
-    ax.plot([], [], color=cmap_blues(0), label=f"SPD with right subnet ({subnet_idx})")
-    ax.plot([], [], color=cmap_reds(0), label=f"SPD without right subnet ({subnet_idx})")
-    ax.scatter(
-        x, mlp_out_target[0, :].detach().cpu(), color="wheat", label="Target", marker=".", zorder=-1
-    )
     ax.set_title(f"SPD model output for increasing number of subnets, feature {feature_idx}")
     ax.legend()
     return {"feature_response_with_subnets": fig}
