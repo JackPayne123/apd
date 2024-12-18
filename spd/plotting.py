@@ -139,3 +139,29 @@ def plot_subnetwork_correlations(
         ax.set_xlabel("Subnetwork")
         ax.set_ylabel("Subnetwork")
     return {"subnetwork_correlation_matrix": fig}
+
+
+def plot_sparse_feature_mse_line_plot(
+    results: dict[str, list[float]], label_map: dict[str, str]
+) -> plt.Figure:
+    # Create line plots of target model, spd model, and baseline
+    fig, ax = plt.subplots(figsize=(10, 6))
+    # X values are from 1 to the number of active features in the results
+    x = range(1, len(results[list(results.keys())[0]]) + 1)
+    for model_type in label_map:
+        ax.plot(x, results[model_type], marker="o", label=label_map[model_type])
+
+    ax.set_xlabel("Number of active features")
+    ax.set_ylabel("MSE between model output and true labels")
+    ax.set_xticks(x)
+    ax.grid(True, alpha=0.3)
+    ax.legend()
+
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+
+    # Ensure that 0 is the bottom of the y-axis
+    ax.set_ylim(bottom=0)
+
+    plt.tight_layout()
+    return fig

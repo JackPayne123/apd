@@ -615,6 +615,7 @@ class SparseFeatureDataset(
             "exactly_two_active",
             "exactly_three_active",
             "exactly_four_active",
+            "exactly_five_active",
             "at_least_zero_active",
         ] = "at_least_zero_active",
         value_range: tuple[float, float] = (0.0, 1.0),
@@ -642,6 +643,7 @@ class SparseFeatureDataset(
             "exactly_two_active": 2,
             "exactly_three_active": 3,
             "exactly_four_active": 4,
+            "exactly_five_active": 5,
         }
         if self.data_generation_type in number_map:
             n = number_map[self.data_generation_type]
@@ -729,3 +731,74 @@ def compute_feature_importances(
             n_instances=n_instances,
         )
     return importance_tensor
+
+
+def calc_recon_mse(
+    output: Float[Tensor, "batch n_features"] | Float[Tensor, "batch n_instances n_features"],
+    labels: Float[Tensor, "batch n_features"] | Float[Tensor, "batch n_instances n_features"],
+    has_instance_dim: bool = False,
+) -> Float[Tensor, ""] | Float[Tensor, " n_instances"]:
+    recon_loss = (output - labels) ** 2
+    if recon_loss.ndim == 3:
+        assert has_instance_dim
+        recon_loss = einops.reduce(recon_loss, "b i f -> i", "mean")
+    elif recon_loss.ndim == 2:
+        recon_loss = recon_loss.mean()
+    else:
+        raise ValueError(f"Expected 2 or 3 dims in recon_loss, got {recon_loss.ndim}")
+    return recon_loss
+
+
+def collect_sparse_dataset_mse_losses(
+    dataset: SparseFeatureDataset,
+    target_model: Model,
+    spd_model: SPDModel | SPDRankPenaltyModel,
+    batch_size: int,
+    device: str,
+    topk: float,
+    attribution_type: Literal["gradient", "ablation", "activation"],
+    batch_topk: bool,
+    distil_from_target: bool,
+    max_n_active_features: int,
+) -> dict[str, list[Float[Tensor, ""] | Float[Tensor, " n_instances"]]]:
+    """Collect the MSE losses for specific number of active features.
+
+    We use a no-op baseline loss (i.e. the loss of the original input).
+    """
+    # Get the entries for the main loss table in the paper
+    results = {"target": [], "spd": [], "baseline": []}
+    gen_types = [
+        "exactly_one_active",
+        "exactly_two_active",
+        "exactly_three_active",
+        "exactly_four_active",
+        "exactly_five_active",
+    ][:max_n_active_features]
+
+    for gen_type in gen_types:
+        dataset.data_generation_type = gen_type
+        batch, labels = dataset.generate_batch(batch_size)
+        batch = batch.to(device)
+        labels = labels.to(device)
+
+        target_model_output, _, _ = target_model(batch)
+
+        spd_outputs = run_spd_forward_pass(
+            spd_model=spd_model,
+            target_model=target_model,
+            input_array=batch,
+            attribution_type=attribution_type,
+            batch_topk=batch_topk,
+            topk=topk,
+            distil_from_target=distil_from_target,
+        )
+        topk_recon_loss_labels = calc_recon_mse(
+            spd_outputs.spd_topk_model_output, labels, has_instance_dim=True
+        )
+        recon_loss = calc_recon_mse(target_model_output, labels, has_instance_dim=True)
+        baseline_loss = calc_recon_mse(batch, labels, has_instance_dim=True)
+
+        results["target"].append(recon_loss)
+        results["spd"].append(topk_recon_loss_labels)
+        results["baseline"].append(baseline_loss)
+    return results

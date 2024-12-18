@@ -244,7 +244,7 @@ def test_dataset_at_least_zero_active():
     ), f"Expected proportion {feature_probability}, but got {non_zero_proportion}"
 
 
-@pytest.mark.parametrize("n", [1, 2, 4, 8])
+@pytest.mark.parametrize("n", [1, 2, 3, 4, 5])
 def test_dataset_exactly_n_active(n: int):
     n_instances = 3
     n_features = 10
@@ -258,14 +258,16 @@ def test_dataset_exactly_n_active(n: int):
         Literal[
             "exactly_one_active",
             "exactly_two_active",
+            "exactly_three_active",
             "exactly_four_active",
-            "exactly_eight_active",
+            "exactly_five_active",
         ],
     ] = {
         1: "exactly_one_active",
         2: "exactly_two_active",
+        3: "exactly_three_active",
         4: "exactly_four_active",
-        8: "exactly_eight_active",
+        5: "exactly_five_active",
     }
     dataset = SparseFeatureDataset(
         n_instances=n_instances,

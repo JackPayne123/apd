@@ -26,7 +26,7 @@ from tqdm import tqdm
 from spd.log import logger
 from spd.models.base import Model, SPDFullRankModel, SPDRankPenaltyModel
 from spd.types import ModelPath, Probability, RootPath
-from spd.utils import calc_topk_mask, calculate_attributions
+from spd.utils import calc_recon_mse, calc_topk_mask, calculate_attributions
 
 
 class TMSTaskConfig(BaseModel):
@@ -311,22 +311,6 @@ def get_lr_with_warmup(
     if step < warmup_steps:
         return lr * (step / warmup_steps)
     return lr * lr_schedule_fn(step - warmup_steps, steps - warmup_steps)
-
-
-def calc_recon_mse(
-    output: Float[Tensor, "batch n_features"] | Float[Tensor, "batch n_instances n_features"],
-    labels: Float[Tensor, "batch n_features"] | Float[Tensor, "batch n_instances n_features"],
-    has_instance_dim: bool = False,
-) -> Float[Tensor, ""] | Float[Tensor, " n_instances"]:
-    recon_loss = (output - labels) ** 2
-    if recon_loss.ndim == 3:
-        assert has_instance_dim
-        recon_loss = einops.reduce(recon_loss, "b i f -> i", "mean")
-    elif recon_loss.ndim == 2:
-        recon_loss = recon_loss.mean()
-    else:
-        raise ValueError(f"Expected 2 or 3 dims in recon_loss, got {recon_loss.ndim}")
-    return recon_loss
 
 
 def calc_topk_l2_full_rank(

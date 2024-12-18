@@ -263,16 +263,50 @@ def feature_contribution_plot(
     model: ResidualMLPModel | ResidualMLPSPDRankPenaltyModel,
     n_features: int,
     pre_labelled_neurons: dict[int, list[int]] | None = None,
+    legend: bool = True,
 ) -> dict[int, list[int]]:
     diag_relu_conns: Float[Tensor, "n_features d_mlp"] = all_diag_relu_conns.cpu().detach()
     d_mlp = model.config.d_mlp
     n_layers = model.config.n_layers
 
+    # Define colors for different layers
+    assert n_layers in [1, 2]
+    layer_colors = ["grey"] if n_layers == 1 else ["blue", "red"]
+    distinct_colors = [
+        "#E41A1C",  # red
+        "#377EB8",  # blue
+        "#4DAF4A",  # green
+        "#984EA3",  # purple
+        "#FF7F00",  # orange
+        "#A65628",  # brown
+        "#F781BF",  # pink
+        "#1B9E77",  # teal
+        "#D95F02",  # dark orange
+        "#7570B3",  # slate blue
+        "#66A61E",  # lime green
+    ]
+
+    # Add legend if there are two layers
+    if n_layers == 2 and legend:
+        # Create dummy scatter plots for legend
+        ax.scatter([], [], c="blue", alpha=0.3, marker=".", label="First MLP")
+        ax.scatter([], [], c="red", alpha=0.3, marker=".", label="Second MLP")
+        ax.legend(loc="upper right")
+
     labelled_neurons: dict[int, list[int]] = {i: [] for i in range(n_features)}
 
     ax.axvline(-0.5, color="k", linestyle="--", alpha=0.3, lw=0.5)
     for i in range(n_features):
-        ax.scatter([i] * d_mlp * n_layers, diag_relu_conns[i, :], alpha=0.3, marker=".", c="k")
+        # Split points by layer and plot separately
+        for layer in range(n_layers):
+            layer_indices = slice(layer * d_mlp, (layer + 1) * d_mlp)
+            ax.scatter(
+                [i] * d_mlp,
+                diag_relu_conns[i, layer_indices],
+                alpha=0.3,
+                marker=".",
+                c=layer_colors[layer],
+            )
         ax.axvline(i + 0.5, color="k", linestyle="--", alpha=0.3, lw=0.5)
         for j in range(d_mlp * n_layers):
             # Label the neuron if it's in the pre-labelled set or if no pre-labelled set is provided
@@ -280,19 +314,24 @@ def feature_contribution_plot(
             if (pre_labelled_neurons is not None and j in pre_labelled_neurons[i]) or (
                 pre_labelled_neurons is None and diag_relu_conns[i, j].item() > 0.1
             ):
-                cmap_label = plt.get_cmap("hsv")
+                color_idx = j % len(distinct_colors)
                 # Make the neuron label alternate between left and right (-0.1, 0.1)
+                # Add 0.05 or -0.05 to the x coordinate to shift the label left or right
                 ax.text(
                     i,
                     diag_relu_conns[i, j].item(),
                     str(j),
-                    color=cmap_label(j / d_mlp / n_layers),
+                    color=distinct_colors[color_idx],
                     ha="left" if (len(labelled_neurons[i]) + 1) % 2 == 0 else "right",
                 )
                 labelled_neurons[i].append(j)
     ax.axhline(0, color="k", linestyle="--", alpha=0.3)
     ax.set_xlim(-0.5, n_features - 0.5)
     ax.set_xlabel("Features")
+
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+
     return labelled_neurons
 
 
@@ -476,9 +515,10 @@ def plot_spd_feature_contributions_truncated(
         relu_conns,
         model=target_model,
         n_features=n_features,
+        legend=True,
     )
     axes1[0].set_ylabel("Neuron size")
-    axes1[0].set_xlabel("Input feature index")
+    axes1[0].set_xlabel(f"Input feature index (first {n_features} shown)")
     axes1[0].set_title("Target model")
     axes1[0].set_xticks(range(n_features))  # Ensure all xticks have labels
 
@@ -492,6 +532,7 @@ def plot_spd_feature_contributions_truncated(
         model=spd_model,
         n_features=n_features,
         pre_labelled_neurons=labelled_neurons,
+        legend=False,
     )
     axes1[1].set_ylabel("Neuron size")
     axes1[1].set_xlabel("Parameter component index")
