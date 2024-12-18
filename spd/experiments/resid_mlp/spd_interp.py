@@ -232,8 +232,6 @@ plot_resid_vs_mlp_out(
 )
 
 # %% Linearity test: Enable one subnet after the other
-# TODO This could be little-violins. Or fill_betweens
-
 
 # Dictionary feature_idx -> subnet_idx
 subnet_indices = get_feature_subnet_map(top1_model_fn, device, model.config, instance_idx=0)
@@ -281,9 +279,12 @@ def target_model_fn(batch: Float[Tensor, "batch n_instances"]):
 # Dictionary feature_idx -> subnet_idx
 subnet_indices = get_feature_subnet_map(top1_model_fn, device, model.config, instance_idx=0)
 
-for data_generation_type in data_generation_types:
-    batch_size = 5_000
-    n_batches = 20
+# for data_generation_type in data_generation_types:
+for data_generation_type in ["at_least_zero_active"]:
+    batch_size = config.batch_size
+    # make sure to use config.batch_size because
+    # it's tuned to config.topk!
+    n_batches = 100
     test_dataset = ResidualMLPDataset(
         n_instances=model.config.n_instances,
         n_features=model.config.n_features,
@@ -319,6 +320,9 @@ for data_generation_type in data_generation_types:
             scrubbed_topk_mask[b, i, s] = 1
             antiscrubbed_topk_mask[b, i, s] = 0
         if data_generation_type == "at_least_zero_active":
+            assert (
+                batch_size == config.batch_size
+            ), "topk and batch_topk are tuned to config.batch_size"
             topk = config.topk
             batch_topk = config.batch_topk
         elif data_generation_type == "exactly_one_active":
@@ -378,12 +382,36 @@ for data_generation_type in data_generation_types:
 
     fig, ax = plt.subplots(figsize=(15, 5))
     log_bins = np.geomspace(1e-7, loss_zero.max().item(), 50).tolist()
-    ax.hist(loss_spd, bins=log_bins, label="SPD", alpha=0.5)
-    ax.hist(loss_scrubbed, bins=log_bins, label="Scrubbed", histtype="step")
-    ax.hist(loss_antiscrubbed, bins=log_bins, label="Antiscrubbed", histtype="step")
-    ax.hist(loss_random, bins=log_bins, label="Random", histtype="step")
-    ax.hist(loss_zero, bins=log_bins, label="Zero", histtype="step")
-    ax.axvline(loss_naive, color="black", linestyle="--", label="Naive")
+    ax.hist(
+        loss_spd,
+        bins=log_bins,
+        label="APD (top-k)",
+        histtype="step",
+        lw=2,
+        color="tab:purple",
+    )
+    ax.axvline(loss_spd.mean().item(), color="tab:purple", linestyle="--")
+    ax.hist(
+        loss_scrubbed,
+        bins=log_bins,
+        label="APD (scrubbed)",
+        histtype="step",
+        lw=2,
+        color="tab:orange",
+    )
+    ax.axvline(loss_scrubbed.mean().item(), color="tab:orange", linestyle="--")
+    ax.hist(
+        loss_antiscrubbed,
+        bins=log_bins,
+        label="APD (anti-scrubbed)",
+        histtype="step",
+        lw=2,
+        color="tab:green",
+    )
+    ax.axvline(loss_antiscrubbed.mean().item(), color="tab:green", linestyle="--")
+    # ax.hist(loss_random, bins=log_bins, label="APD (random)", histtype="step")
+    # ax.hist(loss_zero, bins=log_bins, label="APD (zero)", histtype="step")
+    ax.axvline(loss_naive, color="black", linestyle="--", label="Monosemantic neuron solution")
     ax.legend()
     ax.set_ylabel(f"Count (out of {batch_size})")
     ax.set_xlabel("Recon loss")

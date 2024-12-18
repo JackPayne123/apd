@@ -859,7 +859,7 @@ def plot_feature_response_with_subnets(
             blue_mean,
             yerr=blue_std,
             color="tab:purple",
-            label=f"SPD with right subnet ({subnet_idx})",
+            label="APD scrubbed",
             fmt="o",
             markersize=2,
         )
@@ -868,7 +868,7 @@ def plot_feature_response_with_subnets(
             red_mean,
             yerr=red_std,
             color="tab:orange",
-            label=f"SPD without right subnet ({subnet_idx})",
+            label="APD anti-scrubbed",
             fmt="o",
             markersize=2,
         )
@@ -876,6 +876,13 @@ def plot_feature_response_with_subnets(
         # Plot target model output
         yt = mlp_out_target[0, :].detach().cpu()
         ax.scatter(x, yt, color="red", label="Target model", marker="x", s=10)
+        # Remove all axes lines
+        ax.spines["top"].set_visible(False)
+        ax.spines["right"].set_visible(False)
+        ax.spines["bottom"].set_visible(False)
+        ax.spines["left"].set_visible(False)
+        ax.set_xticks([])
+        ax.set_yticks([])
     elif plot_type == "line":
         cmap1 = plt.get_cmap("Purples")
         cmap2 = plt.get_cmap("Oranges")
@@ -885,8 +892,8 @@ def plot_feature_response_with_subnets(
             if plot_type == "line":
                 ax.plot(x, yb, color=cmap1(s / batch_size), lw=0.3)
                 ax.plot(x, yr, color=cmap2(s / batch_size), lw=0.3)
-        ax.plot([], [], color=cmap1(0), label="SPD with right subnet (scrubbed)")
-        ax.plot([], [], color=cmap2(0), label="SPD without right subnet (anti-scrubbed)")
+        ax.plot([], [], color=cmap1(0), label="APD with right subnet (scrubbed)")
+        ax.plot([], [], color=cmap2(0), label="APD without right subnet (anti-scrubbed)")
         yt = mlp_out_target[0, :].detach().cpu()
         ax.plot(x, yt, color="red", lw=0.5, label="Target model")
     else:
