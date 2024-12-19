@@ -91,7 +91,7 @@ def plot_individual_feature_response(
             torch.arange(n_features),
             targets.cpu().detach(),
             color="red",
-            label="Target ($x+\mathrm{ReLU}(x)$)",
+            label="Label ($x+\mathrm{ReLU}(x)$)",
         )
         ax.plot(
             torch.arange(n_features),
@@ -105,7 +105,7 @@ def plot_individual_feature_response(
             torch.arange(n_features),
             targets.cpu().detach(),
             color="red",
-            label="Target ($x+\mathrm{ReLU}(x)$)",
+            label="Label ($x+\mathrm{ReLU}(x)$)",
             marker="x",
             s=5,
         )
@@ -119,7 +119,10 @@ def plot_individual_feature_response(
         cbar = plt.colorbar(sm, ax=ax, orientation="vertical")
         cbar.set_label("Active input feature index")
     ax.set_xlabel("Output index")
-    ax.set_ylabel("Output values $y_i$ (superimposed)")
+    ax.set_ylabel("Output values $x̂_i$")
+
+    ax.set_xticks([0, n_features])
+    ax.set_xticklabels([0, n_features])
     return fig
 
 
@@ -158,15 +161,22 @@ def plot_single_feature_response(
     label_fn = F.relu if model_config.act_fn_name == "relu" else F.gelu
     targets = label_fn(inputs) if subtract_inputs else inputs + label_fn(inputs)
     if plot_type == "line":
-        ax.plot(x, y, color=cmap_viridis(feature_idx / n_features), label="Model")
-        ax.plot(torch.arange(n_features), targets.cpu().detach(), color="red", label="Target")
+        ax.plot(x, y, color=cmap_viridis(feature_idx / n_features), label="Target Model")
+        ax.plot(
+            torch.arange(n_features),
+            targets.cpu().detach(),
+            color="red",
+            label="Label ($x+\mathrm{ReLU}(x)$)",
+        )
     elif plot_type == "scatter":
-        ax.scatter(x, y, c=cmap_viridis(feature_idx / n_features), label="Model", marker=".", s=20)
+        ax.scatter(
+            x, y, c=cmap_viridis(feature_idx / n_features), label="Target Model", marker=".", s=20
+        )
         ax.scatter(
             torch.arange(n_features),
             targets.cpu().detach(),
             c="red",
-            label="Target",
+            label="Label ($x+\mathrm{ReLU}(x)$)",
             marker="x",
             s=5,
         )
@@ -174,8 +184,11 @@ def plot_single_feature_response(
         raise ValueError("Unknown plot_type")
     ax.legend()
     ax.set_xlabel("Output index")
-    ax.set_ylabel(f"Output value $y_{{{feature_idx}}}$")
+    ax.set_ylabel(f"Output value $x̂_{{{feature_idx}}}$")
     ax.set_title(f"Output for a single input $x_{{{feature_idx}}}=1$")
+
+    ax.set_xticks([0, n_features])
+    ax.set_xticklabels([0, n_features])
     return fig
 
 
@@ -205,12 +218,20 @@ def plot_single_relu_curve(
     y = out[:, feature_idx].detach().cpu()
     label_fn = F.relu if model_config.act_fn_name == "relu" else F.gelu
     targets = label_fn(x) if subtract_inputs else x + label_fn(x)
-    ax.plot(x, y, color=cmap_viridis(feature_idx / n_features), label="Model" if label else None)
-    ax.plot(x, targets.cpu().detach(), color="red", label="Target" if label else None, ls="--")
+    ax.plot(
+        x, y, color=cmap_viridis(feature_idx / n_features), label="Target Model" if label else None
+    )
+    ax.plot(
+        x,
+        targets.cpu().detach(),
+        color="red",
+        label="Label ($x+\mathrm{ReLU}(x)$)" if label else None,
+        ls="--",
+    )
     ax.legend()
     ax.set_xlabel(f"Input value $x_{{{feature_idx}}}$")
-    ax.set_ylabel(f"Output value $y_{{{feature_idx}}}$")
-    ax.set_title(f"Input-output response for feature {feature_idx}")
+    ax.set_ylabel(f"Output value $x̂_{{{feature_idx}}}$")
+    ax.set_title(f"Input-output response for input feature {feature_idx}")
     return fig
 
 
@@ -234,7 +255,7 @@ def plot_all_relu_curves(
             ax=ax,
             label=False,
         )
-    ax.set_title(f"Input-output response for all {n_features} features")
+    ax.set_title(f"Input-output response for all {n_features} input features")
     ax.set_xlabel("Input values $x_i$")
     # ax.set_ylabel("Output values $y_i$ (superimposed)")
     ax.set_ylabel("")

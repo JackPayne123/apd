@@ -20,15 +20,19 @@ from spd.experiments.resid_mlp.plotting import (
 )
 from spd.experiments.resid_mlp.resid_mlp_dataset import ResidualMLPDataset
 from spd.experiments.resid_mlp.train_resid_mlp import ResidMLPTrainConfig
+from spd.settings import REPO_ROOT
 from spd.types import ModelPath
 from spd.utils import set_seed
 
 # %% Load model and config
 
+out_dir = REPO_ROOT / "spd/experiments/resid_mlp/figures/"
+out_dir.mkdir(parents=True, exist_ok=True)
 
 set_seed(0)
 device = "cpu" if torch.cuda.is_available() else "cpu"
-path: ModelPath = "wandb:spd-train-resid-mlp/runs/qbpuju4j"
+# path: ModelPath = "wandb:spd-train-resid-mlp/runs/zas5yjdl"  # 1 layer
+path: ModelPath = "wandb:spd-train-resid-mlp/runs/sv23xrhj"  # 2 layers
 model, train_config_dict, label_coeffs = ResidualMLPModel.from_pretrained(path)
 model = model.to(device)
 train_config = ResidMLPTrainConfig(**train_config_dict)
@@ -46,6 +50,7 @@ dataset = ResidualMLPDataset(
 )
 batch, labels = dataset.generate_batch(train_config.batch_size)
 
+n_layers = train_config.resid_mlp_config.n_layers
 # %% Plot feature response with one active feature
 fig = plot_individual_feature_response(
     lambda batch: model(batch)[0],
@@ -82,7 +87,12 @@ plot_single_relu_curve(
     feature_idx=15,
     ax=ax2,
 )
-fig.savefig("feature_response_single.png", bbox_inches="tight", dpi=300)
+fig.savefig(
+    out_dir / f"resid_mlp_feature_response_single_{n_layers}layers.png",
+    bbox_inches="tight",
+    dpi=300,
+)
+print(f"Saved figure to {out_dir / f'resid_mlp_feature_response_single_{n_layers}layers.png'}")
 
 fig, [ax1, ax2] = plt.subplots(ncols=2, figsize=(10, 5), constrained_layout=True, sharey=True)
 plot_individual_feature_response(
@@ -94,7 +104,7 @@ plot_individual_feature_response(
     ax=ax1,
     cbar=False,
 )
-ax1.set_title("Outputs for any one-hot input (coloured by input index)")
+ax1.set_title("Outputs one-hot inputs (coloured by input index)")
 plot_all_relu_curves(
     lambda batch: model(batch)[0],
     model_config=train_config.resid_mlp_config,
@@ -110,7 +120,14 @@ sm = plt.cm.ScalarMappable(
 sm.set_array([])
 cbar = plt.colorbar(sm, ax=ax2, orientation="vertical")
 cbar.set_label("Active input feature index")
-fig.savefig("feature_response_multi.png", bbox_inches="tight", dpi=300)
+
+ax2.plot([], [], color="red", ls="--", label="Label ($x+\mathrm{ReLU}(x)$)")
+ax2.legend(loc="upper left")
+
+fig.savefig(
+    out_dir / f"resid_mlp_feature_response_multi_{n_layers}layers.png", bbox_inches="tight", dpi=300
+)
+print(f"Saved figure to {out_dir / f'resid_mlp_feature_response_multi_{n_layers}layers.png'}")
 
 # %%
 
