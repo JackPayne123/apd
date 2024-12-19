@@ -123,6 +123,11 @@ def plot_individual_feature_response(
 
     ax.set_xticks([0, n_features])
     ax.set_xticklabels([0, n_features])
+
+    # Remove top and right spines
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+
     return fig
 
 
@@ -189,6 +194,11 @@ def plot_single_feature_response(
 
     ax.set_xticks([0, n_features])
     ax.set_xticklabels([0, n_features])
+
+    # Remove top and right spines
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+
     return fig
 
 
@@ -232,6 +242,11 @@ def plot_single_relu_curve(
     ax.set_xlabel(f"Input value $x_{{{feature_idx}}}$")
     ax.set_ylabel(f"Output value $x̂_{{{feature_idx}}}$")
     ax.set_title(f"Input-output response for input feature {feature_idx}")
+
+    # Remove top and right spines
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+
     return fig
 
 
@@ -257,8 +272,10 @@ def plot_all_relu_curves(
         )
     ax.set_title(f"Input-output response for all {n_features} input features")
     ax.set_xlabel("Input values $x_i$")
-    # ax.set_ylabel("Output values $y_i$ (superimposed)")
-    ax.set_ylabel("")
+    ax.set_ylabel("Output values $x̂_i$")
+    # Remove top and right spines
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
     return fig
 
 
