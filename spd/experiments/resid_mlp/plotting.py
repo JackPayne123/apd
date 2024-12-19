@@ -824,7 +824,9 @@ def plot_feature_response_with_subnets(
     topk_mask_red = torch.zeros_like(batch[:, :, :])
     topk_mask_blue[:, :, subnet_idx] = 1
     for s in range(batch_size):
-        choice = torch.randperm(n_features - 1)[:s]
+        # Randomly ablate half the features
+        half_n_features = n_features // 2
+        choice = torch.randperm(n_features - 1)[:half_n_features]
         # Exclude feature_idx from choice
         choice[choice >= subnet_idx] += 1
         topk_mask_blue[s, :, choice] = 1
