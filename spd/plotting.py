@@ -1,4 +1,4 @@
-from typing import Any
+from typing import Any, Literal
 
 import einops
 import matplotlib.pyplot as plt
@@ -9,9 +9,17 @@ from mpl_toolkits.axes_grid1 import make_axes_locatable
 from torch import Tensor
 from torch.utils.data import DataLoader
 
+from spd.experiments.resid_mlp.models import ResidualMLPModel, ResidualMLPSPDRankPenaltyModel
+from spd.experiments.tms.models import TMSModel, TMSSPDRankPenaltyModel
 from spd.models.base import Model, SPDFullRankModel, SPDRankPenaltyModel
 from spd.run_spd import Config
-from spd.utils import calc_topk_mask, calculate_attributions
+from spd.utils import (
+    SparseFeatureDataset,
+    calc_recon_mse,
+    calc_topk_mask,
+    calculate_attributions,
+    run_spd_forward_pass,
+)
 
 
 def plot_subnetwork_attributions_statistics(
@@ -139,6 +147,91 @@ def plot_subnetwork_correlations(
         ax.set_xlabel("Subnetwork")
         ax.set_ylabel("Subnetwork")
     return {"subnetwork_correlation_matrix": fig}
+
+
+def collect_sparse_dataset_mse_losses(
+    dataset: SparseFeatureDataset,
+    target_model: ResidualMLPModel | TMSModel,
+    spd_model: TMSSPDRankPenaltyModel | ResidualMLPSPDRankPenaltyModel,
+    batch_size: int,
+    device: str,
+    topk: float,
+    attribution_type: Literal["gradient", "ablation", "activation"],
+    batch_topk: bool,
+    distil_from_target: bool,
+    max_n_active_features: int,
+) -> dict[str, list[Float[Tensor, ""] | Float[Tensor, " n_instances"]]]:
+    """Collect the MSE losses for specific number of active features, as well as for
+    'at_least_zero_active'.
+
+    We calculate two baselines:
+    - baseline_batch: a no-op baseline loss (i.e. the loss of the original input).
+    - baseline_monosemantic: a baseline loss where the first d_mlp feature indices get mapped to the
+        true labels and the final (n_features - d_mlp) features are the raw inputs.
+
+    Returns:
+        A dictionary keyed by generation type, with values being lists of MSE losses going from
+        n_features = 1 to n_features = max_n_active_features and a final value for the
+        `at_least_zero_active` generation type.
+    """
+    target_model.to(device)
+    spd_model.to(device)
+    # Get the entries for the main loss table in the paper
+    results = {
+        "target": [],
+        "spd": [],
+        "baseline_batch": [],
+        "baseline_monosemantic": [],
+    }
+    gen_types = [
+        "exactly_one_active",
+        "exactly_two_active",
+        "exactly_three_active",
+        "exactly_four_active",
+        "exactly_five_active",
+    ][:max_n_active_features]
+    gen_types.append("at_least_zero_active")
+
+    for gen_type in gen_types:
+        dataset.data_generation_type = gen_type
+        batch, labels = dataset.generate_batch(batch_size)
+        batch = batch.to(device)
+        labels = labels.to(device)
+
+        target_model_output, _, _ = target_model(batch)
+
+        spd_outputs = run_spd_forward_pass(
+            spd_model=spd_model,
+            target_model=target_model,
+            input_array=batch,
+            attribution_type=attribution_type,
+            batch_topk=batch_topk,
+            topk=topk,
+            distil_from_target=distil_from_target,
+        )
+        topk_recon_loss_labels = calc_recon_mse(
+            spd_outputs.spd_topk_model_output, labels, has_instance_dim=True
+        )
+        recon_loss = calc_recon_mse(target_model_output, labels, has_instance_dim=True)
+        baseline_batch = calc_recon_mse(batch, labels, has_instance_dim=True)
+
+        # Monosemantic baseline
+        monosemantic_out = batch.clone()
+        # Assumes TMS or ResidualMLP
+        if isinstance(target_model, ResidualMLPModel):
+            d_mlp = target_model.config.d_mlp * target_model.config.n_layers  # type: ignore
+            monosemantic_out[..., :d_mlp] = labels[..., :d_mlp]
+        elif isinstance(target_model, TMSModel):
+            d_mlp = target_model.config.n_hidden  # type: ignore
+            # The first d_mlp features are the true labels (i.e. the batch) and the rest are 0
+            monosemantic_out[..., d_mlp:] = 0
+        baseline_monosemantic = calc_recon_mse(monosemantic_out, labels, has_instance_dim=True)
+
+        results["target"].append(recon_loss)
+        results["spd"].append(topk_recon_loss_labels)
+        results["baseline_batch"].append(baseline_batch)
+        results["baseline_monosemantic"].append(baseline_monosemantic)
+    return results
 
 
 def plot_sparse_feature_mse_line_plot(

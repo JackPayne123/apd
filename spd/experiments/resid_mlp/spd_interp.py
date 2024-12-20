@@ -19,22 +19,17 @@ from spd.experiments.resid_mlp.plotting import (
 )
 from spd.experiments.resid_mlp.resid_mlp_dataset import ResidualMLPDataset
 from spd.experiments.resid_mlp.resid_mlp_decomposition import plot_subnet_categories
-from spd.plotting import plot_sparse_feature_mse_line_plot
+from spd.plotting import collect_sparse_dataset_mse_losses, plot_sparse_feature_mse_line_plot
 from spd.run_spd import ResidualMLPTaskConfig
 from spd.settings import REPO_ROOT
-from spd.utils import (
-    calc_recon_mse,
-    collect_sparse_dataset_mse_losses,
-    run_spd_forward_pass,
-    set_seed,
-)
+from spd.utils import calc_recon_mse, run_spd_forward_pass, set_seed
 
 # %% Loading
 device = "cuda" if torch.cuda.is_available() else "cpu"
 print(f"Using device: {device}")
 set_seed(0)  # You can change this seed if needed
 
-wandb_path = "wandb:spd-resid-mlp/runs/8qz1si1l"  # 1 layer (40k steps. 15 cross 97 mono) R6
+wandb_path = "wandb:spd-resid-mlp/runs/8qz1si1l"  # 1 layer (40k steps. 15 cross 98 mono) R6
 # wandb_path = "wandb:spd-resid-mlp/runs/cb0ej7hj"  # 2 layer 2LR4
 # Load the pretrained SPD model
 model, config, label_coeffs = ResidualMLPSPDRankPenaltyModel.from_pretrained(wandb_path)
@@ -87,7 +82,7 @@ results = collect_sparse_dataset_mse_losses(
     dataset=dataset,
     target_model=target_model,
     spd_model=model,
-    batch_size=1000,
+    batch_size=10000,  # Similar to 1k. Only do 10k on a gpu, slow otherwise
     device=device,
     topk=config.topk,
     attribution_type=config.attribution_type,
@@ -95,13 +90,20 @@ results = collect_sparse_dataset_mse_losses(
     distil_from_target=config.distil_from_target,
     max_n_active_features=4,
 )
-# Convert all the tensors to floats
-results = {k: [float(v.detach().cpu()) for v in results[k]] for k in results}
+# Results for at_least_zero_active (they're the last values in each list)
+full_dist_results = {k: float(results[k][-1].detach().cpu()) for k in results}
+print(f"Results for `at_least_zero_active`:\n{full_dist_results}")
+# Results for exactly_one_active, exactly_two_active, etc.
+results = {k: [float(v.detach().cpu()) for v in results[k][:-1]] for k in results}
 
 # %%
 # Create line plot of results
 
-label_map = {"target": "Target model", "spd": "APD model", "baseline": "Baseline"}
+label_map = {
+    "baseline_monosemantic": "Baseline target model (monosemantic neurons)",
+    "target": "Target model",
+    "spd": "APD model",
+}
 fig = plot_sparse_feature_mse_line_plot(results, label_map=label_map)
 fig.show()
 fig.savefig(out_dir / f"resid_mlp_mse_{n_layers}layers.png")

@@ -8,10 +8,10 @@ from jaxtyping import Float
 from torch import Tensor
 
 from spd.experiments.tms.models import TMSModel, TMSSPDRankPenaltyModel
-from spd.plotting import plot_sparse_feature_mse_line_plot
+from spd.plotting import collect_sparse_dataset_mse_losses, plot_sparse_feature_mse_line_plot
 from spd.run_spd import TMSTaskConfig
 from spd.settings import REPO_ROOT
-from spd.utils import SparseFeatureDataset, collect_sparse_dataset_mse_losses
+from spd.utils import SparseFeatureDataset
 
 
 def plot_vectors(
@@ -263,13 +263,24 @@ results = collect_sparse_dataset_mse_losses(
     distil_from_target=config.distil_from_target,
     max_n_active_features=5,
 )
-# We only plot the 0th instance, grab that and convert to floats
-results = {k: [float(v[0].detach().cpu()) for v in results[k]] for k in results}
+
+# We only plot the 0th instance
+# Results for at_least_zero_active (they're the last values in each list)
+full_dist_results = {k: float(results[k][-1][0].detach().cpu()) for k in results}
+print(f"Results for `at_least_zero_active`:\n{full_dist_results}")
+# Results for exactly_one_active, exactly_two_active, etc.
+results = {k: [float(v[0].detach().cpu()) for v in results[k][:-1]] for k in results}
 
 # %%
 # Create line plot of results
-label_map = {"target": "Target model", "spd": "APD model"}
+label_map = {
+    "baseline_monosemantic": "Baseline target model (monosemantic neurons)",
+    "target": "Target model",
+    "spd": "APD model",
+}
 fig = plot_sparse_feature_mse_line_plot(results, label_map=label_map)
 fig.show()
 fig.savefig(out_dir / "tms_mse.png", dpi=400)
 print(f"Saved figure to {out_dir / 'tms_mse.png'}")
+
+# %%
