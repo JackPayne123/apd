@@ -1,8 +1,6 @@
 # %% Imports
 
 
-from typing import Literal
-
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
@@ -17,24 +15,26 @@ from spd.experiments.resid_mlp.models import ResidualMLPModel, ResidualMLPSPDRan
 from spd.experiments.resid_mlp.plotting import (
     analyze_per_feature_performance,
     get_feature_subnet_map,
-    plot_feature_response_with_subnets,
     plot_individual_feature_response,
-    plot_resid_vs_mlp_out,
     plot_spd_relu_contribution,
     plot_virtual_weights_target_spd,
 )
 from spd.experiments.resid_mlp.resid_mlp_dataset import ResidualMLPDataset
 from spd.experiments.resid_mlp.scaling_resid_mlp_training import naive_loss
 from spd.run_spd import ResidualMLPTaskConfig, calc_recon_mse
+from spd.settings import REPO_ROOT
 from spd.utils import SPDOutputs, run_spd_forward_pass, set_seed
+
+out_dir = REPO_ROOT / "spd/experiments/resid_mlp/figures/"
+out_dir.mkdir(parents=True, exist_ok=True)
 
 # %% Loading
 device = "cuda" if torch.cuda.is_available() else "cpu"
 print(f"Using device: {device}")
 set_seed(0)  # You can change this seed if needed
-# path = "wandb:spd-resid-mlp/runs/8st8rale"  # Dan's R1
-# path = "wandb:spd-resid-mlp/runs/kkstog7o"  # Dan's R2
-path = "wandb:spd-resid-mlp/runs/2ala9kjy"  # Stefan's initial try
+path = "wandb:spd-resid-mlp/runs/8qz1si1l"  # Dan's R1
+# path = "wandb:spd-resid-mlp/runs/cb0ej7hj"  # Dan's R2
+# path = "wandb:spd-resid-mlp/runs/2ala9kjy"  # Stefan's initial try
 # path = "wandb:spd-resid-mlp/runs/qmio77cl"  # Stefan's run with initial-hardcoded topk
 # Load the pretrained SPD model
 model, config, label_coeffs = ResidualMLPSPDRankPenaltyModel.from_pretrained(path)
@@ -56,76 +56,8 @@ target_model = target_model.to(device)
 target_label_coeffs = target_label_coeffs.to(device)
 assert torch.allclose(target_label_coeffs, torch.tensor(label_coeffs))
 
-
-# %% Check performance for different numbers of active features
-
-data_generation_types: list[
-    Literal["at_least_zero_active", "exactly_one_active", "exactly_two_active"]
-] = ["at_least_zero_active", "exactly_one_active", "exactly_two_active"]
-for data_generation_type in data_generation_types:
-    batch_size = 10_000
-    test_dataset = ResidualMLPDataset(
-        n_instances=model.config.n_instances,
-        n_features=model.config.n_features,
-        feature_probability=config.task_config.feature_probability,
-        device=device,
-        calc_labels=False,  # Our labels will be the output of the target model
-        data_generation_type=data_generation_type,
-    )
-    instance_idx = 0
-    batch, labels = test_dataset.generate_batch(batch_size)
-    batch = batch.to(device)
-    labels = labels.to(device)
-    target_model_output, _, _ = target_model(batch)
-    assert config.topk is not None
-    batch_topk = data_generation_type == "at_least_zero_active"
-    print(f"Topk recon loss for {data_generation_type} (batch_topk={batch_topk}):")
-    topk_recon_losses = []
-    feature_subnet_correlations = []
-    topks = [config.topk, 1, 2, 3]
-    for topk in topks:
-        spd_outputs = run_spd_forward_pass(
-            spd_model=model,
-            target_model=target_model,
-            input_array=batch,
-            attribution_type=config.attribution_type,
-            batch_topk=batch_topk,
-            topk=topk,
-            distil_from_target=config.distil_from_target,
-        )
-        topk_recon_loss: Float[Tensor, " batch"] = (
-            (spd_outputs.spd_topk_model_output - target_model_output) ** 2
-        ).mean(dim=(-2, -1))
-        topk_recon_losses.append(topk_recon_loss)
-        print(f"Top-k with k={topk}: {topk_recon_loss.mean().item():.6f}")
-    # Histograms
-    fig, ax = plt.subplots(figsize=(15, 5))
-    for i, topk_recon_loss in enumerate(topk_recon_losses):
-        # Get min/max in log space for bins
-        topk_recon_loss_nonzero = topk_recon_loss[topk_recon_loss > 0]
-        bins = list(
-            np.geomspace(
-                topk_recon_loss_nonzero.min().item(),
-                topk_recon_loss_nonzero.max().item(),
-                100,
-            )
-        )
-        ax.hist(
-            topk_recon_loss.detach().cpu(),
-            bins=bins,
-            alpha=1 if i > 0 else 0.5,
-            label=f"k={topks[i]}",
-            histtype="step" if i > 0 else "bar",
-        )
-    ax.set_title(f"Topk recon loss for {data_generation_type} (batch_topk={batch_topk})")
-    ax.set_xlabel("Recon loss")
-    ax.set_ylabel("Frequency")
-    ax.legend()
-    ax.set_xscale("log")
-    fig.show()
-    plt.close(fig)
-
-
+# Note, the plot that calculates the MSE was deleted. You should use the code at the same path
+# in feature/init-alive-subnets.
 # %%
 dataset = ResidualMLPDataset(
     n_instances=model.config.n_instances,
@@ -214,47 +146,49 @@ fig.suptitle(f"Polysemanticity of model: {path}")
 fig.show()
 
 # %% Observe how well the model reconstructs the noise
+# Appears broken
 # TODO: Or bar chart for SPD/target, diff from goal (one-hot)
 
-instance_idx = 0
-nrows = 1
-feature_idx = 15
-fig, ax = plt.subplots(nrows=1, ncols=1, constrained_layout=True, figsize=(10, 1 + 3 * nrows))
-fig.suptitle(f"Model {path}")
-plot_resid_vs_mlp_out(
-    target_model=target_model,
-    device=device,
-    ax=ax,
-    instance_idx=instance_idx,
-    feature_idx=feature_idx,
-    topk_model_fn=top1_model_fn,
-    subnet_indices=None,
-)
+# instance_idx = 0
+# nrows = 1
+# feature_idx = 15
+# fig, ax = plt.subplots(nrows=1, ncols=1, constrained_layout=True, figsize=(10, 1 + 3 * nrows))
+# fig.suptitle(f"Model {path}")
+# plot_resid_vs_mlp_out(
+#     target_model=target_model,
+#     device=device,
+#     ax=ax,
+#     instance_idx=instance_idx,
+#     feature_idx=feature_idx,
+#     topk_model_fn=top1_model_fn,
+#     subnet_indices=None,
+# )
 
 # %% Linearity test: Enable one subnet after the other
+# Seems to be broken
 
-# Dictionary feature_idx -> subnet_idx
-subnet_indices = get_feature_subnet_map(top1_model_fn, device, model.config, instance_idx=0)
+# # Dictionary feature_idx -> subnet_idx
+# subnet_indices = get_feature_subnet_map(top1_model_fn, device, model.config, instance_idx=0)
 
-n_features = model.config.n_features
-feature_idx = 15
-subtract_inputs = True  # TODO TRUE subnet
-fig = plot_feature_response_with_subnets(
-    topk_model_fn=top1_model_fn,
-    device=device,
-    model_config=model.config,
-    feature_idx=feature_idx,
-    subnet_idx=subnet_indices[feature_idx],
-    batch_size=100,
-    plot_type="errorbar",
-)["feature_response_with_subnets"]
-if fig is not None:
-    fig.suptitle(f"Model {path}")
-    fig.savefig(f"feature_response_with_subnets_{feature_idx}.png", bbox_inches="tight", dpi=300)
-    plt.show()
+# n_features = model.config.n_features
+# feature_idx = 15
+# subtract_inputs = True  # TODO TRUE subnet
+# fig = plot_feature_response_with_subnets(
+#     topk_model_fn=top1_model_fn,
+#     device=device,
+#     model_config=model.config,
+#     feature_idx=feature_idx,
+#     subnet_idx=subnet_indices[feature_idx],
+#     batch_size=100,
+#     plot_type="errorbar",
+# )["feature_response_with_subnets"]
+# if fig is not None:
+#     fig.suptitle(f"Model {path}")
+#     fig.savefig(f"feature_response_with_subnets_{feature_idx}.png", bbox_inches="tight", dpi=300)
+#     plt.show()
 
 
-# %% Causal Scrubbing-esque test
+# %% Collect data for causal scrubbing-esque test
 def spd_model_fn(
     batch: Float[Tensor, "batch n_instances n_features"],
     topk: PositiveFloat = config.topk,
@@ -279,145 +213,146 @@ def target_model_fn(batch: Float[Tensor, "batch n_instances"]):
 # Dictionary feature_idx -> subnet_idx
 subnet_indices = get_feature_subnet_map(top1_model_fn, device, model.config, instance_idx=0)
 
-# for data_generation_type in data_generation_types:
-for data_generation_type in ["at_least_zero_active"]:
-    batch_size = config.batch_size
-    # make sure to use config.batch_size because
-    # it's tuned to config.topk!
-    n_batches = 100
-    test_dataset = ResidualMLPDataset(
-        n_instances=model.config.n_instances,
-        n_features=model.config.n_features,
-        feature_probability=config.task_config.feature_probability,
-        device=device,
-        calc_labels=False,  # Our labels will be the output of the target model
-        data_generation_type=data_generation_type,
+# for data_generation_type in ["at_least_zero_active"]:
+
+batch_size = config.batch_size
+# make sure to use config.batch_size because
+# it's tuned to config.topk!
+n_batches = 100
+test_dataset = ResidualMLPDataset(
+    n_instances=model.config.n_instances,
+    n_features=model.config.n_features,
+    feature_probability=config.task_config.feature_probability,
+    device=device,
+    calc_labels=False,  # Our labels will be the output of the target model
+    data_generation_type="at_least_zero_active",
+)
+
+# Initialize tensors to store all losses
+all_loss_scrubbed = []
+all_loss_antiscrubbed = []
+all_loss_random = []
+all_loss_spd = []
+all_loss_zero = []
+
+for _ in tqdm(range(n_batches)):
+    batch, labels = test_dataset.generate_batch(batch_size)
+    batch = batch.to(device)
+    active_features = torch.where(batch != 0)
+    # Randomly assign 0 or 1 to topk mask
+    random_topk_mask = torch.randint(0, 2, (batch_size, model.config.n_instances, model.config.k))
+    scrubbed_topk_mask = torch.randint(0, 2, (batch_size, model.config.n_instances, model.config.k))
+    antiscrubbed_topk_mask = torch.randint(
+        0, 2, (batch_size, model.config.n_instances, model.config.k)
+    )
+    for b, i, f in zip(*active_features, strict=False):
+        s = subnet_indices[f.item()]
+        scrubbed_topk_mask[b, i, s] = 1
+        antiscrubbed_topk_mask[b, i, s] = 0
+    topk = config.topk
+    batch_topk = config.batch_topk
+    # if data_generation_type == "at_least_zero_active":
+    #     assert (
+    #         batch_size == config.batch_size
+    #     ), "topk and batch_topk are tuned to config.batch_size"
+    #     topk = config.topk
+    #     batch_topk = config.batch_topk
+    # elif data_generation_type == "exactly_one_active":
+    #     topk = 1
+    #     batch_topk = True
+    # elif data_generation_type == "exactly_two_active":
+    #     topk = 2
+    #     batch_topk = True
+    # else:
+    #     raise ValueError(f"Unknown data generation type: {data_generation_type}")
+    out_spd = spd_model_fn(batch, topk=topk, batch_topk=batch_topk)
+    out_random = top1_model_fn(batch, random_topk_mask).spd_topk_model_output
+    out_scrubbed = top1_model_fn(batch, scrubbed_topk_mask).spd_topk_model_output
+    out_antiscrubbed = top1_model_fn(batch, antiscrubbed_topk_mask).spd_topk_model_output
+    out_target = target_model_fn(batch)
+    # Calc MSE losses
+    all_loss_scrubbed.append(
+        ((out_scrubbed - out_target) ** 2).mean(dim=-1).flatten().detach().cpu()
+    )
+    all_loss_antiscrubbed.append(
+        ((out_antiscrubbed - out_target) ** 2).mean(dim=-1).flatten().detach().cpu()
+    )
+    all_loss_random.append(((out_random - out_target) ** 2).mean(dim=-1).flatten().detach().cpu())
+    all_loss_spd.append(((out_spd - out_target) ** 2).mean(dim=-1).flatten().detach().cpu())
+    all_loss_zero.append(
+        ((torch.zeros_like(out_target) - out_target) ** 2).mean(dim=-1).flatten().detach().cpu()
     )
 
-    # Initialize tensors to store all losses
-    all_loss_scrubbed = []
-    all_loss_antiscrubbed = []
-    all_loss_random = []
-    all_loss_spd = []
-    all_loss_zero = []
+# Concatenate all batches
+loss_scrubbed = torch.cat(all_loss_scrubbed)
+loss_antiscrubbed = torch.cat(all_loss_antiscrubbed)
+loss_random = torch.cat(all_loss_random)
+loss_spd = torch.cat(all_loss_spd)
+loss_zero = torch.cat(all_loss_zero)
 
-    for _ in tqdm(range(n_batches)):
-        batch, labels = test_dataset.generate_batch(batch_size)
-        batch = batch.to(device)
-        active_features = torch.where(batch != 0)
-        # Randomly assign 0 or 1 to topk mask
-        random_topk_mask = torch.randint(
-            0, 2, (batch_size, model.config.n_instances, model.config.k)
-        )
-        scrubbed_topk_mask = torch.randint(
-            0, 2, (batch_size, model.config.n_instances, model.config.k)
-        )
-        antiscrubbed_topk_mask = torch.randint(
-            0, 2, (batch_size, model.config.n_instances, model.config.k)
-        )
-        for b, i, f in zip(*active_features, strict=False):
-            s = subnet_indices[f.item()]
-            scrubbed_topk_mask[b, i, s] = 1
-            antiscrubbed_topk_mask[b, i, s] = 0
-        if data_generation_type == "at_least_zero_active":
-            assert (
-                batch_size == config.batch_size
-            ), "topk and batch_topk are tuned to config.batch_size"
-            topk = config.topk
-            batch_topk = config.batch_topk
-        elif data_generation_type == "exactly_one_active":
-            topk = 1
-            batch_topk = True
-        elif data_generation_type == "exactly_two_active":
-            topk = 2
-            batch_topk = True
-        else:
-            raise ValueError(f"Unknown data generation type: {data_generation_type}")
-        out_spd = spd_model_fn(batch, topk=topk, batch_topk=batch_topk)
-        out_random = top1_model_fn(batch, random_topk_mask).spd_topk_model_output
-        out_scrubbed = top1_model_fn(batch, scrubbed_topk_mask).spd_topk_model_output
-        out_antiscrubbed = top1_model_fn(batch, antiscrubbed_topk_mask).spd_topk_model_output
-        out_target = target_model_fn(batch)
-        # Calc MSE losses
-        all_loss_scrubbed.append(
-            ((out_scrubbed - out_target) ** 2).mean(dim=-1).flatten().detach().cpu()
-        )
-        all_loss_antiscrubbed.append(
-            ((out_antiscrubbed - out_target) ** 2).mean(dim=-1).flatten().detach().cpu()
-        )
-        all_loss_random.append(
-            ((out_random - out_target) ** 2).mean(dim=-1).flatten().detach().cpu()
-        )
-        all_loss_spd.append(((out_spd - out_target) ** 2).mean(dim=-1).flatten().detach().cpu())
-        all_loss_zero.append(
-            ((torch.zeros_like(out_target) - out_target) ** 2).mean(dim=-1).flatten().detach().cpu()
-        )
+# Print & plot the above
+loss_naive = naive_loss(
+    n_features=model.config.n_features,
+    d_mlp=model.config.d_mlp,
+    p=config.task_config.feature_probability,
+    bias=model.layers[0].linear1.bias is not None,
+    embed="random",
+)
 
-    # Concatenate all batches
-    loss_scrubbed = torch.cat(all_loss_scrubbed)
-    loss_antiscrubbed = torch.cat(all_loss_antiscrubbed)
-    loss_random = torch.cat(all_loss_random)
-    loss_spd = torch.cat(all_loss_spd)
-    loss_zero = torch.cat(all_loss_zero)
+print(f"Loss SPD:           {loss_spd.mean().item():.6f}")
+print(f"Loss scrubbed:      {loss_scrubbed.mean().item():.6f}")
+print(f"Loss antiscrubbed:  {loss_antiscrubbed.mean().item():.6f}")
+print(f"Loss naive:         {loss_naive:.6f}")
+print(f"Loss random:        {loss_random.mean().item():.6f}")
+print(f"Loss zero:          {loss_zero.mean().item():.6f}")
 
-    # Print & plot the above
-    loss_naive = naive_loss(
-        n_features=model.config.n_features,
-        d_mlp=model.config.d_mlp,
-        p=config.task_config.feature_probability,
-        bias=model.layers[0].linear1.bias is not None,
-        embed="random",
-    )
+# %%
+# Plot causal scrubbing-esque test
 
-    print(f"Loss SPD:           {loss_spd.mean().item():.6f}")
-    print(f"Loss scrubbed:      {loss_scrubbed.mean().item():.6f}")
-    print(f"Loss antiscrubbed:  {loss_antiscrubbed.mean().item():.6f}")
-    print(f"Loss naive:         {loss_naive:.6f}")
-    print(f"Loss random:        {loss_random.mean().item():.6f}")
-    print(f"Loss zero:          {loss_zero.mean().item():.6f}")
+# TODO orange bump: maybe SPD is using 2 subnets for some
+# features? Would explain scrubbed and antiscrubbed bimodality,
+# and random (which is just scrubbed + antiscrubbed) too.
 
-    # TODO orange bump: maybe SPD is using 2 subnets for some
-    # features? Would explain scrubbed and antiscrubbed bimodality,
-    # and random (which is just scrubbed + antiscrubbed) too.
-
-    fig, ax = plt.subplots(figsize=(15, 5))
-    log_bins = np.geomspace(1e-7, loss_zero.max().item(), 50).tolist()
-    ax.hist(
-        loss_spd,
-        bins=log_bins,
-        label="APD (top-k)",
-        histtype="step",
-        lw=2,
-        color="tab:purple",
-    )
-    ax.axvline(loss_spd.mean().item(), color="tab:purple", linestyle="--")
-    ax.hist(
-        loss_scrubbed,
-        bins=log_bins,
-        label="APD (scrubbed)",
-        histtype="step",
-        lw=2,
-        color="tab:orange",
-    )
-    ax.axvline(loss_scrubbed.mean().item(), color="tab:orange", linestyle="--")
-    ax.hist(
-        loss_antiscrubbed,
-        bins=log_bins,
-        label="APD (anti-scrubbed)",
-        histtype="step",
-        lw=2,
-        color="tab:green",
-    )
-    ax.axvline(loss_antiscrubbed.mean().item(), color="tab:green", linestyle="--")
-    # ax.hist(loss_random, bins=log_bins, label="APD (random)", histtype="step")
-    # ax.hist(loss_zero, bins=log_bins, label="APD (zero)", histtype="step")
-    ax.axvline(loss_naive, color="black", linestyle="--", label="Monosemantic neuron solution")
-    ax.legend()
-    ax.set_ylabel(f"Count (out of {batch_size})")
-    ax.set_xlabel("Recon loss")
-    ax.set_xscale("log")
-    fig.suptitle(f"Losses for {data_generation_type}")
-    fig.show()
+fig, ax = plt.subplots(figsize=(15, 5))
+log_bins = np.geomspace(1e-7, loss_zero.max().item(), 50).tolist()
+ax.hist(
+    loss_spd,
+    bins=log_bins,
+    label="APD (top-k)",
+    histtype="step",
+    lw=2,
+    color="tab:purple",
+)
+ax.axvline(loss_spd.mean().item(), color="tab:purple", linestyle="--")
+ax.hist(
+    loss_scrubbed,
+    bins=log_bins,
+    label="APD (scrubbed)",
+    histtype="step",
+    lw=2,
+    color="tab:orange",
+)
+ax.axvline(loss_scrubbed.mean().item(), color="tab:orange", linestyle="--")
+ax.hist(
+    loss_antiscrubbed,
+    bins=log_bins,
+    label="APD (anti-scrubbed)",
+    histtype="step",
+    lw=2,
+    color="tab:green",
+)
+ax.axvline(loss_antiscrubbed.mean().item(), color="tab:green", linestyle="--")
+# ax.hist(loss_random, bins=log_bins, label="APD (random)", histtype="step")
+# ax.hist(loss_zero, bins=log_bins, label="APD (zero)", histtype="step")
+ax.axvline(loss_naive, color="black", linestyle="--", label="Monosemantic neuron solution")
+ax.legend()
+ax.set_ylabel(f"Count (out of {batch_size * n_batches} samples)")
+ax.set_xlabel("MSE loss with target model output")
+ax.set_xscale("log")
+fig.suptitle("Losses when ablating sets of components")
+fig.savefig(out_dir / "resid_mlp_scrub_hist.png", bbox_inches="tight", dpi=300)
+print(f"Saved figure to {out_dir / 'resid_mlp_scrub_hist.png'}")
+fig.show()
 
 
 # %% "Forgetting"-style test for Lee. Let's say we want to ablate performance for all odd features,
