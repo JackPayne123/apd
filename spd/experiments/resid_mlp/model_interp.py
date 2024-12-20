@@ -31,8 +31,8 @@ out_dir.mkdir(parents=True, exist_ok=True)
 
 set_seed(0)
 device = "cpu" if torch.cuda.is_available() else "cpu"
-# path: ModelPath = "wandb:spd-train-resid-mlp/runs/zas5yjdl"  # 1 layer
-path: ModelPath = "wandb:spd-train-resid-mlp/runs/sv23xrhj"  # 2 layers
+path: ModelPath = "wandb:spd-train-resid-mlp/runs/zas5yjdl"  # 1 layer
+# path: ModelPath = "wandb:spd-train-resid-mlp/runs/sv23xrhj"  # 2 layers
 model, train_config_dict, label_coeffs = ResidualMLPModel.from_pretrained(path)
 model = model.to(device)
 train_config = ResidMLPTrainConfig(**train_config_dict)
