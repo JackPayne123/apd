@@ -3,8 +3,6 @@
 
 import matplotlib.pyplot as plt
 import numpy as np
-import pandas as pd
-import seaborn as sns
 import torch
 from jaxtyping import Float
 from pydantic import PositiveFloat
@@ -15,6 +13,7 @@ from spd.experiments.resid_mlp.models import ResidualMLPModel, ResidualMLPSPDRan
 from spd.experiments.resid_mlp.plotting import (
     analyze_per_feature_performance,
     get_feature_subnet_map,
+    plot_feature_response_with_subnets,
     plot_individual_feature_response,
     plot_spd_relu_contribution,
     plot_virtual_weights_target_spd,
@@ -32,8 +31,8 @@ out_dir.mkdir(parents=True, exist_ok=True)
 device = "cuda" if torch.cuda.is_available() else "cpu"
 print(f"Using device: {device}")
 set_seed(0)  # You can change this seed if needed
-path = "wandb:spd-resid-mlp/runs/8qz1si1l"  # Dan's R1
-# path = "wandb:spd-resid-mlp/runs/cb0ej7hj"  # Dan's R2
+path = "wandb:spd-resid-mlp/runs/8qz1si1l"  # Dan's 1 layer
+# path = "wandb:spd-resid-mlp/runs/cb0ej7hj"  # Dan's 2 layer
 # path = "wandb:spd-resid-mlp/runs/2ala9kjy"  # Stefan's initial try
 # path = "wandb:spd-resid-mlp/runs/qmio77cl"  # Stefan's run with initial-hardcoded topk
 # Load the pretrained SPD model
@@ -168,24 +167,26 @@ fig.show()
 # Seems to be broken
 
 # # Dictionary feature_idx -> subnet_idx
-# subnet_indices = get_feature_subnet_map(top1_model_fn, device, model.config, instance_idx=0)
+subnet_indices = get_feature_subnet_map(top1_model_fn, device, model.config, instance_idx=0)
 
-# n_features = model.config.n_features
-# feature_idx = 15
-# subtract_inputs = True  # TODO TRUE subnet
-# fig = plot_feature_response_with_subnets(
-#     topk_model_fn=top1_model_fn,
-#     device=device,
-#     model_config=model.config,
-#     feature_idx=feature_idx,
-#     subnet_idx=subnet_indices[feature_idx],
-#     batch_size=100,
-#     plot_type="errorbar",
-# )["feature_response_with_subnets"]
-# if fig is not None:
-#     fig.suptitle(f"Model {path}")
-#     fig.savefig(f"feature_response_with_subnets_{feature_idx}.png", bbox_inches="tight", dpi=300)
-#     plt.show()
+n_features = model.config.n_features
+feature_idx = 42
+subtract_inputs = True  # TODO TRUE subnet
+fig = plot_feature_response_with_subnets(
+    topk_model_fn=top1_model_fn,
+    device=device,
+    model_config=model.config,
+    feature_idx=feature_idx,
+    subnet_idx=subnet_indices[feature_idx],
+    batch_size=100,
+    plot_type="errorbar",
+)["feature_response_with_subnets"]
+if fig is not None:
+    fig.savefig(
+        out_dir / f"feature_response_with_subnets_{feature_idx}.png", bbox_inches="tight", dpi=300
+    )
+    print(f"Saved figure to {out_dir / f'feature_response_with_subnets_{feature_idx}.png'}")
+    plt.show()
 
 
 # %% Collect data for causal scrubbing-esque test
@@ -213,12 +214,10 @@ def target_model_fn(batch: Float[Tensor, "batch n_instances"]):
 # Dictionary feature_idx -> subnet_idx
 subnet_indices = get_feature_subnet_map(top1_model_fn, device, model.config, instance_idx=0)
 
-# for data_generation_type in ["at_least_zero_active"]:
-
 batch_size = config.batch_size
 # make sure to use config.batch_size because
 # it's tuned to config.topk!
-n_batches = 100
+n_batches = 1000
 test_dataset = ResidualMLPDataset(
     n_instances=model.config.n_instances,
     n_features=model.config.n_features,
@@ -349,7 +348,12 @@ ax.legend()
 ax.set_ylabel(f"Count (out of {batch_size * n_batches} samples)")
 ax.set_xlabel("MSE loss with target model output")
 ax.set_xscale("log")
-fig.suptitle("Losses when ablating sets of components")
+
+# Remove spines
+ax.spines["top"].set_visible(False)
+ax.spines["right"].set_visible(False)
+
+# fig.suptitle("Losses when scrubbing set of parameter components")
 fig.savefig(out_dir / "resid_mlp_scrub_hist.png", bbox_inches="tight", dpi=300)
 print(f"Saved figure to {out_dir / 'resid_mlp_scrub_hist.png'}")
 fig.show()
@@ -358,155 +362,156 @@ fig.show()
 # %% "Forgetting"-style test for Lee. Let's say we want to ablate performance for all odd features,
 # while preserving performance for even features.
 
-batch_size = 1000
-# target_model_train_config_dict
-test_dataset = ResidualMLPDataset(
-    n_instances=model.config.n_instances,
-    n_features=model.config.n_features,
-    feature_probability=config.task_config.feature_probability,
-    device=device,
-    calc_labels=True,  # Our labels will be the output of the target model
-    label_type=target_model_train_config_dict["label_type"],
-    act_fn_name=target_model_train_config_dict["resid_mlp_config"]["act_fn_name"],
-    label_fn_seed=target_model_train_config_dict["label_fn_seed"],
-    label_coeffs=target_label_coeffs,
-    data_generation_type="at_least_zero_active",
-)
-batch, labels = test_dataset.generate_batch(batch_size)
-batch = batch.to(device)
-labels = labels.to(device)
-instance_idx = 0
+# Currently broken
 
-# Dictionary feature_idx -> subnet_idx
-subnet_indices = get_feature_subnet_map(top1_model_fn, device, model.config, instance_idx=0)
+# # target_model_train_config_dict
+# test_dataset = ResidualMLPDataset(
+#     n_instances=model.config.n_instances,
+#     n_features=model.config.n_features,
+#     feature_probability=config.task_config.feature_probability,
+#     device=device,
+#     calc_labels=True,  # Our labels will be the output of the target model
+#     label_type=target_model_train_config_dict["label_type"],
+#     act_fn_name=target_model_train_config_dict["resid_mlp_config"]["act_fn_name"],
+#     label_fn_seed=target_model_train_config_dict["label_fn_seed"],
+#     label_coeffs=target_label_coeffs,
+#     data_generation_type="at_least_zero_active",
+# )
+# batch, labels = test_dataset.generate_batch(batch_size=1000)
+# batch = batch.to(device)
+# labels = labels.to(device)
+# instance_idx = 0
 
-subnets_corresponding_to_even_features = [
-    subnet_indices[f] for f in range(model.config.n_features) if f % 2 == 0
-]
-topk_mask = torch.zeros_like(batch)
-for subnet_idx in subnets_corresponding_to_even_features:
-    topk_mask[:, instance_idx, subnet_idx] = 1
+# # Dictionary feature_idx -> subnet_idx
+# subnet_indices = get_feature_subnet_map(top1_model_fn, device, model.config, instance_idx=0)
 
-out_spd = spd_model_fn(batch)
+# subnets_corresponding_to_even_features = [
+#     subnet_indices[f] for f in range(model.config.n_features) if f % 2 == 0
+# ]
+# topk_mask = torch.zeros_like(batch)
+# for subnet_idx in subnets_corresponding_to_even_features:
+#     topk_mask[:, instance_idx, subnet_idx] = 1
 
-out = top1_model_fn(batch, topk_mask=topk_mask)
-out_target = target_model_fn(batch)
-out_ablated = out.spd_topk_model_output
-label_loss_target = (out_target - labels) ** 2
-label_loss_spd = (out_spd - labels) ** 2
-label_loss_ablated = (out_ablated - labels) ** 2
-target_loss_spd = (out_target - out_spd) ** 2
-target_loss_ablated = (out_target - out_ablated) ** 2
-# Find samples in batch that contain only odd features
-# odd_features = [i for i in range(model.config.n_features) if i % 2 == 1]
-# even_features = [i for i in range(model.config.n_features) if i % 2 == 0]
-odd_samples = torch.where(batch[:, instance_idx, 0::2].sum(dim=-1) != 0)[0].cpu().detach()
-even_samples = torch.where(batch[:, instance_idx, 1::2].sum(dim=-1) != 0)[0].cpu().detach()
-# Exclude samples containing both odd and even features
+# out_spd = spd_model_fn(batch)
 
-both_odd_and_even_samples = np.intersect1d(odd_samples.numpy(), even_samples.numpy())
-only_odd_samples = np.setdiff1d(odd_samples.numpy(), both_odd_and_even_samples)
-only_even_samples = np.setdiff1d(even_samples.numpy(), both_odd_and_even_samples)
+# out = top1_model_fn(batch, topk_mask=topk_mask)
+# out_target = target_model_fn(batch)
+# out_ablated = out.spd_topk_model_output
+# label_loss_target = (out_target - labels) ** 2
+# label_loss_spd = (out_spd - labels) ** 2
+# label_loss_ablated = (out_ablated - labels) ** 2
+# target_loss_spd = (out_target - out_spd) ** 2
+# target_loss_ablated = (out_target - out_ablated) ** 2
+# # Find samples in batch that contain only odd features
+# # odd_features = [i for i in range(model.config.n_features) if i % 2 == 1]
+# # even_features = [i for i in range(model.config.n_features) if i % 2 == 0]
+# odd_samples = torch.where(batch[:, instance_idx, 0::2].sum(dim=-1) != 0)[0].cpu().detach()
+# even_samples = torch.where(batch[:, instance_idx, 1::2].sum(dim=-1) != 0)[0].cpu().detach()
+# # Exclude samples containing both odd and even features
 
-label_loss_target_odd = (
-    label_loss_target[only_odd_samples].mean(dim=-1).flatten().detach().cpu().numpy()
-)  # noqa: E501
-label_loss_spd_odd = label_loss_spd[only_odd_samples].mean(dim=-1).flatten().detach().cpu().numpy()  # noqa: E501
-label_loss_ablated_odd = (
-    label_loss_ablated[only_odd_samples].mean(dim=-1).flatten().detach().cpu().numpy()
-)  # noqa: E501
-label_loss_target_even = (
-    label_loss_target[only_even_samples].mean(dim=-1).flatten().detach().cpu().numpy()
-)  # noqa: E501
-label_loss_spd_even = (
-    label_loss_spd[only_even_samples].mean(dim=-1).flatten().detach().cpu().numpy()
-)  # noqa: E501
-label_loss_ablated_even = (
-    label_loss_ablated[only_even_samples].mean(dim=-1).flatten().detach().cpu().numpy()
-)  # noqa: E501
-target_loss_spd_odd = (
-    target_loss_spd[only_odd_samples].mean(dim=-1).flatten().detach().cpu().numpy()
-)  # noqa: E501
-target_loss_spd_even = (
-    target_loss_spd[only_even_samples].mean(dim=-1).flatten().detach().cpu().numpy()
-)  # noqa: E501
-target_loss_ablated_odd = (
-    target_loss_ablated[only_odd_samples].mean(dim=-1).flatten().detach().cpu().numpy()
-)  # noqa: E501
-target_loss_ablated_even = (
-    target_loss_ablated[only_even_samples].mean(dim=-1).flatten().detach().cpu().numpy()
-)  # noqa: E501
-target_loss_target_odd = torch.zeros_like(torch.tensor(target_loss_ablated_odd)).numpy()
-target_loss_target_even = torch.zeros_like(torch.tensor(target_loss_ablated_even)).numpy()
-# Boxplot chart
-# Create a dataframe for seaborn
-data = pd.DataFrame(
-    {
-        "Label Loss": np.concatenate(
-            [
-                label_loss_target_odd,
-                label_loss_spd_odd,
-                label_loss_ablated_odd,
-                label_loss_target_even,
-                label_loss_spd_even,
-                label_loss_ablated_even,
-            ]
-        ),
-        "Target Loss": np.concatenate(
-            [
-                target_loss_target_odd,
-                target_loss_spd_odd,
-                target_loss_ablated_odd,
-                target_loss_target_even,
-                target_loss_spd_even,
-                target_loss_ablated_even,
-            ]
-        ),
-        "Model": np.repeat(
-            ["Target", "APD", "Ablated", "Target", "APD", "Ablated"],
-            [
-                len(label_loss_target_odd),
-                len(label_loss_spd_odd),
-                len(label_loss_ablated_odd),
-                len(label_loss_target_even),
-                len(label_loss_spd_even),
-                len(label_loss_ablated_even),
-            ],
-        ),
-        "Sample Type": np.repeat(
-            ["Odd", "Odd", "Odd", "Even", "Even", "Even"],
-            [
-                len(label_loss_target_odd),
-                len(label_loss_ablated_odd),
-                len(label_loss_spd_odd),
-                len(label_loss_target_even),
-                len(label_loss_ablated_even),
-                len(label_loss_spd_even),
-            ],
-        ),
-    }
-)
+# both_odd_and_even_samples = np.intersect1d(odd_samples.numpy(), even_samples.numpy())
+# only_odd_samples = np.setdiff1d(odd_samples.numpy(), both_odd_and_even_samples)
+# only_even_samples = np.setdiff1d(even_samples.numpy(), both_odd_and_even_samples)
 
-fig, axes = plt.subplots(ncols=2, figsize=(10, 3))
-axes = np.atleast_1d(axes)  # type: ignore
-ax = axes[0]
-sns.boxplot(data=data, x="Sample Type", y="Label Loss", hue="Model", ax=ax)
-ax.set_yscale("log")
-ax.set_ylim(bottom=1e-5)
-ax.set_title("Label loss")
-ax.set_ylabel("")
-# ax.axhline(y=loss_naive, color="k", linestyle="--", label="Monosemantic neuron solution", alpha=0.5)
-ax.legend(bbox_to_anchor=(0.5, -0.05), loc="upper center", bbox_transform=fig.transFigure, ncol=3)
+# label_loss_target_odd = (
+#     label_loss_target[only_odd_samples].mean(dim=-1).flatten().detach().cpu().numpy()
+# )  # noqa: E501
+# label_loss_spd_odd = label_loss_spd[only_odd_samples].mean(dim=-1).flatten().detach().cpu().numpy()  # noqa: E501
+# label_loss_ablated_odd = (
+#     label_loss_ablated[only_odd_samples].mean(dim=-1).flatten().detach().cpu().numpy()
+# )  # noqa: E501
+# label_loss_target_even = (
+#     label_loss_target[only_even_samples].mean(dim=-1).flatten().detach().cpu().numpy()
+# )  # noqa: E501
+# label_loss_spd_even = (
+#     label_loss_spd[only_even_samples].mean(dim=-1).flatten().detach().cpu().numpy()
+# )  # noqa: E501
+# label_loss_ablated_even = (
+#     label_loss_ablated[only_even_samples].mean(dim=-1).flatten().detach().cpu().numpy()
+# )  # noqa: E501
+# target_loss_spd_odd = (
+#     target_loss_spd[only_odd_samples].mean(dim=-1).flatten().detach().cpu().numpy()
+# )  # noqa: E501
+# target_loss_spd_even = (
+#     target_loss_spd[only_even_samples].mean(dim=-1).flatten().detach().cpu().numpy()
+# )  # noqa: E501
+# target_loss_ablated_odd = (
+#     target_loss_ablated[only_odd_samples].mean(dim=-1).flatten().detach().cpu().numpy()
+# )  # noqa: E501
+# target_loss_ablated_even = (
+#     target_loss_ablated[only_even_samples].mean(dim=-1).flatten().detach().cpu().numpy()
+# )  # noqa: E501
+# target_loss_target_odd = torch.zeros_like(torch.tensor(target_loss_ablated_odd)).numpy()
+# target_loss_target_even = torch.zeros_like(torch.tensor(target_loss_ablated_even)).numpy()
+# # Boxplot chart
+# # Create a dataframe for seaborn
+# data = pd.DataFrame(
+#     {
+#         "Label Loss": np.concatenate(
+#             [
+#                 label_loss_target_odd,
+#                 label_loss_spd_odd,
+#                 label_loss_ablated_odd,
+#                 label_loss_target_even,
+#                 label_loss_spd_even,
+#                 label_loss_ablated_even,
+#             ]
+#         ),
+#         "Target Loss": np.concatenate(
+#             [
+#                 target_loss_target_odd,
+#                 target_loss_spd_odd,
+#                 target_loss_ablated_odd,
+#                 target_loss_target_even,
+#                 target_loss_spd_even,
+#                 target_loss_ablated_even,
+#             ]
+#         ),
+#         "Model": np.repeat(
+#             ["Target", "APD", "Ablated", "Target", "APD", "Ablated"],
+#             [
+#                 len(label_loss_target_odd),
+#                 len(label_loss_spd_odd),
+#                 len(label_loss_ablated_odd),
+#                 len(label_loss_target_even),
+#                 len(label_loss_spd_even),
+#                 len(label_loss_ablated_even),
+#             ],
+#         ),
+#         "Sample Type": np.repeat(
+#             ["Odd", "Odd", "Odd", "Even", "Even", "Even"],
+#             [
+#                 len(label_loss_target_odd),
+#                 len(label_loss_ablated_odd),
+#                 len(label_loss_spd_odd),
+#                 len(label_loss_target_even),
+#                 len(label_loss_ablated_even),
+#                 len(label_loss_spd_even),
+#             ],
+#         ),
+#     }
+# )
 
-ax = axes[1]
-sns.boxplot(data=data, x="Sample Type", y="Target Loss", hue="Model", ax=ax)
-ax.set_yscale("log")
-ax.set_ylim(bottom=1e-6)
-ax.set_title("Target loss")
-ax.set_ylabel("")
-ax.legend().remove()
-fig.savefig("ablation_story.png", bbox_inches="tight", dpi=300)
-fig.show()
+# fig, axes = plt.subplots(ncols=2, figsize=(10, 3))
+# axes = np.atleast_1d(axes)  # type: ignore
+# ax = axes[0]
+# sns.boxplot(data=data, x="Sample Type", y="Label Loss", hue="Model", ax=ax)
+# ax.set_yscale("log")
+# ax.set_ylim(bottom=1e-5)
+# ax.set_title("Label loss")
+# ax.set_ylabel("")
+# # ax.axhline(y=loss_naive, color="k", linestyle="--", label="Monosemantic neuron solution", alpha=0.5)
+# ax.legend(bbox_to_anchor=(0.5, -0.05), loc="upper center", bbox_transform=fig.transFigure, ncol=3)
+
+# ax = axes[1]
+# sns.boxplot(data=data, x="Sample Type", y="Target Loss", hue="Model", ax=ax)
+# ax.set_yscale("log")
+# ax.set_ylim(bottom=1e-6)
+# ax.set_title("Target loss")
+# ax.set_ylabel("")
+# ax.legend().remove()
+# fig.savefig("ablation_story.png", bbox_inches="tight", dpi=300)
+# fig.show()
 
 
 # %% Individual feature response

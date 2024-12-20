@@ -839,7 +839,7 @@ def plot_feature_response_with_subnets(
         SPDOutputs,
     ],
     device: str,
-    model_config: ResidualMLPConfig | ResidualMLPSPDRankPenaltyConfig,
+    model_config: ResidualMLPSPDRankPenaltyConfig,
     feature_idx: int = 0,
     subnet_idx: int = 0,
     instance_idx: int = 0,
@@ -850,6 +850,7 @@ def plot_feature_response_with_subnets(
     n_instances = model_config.n_instances
     n_features = model_config.n_features
     batch_size = batch_size or n_features
+    k = model_config.k
 
     if ax is None:
         fig, ax = plt.subplots(constrained_layout=True, figsize=(10, 5))
@@ -858,8 +859,8 @@ def plot_feature_response_with_subnets(
 
     batch = torch.zeros(batch_size, n_instances, n_features, device=device)
     batch[:, instance_idx, feature_idx] = 1
-    topk_mask_blue = torch.zeros_like(batch[:, :, :])
-    topk_mask_red = torch.zeros_like(batch[:, :, :])
+    topk_mask_blue = torch.zeros(batch_size, n_instances, k, device=device)
+    topk_mask_red = torch.zeros(batch_size, n_instances, k, device=device)
     topk_mask_blue[:, :, subnet_idx] = 1
     for s in range(batch_size):
         # Randomly ablate half the features
@@ -875,7 +876,7 @@ def plot_feature_response_with_subnets(
     assert torch.allclose(
         topk_mask_red[:, :, subnet_idx], torch.zeros_like(topk_mask_red[:, :, subnet_idx])
     )
-    zero_topk_mask = torch.zeros_like(batch[:, :, :])
+    zero_topk_mask = torch.zeros(batch_size, n_instances, k, device=device)
     out_WE_WU_only = topk_model_fn(batch, zero_topk_mask).spd_topk_model_output[:, instance_idx, :]
 
     out_red = topk_model_fn(batch, topk_mask_red)
@@ -899,7 +900,7 @@ def plot_feature_response_with_subnets(
             blue_mean,
             yerr=blue_std,
             color="tab:purple",
-            label="APD scrubbed",
+            label="APD (scrubbed)",
             fmt="o",
             markersize=2,
         )
@@ -908,7 +909,7 @@ def plot_feature_response_with_subnets(
             red_mean,
             yerr=red_std,
             color="tab:orange",
-            label="APD anti-scrubbed",
+            label="APD (anti-scrubbed)",
             fmt="o",
             markersize=2,
         )
@@ -919,10 +920,7 @@ def plot_feature_response_with_subnets(
         # Remove all axes lines
         ax.spines["top"].set_visible(False)
         ax.spines["right"].set_visible(False)
-        ax.spines["bottom"].set_visible(False)
-        ax.spines["left"].set_visible(False)
         ax.set_xticks([])
-        ax.set_yticks([])
     elif plot_type == "line":
         cmap1 = plt.get_cmap("Purples")
         cmap2 = plt.get_cmap("Oranges")
@@ -932,8 +930,8 @@ def plot_feature_response_with_subnets(
             if plot_type == "line":
                 ax.plot(x, yb, color=cmap1(s / batch_size), lw=0.3)
                 ax.plot(x, yr, color=cmap2(s / batch_size), lw=0.3)
-        ax.plot([], [], color=cmap1(0), label="APD with right subnet (scrubbed)")
-        ax.plot([], [], color=cmap2(0), label="APD without right subnet (anti-scrubbed)")
+        ax.plot([], [], color=cmap1(0), label="APD (scrubbed)")
+        ax.plot([], [], color=cmap2(0), label="APD (anti-scrubbed)")
         yt = mlp_out_target[0, :].detach().cpu()
         ax.plot(x, yt, color="red", lw=0.5, label="Target model")
     else:
@@ -941,7 +939,11 @@ def plot_feature_response_with_subnets(
 
     ax.set_ylabel("MLP output (forward pass minus W_E W_U contribution)")
     ax.set_xlabel("Output index")
-    ax.set_title(f"SPD model output for increasing number of subnets, feature {feature_idx}")
+
+    # I only need 0 and 100 as x ticks
+    ax.set_xticks([0, 100])
+    ax.set_xticklabels([0, 100])
+    ax.set_title(f"APD model when ablating parameter components. One-hot $x_{{{feature_idx}}}=1$")
     ax.legend()
     return {"feature_response_with_subnets": fig}
 
