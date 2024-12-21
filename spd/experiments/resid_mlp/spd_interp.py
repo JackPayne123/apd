@@ -164,7 +164,6 @@ fig.show()
 # )
 
 # %% Linearity test: Enable one subnet after the other
-# Seems to be broken
 
 # # Dictionary feature_idx -> subnet_idx
 subnet_indices = get_feature_subnet_map(top1_model_fn, device, model.config, instance_idx=0)

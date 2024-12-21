@@ -943,7 +943,7 @@ def plot_feature_response_with_subnets(
     # I only need 0 and 100 as x ticks
     ax.set_xticks([0, 100])
     ax.set_xticklabels([0, 100])
-    ax.set_title(f"APD model when ablating parameter components. One-hot $x_{{{feature_idx}}}=1$")
+    # ax.set_title(f"APD model when ablating parameter components. One-hot $x_{{{feature_idx}}}=1$")
     ax.legend()
     return {"feature_response_with_subnets": fig}
 
