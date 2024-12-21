@@ -22,7 +22,7 @@ from spd.experiments.resid_mlp.resid_mlp_decomposition import plot_subnet_catego
 from spd.plotting import collect_sparse_dataset_mse_losses, plot_sparse_feature_mse_line_plot
 from spd.run_spd import ResidualMLPTaskConfig
 from spd.settings import REPO_ROOT
-from spd.utils import calc_recon_mse, run_spd_forward_pass, set_seed
+from spd.utils import DataGenerationType, calc_recon_mse, run_spd_forward_pass, set_seed
 
 # %% Loading
 device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -77,6 +77,13 @@ dataset = ResidualMLPDataset(
     label_coeffs=target_label_coeffs,
     data_generation_type="at_least_zero_active",  # We will change this in the for loop
 )
+gen_types: list[DataGenerationType] = [
+    "at_least_zero_active",
+    "exactly_one_active",
+    "exactly_two_active",
+    "exactly_three_active",
+    "exactly_four_active",
+]
 assert config.topk is not None
 results = collect_sparse_dataset_mse_losses(
     dataset=dataset,
@@ -88,14 +95,15 @@ results = collect_sparse_dataset_mse_losses(
     attribution_type=config.attribution_type,
     batch_topk=config.batch_topk,
     distil_from_target=config.distil_from_target,
-    max_n_active_features=4,
+    gen_types=gen_types,
+    buffer_ratio=2,
 )
-# Results for at_least_zero_active (they're the last values in each list)
-full_dist_results = {k: float(results[k][-1].detach().cpu()) for k in results}
-print(f"Results for `at_least_zero_active`:\n{full_dist_results}")
-# Results for exactly_one_active, exactly_two_active, etc.
-results = {k: [float(v.detach().cpu()) for v in results[k][:-1]] for k in results}
 
+# Convert all results to floats
+results = {
+    gen_type: {k: float(v.detach().cpu()) for k, v in results[gen_type].items()}
+    for gen_type in gen_types
+}
 # %%
 # Create line plot of results
 
@@ -104,6 +112,7 @@ label_map = {
     "target": "Target model",
     "spd": "APD model",
 }
+
 fig = plot_sparse_feature_mse_line_plot(results, label_map=label_map)
 fig.show()
 fig.savefig(out_dir / f"resid_mlp_mse_{n_layers}layers.png")
@@ -119,7 +128,15 @@ dataset = ResidualMLPDataset(
     calc_labels=False,  # Our labels will be the output of the target model
     data_generation_type=config.task_config.data_generation_type,
 )
-batch, labels = dataset.generate_batch(config.batch_size)
+if config.task_config.data_generation_type == "at_least_zero_active":
+    # In the future this will be merged into generate_batch
+    batch = dataset._generate_multi_feature_batch_no_zero_samples(config.batch_size, buffer_ratio=2)
+    if isinstance(dataset, ResidualMLPDataset) and dataset.label_fn is not None:
+        labels = dataset.label_fn(batch)
+    else:
+        labels = batch.clone().detach()
+else:
+    batch, labels = dataset.generate_batch(config.batch_size)
 batch = batch.to(device)
 labels = labels.to(device)
 # Print some basic information about the model

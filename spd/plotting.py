@@ -10,10 +10,12 @@ from torch import Tensor
 from torch.utils.data import DataLoader
 
 from spd.experiments.resid_mlp.models import ResidualMLPModel, ResidualMLPSPDRankPenaltyModel
+from spd.experiments.resid_mlp.resid_mlp_dataset import ResidualMLPDataset
 from spd.experiments.tms.models import TMSModel, TMSSPDRankPenaltyModel
 from spd.models.base import Model, SPDFullRankModel, SPDRankPenaltyModel
 from spd.run_spd import Config
 from spd.utils import (
+    DataGenerationType,
     SparseFeatureDataset,
     calc_recon_mse,
     calc_topk_mask,
@@ -159,42 +161,37 @@ def collect_sparse_dataset_mse_losses(
     attribution_type: Literal["gradient", "ablation", "activation"],
     batch_topk: bool,
     distil_from_target: bool,
-    max_n_active_features: int,
-) -> dict[str, list[Float[Tensor, ""] | Float[Tensor, " n_instances"]]]:
+    gen_types: list[DataGenerationType],
+    buffer_ratio: float = 1,
+) -> dict[str, dict[str, Float[Tensor, ""] | Float[Tensor, " n_instances"]]]:
     """Collect the MSE losses for specific number of active features, as well as for
     'at_least_zero_active'.
 
     We calculate two baselines:
-    - baseline_batch: a no-op baseline loss (i.e. the loss of the original input).
     - baseline_monosemantic: a baseline loss where the first d_mlp feature indices get mapped to the
-        true labels and the final (n_features - d_mlp) features are the raw inputs.
+        true labels and the final (n_features - d_mlp) features are either 0 (TMS) or the raw inputs
+        (ResidualMLP).
 
     Returns:
-        A dictionary keyed by generation type, with values being lists of MSE losses going from
-        n_features = 1 to n_features = max_n_active_features and a final value for the
-        `at_least_zero_active` generation type.
+        A dictionary keyed by generation type and then by model type (target, spd,
+        baseline_monosemantic), with values being MSE losses.
     """
     target_model.to(device)
     spd_model.to(device)
     # Get the entries for the main loss table in the paper
-    results = {
-        "target": [],
-        "spd": [],
-        "baseline_batch": [],
-        "baseline_monosemantic": [],
-    }
-    gen_types = [
-        "exactly_one_active",
-        "exactly_two_active",
-        "exactly_three_active",
-        "exactly_four_active",
-        "exactly_five_active",
-    ][:max_n_active_features]
-    gen_types.append("at_least_zero_active")
+    results = {gen_type: {} for gen_type in gen_types}
 
     for gen_type in gen_types:
         dataset.data_generation_type = gen_type
-        batch, labels = dataset.generate_batch(batch_size)
+        if gen_type == "at_least_zero_active":
+            # In the future this will be merged into generate_batch
+            batch = dataset._generate_multi_feature_batch_no_zero_samples(batch_size, buffer_ratio)
+            if isinstance(dataset, ResidualMLPDataset) and dataset.label_fn is not None:
+                labels = dataset.label_fn(batch)
+            else:
+                labels = batch.clone().detach()
+        else:
+            batch, labels = dataset.generate_batch(batch_size)
         batch = batch.to(device)
         labels = labels.to(device)
 
@@ -227,29 +224,46 @@ def collect_sparse_dataset_mse_losses(
             monosemantic_out[..., d_mlp:] = 0
         baseline_monosemantic = calc_recon_mse(monosemantic_out, labels, has_instance_dim=True)
 
-        results["target"].append(recon_loss)
-        results["spd"].append(topk_recon_loss_labels)
-        results["baseline_batch"].append(baseline_batch)
-        results["baseline_monosemantic"].append(baseline_monosemantic)
+        results[gen_type]["target"] = recon_loss
+        results[gen_type]["spd"] = topk_recon_loss_labels
+        results[gen_type]["baseline_batch"] = baseline_batch
+        results[gen_type]["baseline_monosemantic"] = baseline_monosemantic
     return results
 
 
 def plot_sparse_feature_mse_line_plot(
-    results: dict[str, list[float]], label_map: dict[str, str]
+    results: dict[str, dict[str, float]], label_map: dict[str, str]
 ) -> plt.Figure:
-    # Create line plots of target model, spd model, and baseline
-    fig, ax = plt.subplots(figsize=(10, 6))
-    # X values are from 1 to the number of active features in the results
-    x = range(1, len(results[list(results.keys())[0]]) + 1)
-    for model_type in label_map:
-        ax.plot(x, results[model_type], marker="o", label=label_map[model_type])
+    xtick_label_map = {
+        "at_least_zero_active": "Training distribution",
+        "exactly_one_active": "Exactly 1 active",
+        "exactly_two_active": "Exactly 2 active",
+        "exactly_three_active": "Exactly 3 active",
+        "exactly_four_active": "Exactly 4 active",
+        "exactly_five_active": "Exactly 5 active",
+    }
+    # Create grouped bar plots for each generation type
+    fig, ax = plt.subplots(figsize=(12, 6))
 
-    ax.set_xlabel("Number of active features")
+    n_groups = len(results)  # number of generation types
+    n_models = len(label_map)  # number of models to compare
+    width = 0.8 / n_models  # width of bars
+
+    # Create bars for each model type
+    for i, (model_type, label) in enumerate(label_map.items()):
+        x_positions = np.arange(n_groups) + i * width - (n_models - 1) * width / 2
+        heights = [results[gen_type][model_type] for gen_type in results]
+        ax.bar(x_positions, heights, width, label=label)
+
+    # Customize the plot
     ax.set_ylabel("MSE between model output and true labels")
-    ax.set_xticks(x)
-    ax.grid(True, alpha=0.3)
+    ax.set_xticks(np.arange(n_groups))
+    xtick_labels = [xtick_label_map[gen_type] for gen_type in results]
+    ax.set_xticklabels(xtick_labels)
     ax.legend()
+    ax.grid(True, alpha=0.3, axis="y")
 
+    # Remove top and right spines
     ax.spines["top"].set_visible(False)
     ax.spines["right"].set_visible(False)
 

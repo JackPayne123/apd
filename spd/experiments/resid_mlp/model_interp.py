@@ -38,7 +38,17 @@ dataset = ResidualMLPDataset(
     label_coeffs=label_coeffs,
     data_generation_type=train_config.data_generation_type,
 )
-batch, labels = dataset.generate_batch(train_config.batch_size)
+if train_config.data_generation_type == "at_least_zero_active":
+    # In the future this will be merged into generate_batch
+    batch = dataset._generate_multi_feature_batch_no_zero_samples(
+        train_config.batch_size, buffer_ratio=2
+    )
+    if isinstance(dataset, ResidualMLPDataset) and dataset.label_fn is not None:
+        labels = dataset.label_fn(batch)
+    else:
+        labels = batch.clone().detach()
+else:
+    batch, labels = dataset.generate_batch(train_config.batch_size)
 
 # %% Plot feature response with one active feature
 fig = plot_individual_feature_response(

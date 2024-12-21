@@ -596,6 +596,16 @@ def run_spd_forward_pass(
     )
 
 
+DataGenerationType = Literal[
+    "exactly_one_active",
+    "exactly_two_active",
+    "exactly_three_active",
+    "exactly_four_active",
+    "exactly_five_active",
+    "at_least_zero_active",
+]
+
+
 class SparseFeatureDataset(
     Dataset[
         tuple[
@@ -610,14 +620,7 @@ class SparseFeatureDataset(
         n_features: int,
         feature_probability: float,
         device: str,
-        data_generation_type: Literal[
-            "exactly_one_active",
-            "exactly_two_active",
-            "exactly_three_active",
-            "exactly_four_active",
-            "exactly_five_active",
-            "at_least_zero_active",
-        ] = "at_least_zero_active",
+        data_generation_type: DataGenerationType = "at_least_zero_active",
         value_range: tuple[float, float] = (0.0, 1.0),
     ):
         self.n_instances = n_instances
@@ -695,19 +698,73 @@ class SparseFeatureDataset(
 
         return batch
 
-    def _generate_multi_feature_batch(
-        self, batch_size: int
-    ) -> Float[Tensor, "batch n_instances n_features"]:
+    def _masked_batch_generator(
+        self, total_batch_size: int
+    ) -> Float[Tensor, "total_batch_size n_features"]:
         """Generate a batch where each feature activates independently with probability
-        `feature_probability`."""
+        `feature_probability`.
+
+        Args:
+            total_batch_size: Number of samples in the batch (either `batch_size` or
+                `batch_size * n_instances`)
+        """
         min_val, max_val = self.value_range
         batch = (
-            torch.rand((batch_size, self.n_instances, self.n_features), device=self.device)
+            torch.rand((total_batch_size, self.n_features), device=self.device)
             * (max_val - min_val)
             + min_val
         )
         mask = torch.rand_like(batch) < self.feature_probability
         return batch * mask
+
+    def _generate_multi_feature_batch(
+        self, batch_size: int
+    ) -> Float[Tensor, "batch n_instances n_features"]:
+        """Generate a batch where each feature activates independently with probability
+        `feature_probability`."""
+        total_batch_size = batch_size * self.n_instances
+        batch = self._masked_batch_generator(total_batch_size)
+        return einops.rearrange(
+            batch,
+            "(batch n_instances) n_features -> batch n_instances n_features",
+            batch=batch_size,
+        )
+
+    def _generate_multi_feature_batch_no_zero_samples(
+        self, batch_size: int, buffer_ratio: float
+    ) -> Float[Tensor, "batch n_instances n_features"]:
+        """Generate a batch where each feature activates independently with probability
+        `feature_probability`.
+
+        Ensures that there are no zero samples in the batch.
+
+        Args:
+            batch_size: Number of samples in the batch
+            buffer_ratio: First generate `buffer_ratio * total_batch_size` samples and count the
+                number of samples with all zeros. Then generate another `buffer_ratio *
+                n_zeros` samples and fill in the zero samples. Continue until there are no zero
+                samples.
+        """
+        total_batch_size = batch_size * self.n_instances
+        buffer_size = int(total_batch_size * buffer_ratio)
+        batch = torch.empty(0, device=self.device, dtype=torch.float32)
+        n_samples_needed = total_batch_size
+        while True:
+            buffer = self._masked_batch_generator(buffer_size)
+            # Get the indices of the non-zero samples in the buffer
+            valid_indices = buffer.sum(dim=-1) != 0
+            batch = torch.cat((batch, buffer[valid_indices][:n_samples_needed]))
+            if len(batch) == total_batch_size:
+                break
+            else:
+                # We don't have enough valid samples
+                n_samples_needed = total_batch_size - len(batch)
+                buffer_size = int(n_samples_needed * buffer_ratio)
+        return einops.rearrange(
+            batch,
+            "(batch n_instances) n_features -> batch n_instances n_features",
+            batch=batch_size,
+        )
 
 
 def compute_feature_importances(

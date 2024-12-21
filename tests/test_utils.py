@@ -244,6 +244,36 @@ def test_dataset_at_least_zero_active():
     ), f"Expected proportion {feature_probability}, but got {non_zero_proportion}"
 
 
+def test_generate_multi_feature_batch_no_zero_samples():
+    n_instances = 3
+    n_features = 5
+    feature_probability = 0.05  # Low probability to increase chance of zero samples
+    device = "cpu"
+    batch_size = 100
+    buffer_ratio = 1.5
+
+    dataset = SparseFeatureDataset(
+        n_instances=n_instances,
+        n_features=n_features,
+        feature_probability=feature_probability,
+        device=device,
+        data_generation_type="at_least_zero_active",
+        value_range=(0.0, 1.0),
+    )
+
+    batch = dataset._generate_multi_feature_batch_no_zero_samples(batch_size, buffer_ratio)
+
+    # Check shape
+    assert batch.shape == (batch_size, n_instances, n_features), "Incorrect batch shape"
+
+    # Check that the values are between 0 and 1
+    assert torch.all((batch >= 0) & (batch <= 1)), "Values should be between 0 and 1"
+
+    # Check that there are no all-zero samples
+    zero_samples = (batch.sum(dim=-1) == 0).sum()
+    assert zero_samples == 0, f"Found {zero_samples} samples with all zeros"
+
+
 @pytest.mark.parametrize("n", [1, 2, 3, 4, 5])
 def test_dataset_exactly_n_active(n: int):
     n_instances = 3
