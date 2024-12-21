@@ -22,7 +22,6 @@ from spd.experiments.resid_mlp.plotting import (
 )
 from spd.experiments.resid_mlp.resid_mlp_dataset import ResidualMLPDataset
 from spd.experiments.resid_mlp.resid_mlp_decomposition import plot_subnet_categories
-from spd.experiments.resid_mlp.scaling_resid_mlp_training import naive_loss
 from spd.plotting import collect_sparse_dataset_mse_losses, plot_sparse_feature_mse_line_plot
 from spd.run_spd import ResidualMLPTaskConfig
 from spd.settings import REPO_ROOT
@@ -33,8 +32,8 @@ device = "cuda" if torch.cuda.is_available() else "cpu"
 print(f"Using device: {device}")
 set_seed(0)  # You can change this seed if needed
 
-wandb_path = "wandb:spd-resid-mlp/runs/8qz1si1l"  # 1 layer (40k steps. 15 cross 98 mono) R6
-# wandb_path = "wandb:spd-resid-mlp/runs/cb0ej7hj"  # 2 layer 2LR4
+# wandb_path = "wandb:spd-resid-mlp/runs/8qz1si1l"  # 1 layer (40k steps. 15 cross 98 mono) R6
+wandb_path = "wandb:spd-resid-mlp/runs/cb0ej7hj"  # 2 layer 2LR4
 # Load the pretrained SPD model
 model, config, label_coeffs = ResidualMLPSPDRankPenaltyModel.from_pretrained(wandb_path)
 assert isinstance(config.task_config, ResidualMLPTaskConfig)
@@ -171,7 +170,7 @@ subnet_indices = get_feature_subnet_map(top1_model_fn, device, model.config, ins
 batch_size = config.batch_size
 # make sure to use config.batch_size because
 # it's tuned to config.topk!
-n_batches = 1000
+n_batches = 100  # 100 and 1000 are similar. Maybe use 1000 for final plots only
 test_dataset = ResidualMLPDataset(
     n_instances=model.config.n_instances,
     n_features=model.config.n_features,
@@ -187,7 +186,7 @@ all_loss_antiscrubbed = []
 all_loss_random = []
 all_loss_spd = []
 all_loss_zero = []
-
+all_loss_monosemantic = []
 for _ in tqdm(range(n_batches)):
     # In the future this will be merged into generate_batch
     batch = dataset._generate_multi_feature_batch_no_zero_samples(batch_size, buffer_ratio=2)
@@ -216,6 +215,11 @@ for _ in tqdm(range(n_batches)):
     out_scrubbed = top1_model_fn(batch, scrubbed_topk_mask).spd_topk_model_output
     out_antiscrubbed = top1_model_fn(batch, antiscrubbed_topk_mask).spd_topk_model_output
     out_target = target_model_fn(batch)
+    # Monosemantic baseline
+    out_monosemantic = batch.clone()
+    d_mlp = target_model.config.d_mlp * target_model.config.n_layers  # type: ignore
+    out_monosemantic[..., :d_mlp] = labels[..., :d_mlp]
+
     # Calc MSE losses
     all_loss_scrubbed.append(
         ((out_scrubbed - out_target) ** 2).mean(dim=-1).flatten().detach().cpu()
@@ -228,6 +232,9 @@ for _ in tqdm(range(n_batches)):
     all_loss_zero.append(
         ((torch.zeros_like(out_target) - out_target) ** 2).mean(dim=-1).flatten().detach().cpu()
     )
+    all_loss_monosemantic.append(
+        ((out_monosemantic - out_target) ** 2).mean(dim=-1).flatten().detach().cpu()
+    )
 
 # Concatenate all batches
 loss_scrubbed = torch.cat(all_loss_scrubbed)
@@ -235,20 +242,12 @@ loss_antiscrubbed = torch.cat(all_loss_antiscrubbed)
 loss_random = torch.cat(all_loss_random)
 loss_spd = torch.cat(all_loss_spd)
 loss_zero = torch.cat(all_loss_zero)
-
-# Print & plot the above
-loss_naive = naive_loss(
-    n_features=model.config.n_features,
-    d_mlp=model.config.d_mlp,
-    p=config.task_config.feature_probability,
-    bias=model.layers[0].linear1.bias is not None,
-    embed="random",
-)
+loss_monosemantic = torch.cat(all_loss_monosemantic)
 
 print(f"Loss SPD:           {loss_spd.mean().item():.6f}")
 print(f"Loss scrubbed:      {loss_scrubbed.mean().item():.6f}")
 print(f"Loss antiscrubbed:  {loss_antiscrubbed.mean().item():.6f}")
-print(f"Loss naive:         {loss_naive:.6f}")
+print(f"Loss monosemantic:  {loss_monosemantic.mean().item():.6f}")
 print(f"Loss random:        {loss_random.mean().item():.6f}")
 print(f"Loss zero:          {loss_zero.mean().item():.6f}")
 
@@ -290,7 +289,12 @@ ax.hist(
 ax.axvline(loss_antiscrubbed.mean().item(), color="tab:green", linestyle="--")
 # ax.hist(loss_random, bins=log_bins, label="APD (random)", histtype="step")
 # ax.hist(loss_zero, bins=log_bins, label="APD (zero)", histtype="step")
-ax.axvline(loss_naive, color="black", linestyle="--", label="Monosemantic neuron solution")
+ax.axvline(
+    loss_monosemantic.mean().item(),
+    color="black",
+    linestyle="--",
+    label="Monosemantic neuron solution",
+)
 ax.legend()
 ax.set_ylabel(f"Count (out of {batch_size * n_batches} samples)")
 ax.set_xlabel("MSE loss with target model output")
@@ -301,8 +305,8 @@ ax.spines["top"].set_visible(False)
 ax.spines["right"].set_visible(False)
 
 # fig.suptitle("Losses when scrubbing set of parameter components")
-fig.savefig(out_dir / "resid_mlp_scrub_hist.png", bbox_inches="tight", dpi=300)
-print(f"Saved figure to {out_dir / 'resid_mlp_scrub_hist.png'}")
+fig.savefig(out_dir / f"resid_mlp_scrub_hist_{n_layers}layers.png", bbox_inches="tight", dpi=300)
+print(f"Saved figure to {out_dir / f'resid_mlp_scrub_hist_{n_layers}layers.png'}")
 fig.show()
 
 
