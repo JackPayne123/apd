@@ -557,6 +557,7 @@ def run_spd_forward_pass(
     batch_topk: bool,
     topk: float,
     distil_from_target: bool,
+    topk_mask: Float[Tensor, "batch k"] | Float[Tensor, "batch n_instances k"] | None = None,
 ) -> SPDOutputs:
     # non-SPD model, and SPD-model non-topk forward pass
     target_model_output, pre_acts, post_acts = target_model(input_array)
@@ -575,13 +576,15 @@ def run_spd_forward_pass(
 
     # We always assume the final subnetwork is the one we want to distil
     topk_attrs = attribution_scores[..., :-1] if distil_from_target else attribution_scores
-    topk_mask = calc_topk_mask(topk_attrs, topk, batch_topk=batch_topk)
-    if distil_from_target:
-        # Add back the final subnetwork index to the topk mask and set it to True
-        last_subnet_mask = torch.ones(
-            (*topk_mask.shape[:-1], 1), dtype=torch.bool, device=attribution_scores.device
-        )
-        topk_mask = torch.cat((topk_mask, last_subnet_mask), dim=-1)
+
+    if topk_mask is None:
+        topk_mask = calc_topk_mask(topk_attrs, topk, batch_topk=batch_topk)
+        if distil_from_target:
+            # Add back the final subnetwork index to the topk mask and set it to True
+            last_subnet_mask = torch.ones(
+                (*topk_mask.shape[:-1], 1), dtype=torch.bool, device=attribution_scores.device
+            )
+            topk_mask = torch.cat((topk_mask, last_subnet_mask), dim=-1)
 
     model_output_spd_topk, _, _ = spd_model(input_array, topk_mask=topk_mask)
     attribution_scores = attribution_scores.cpu().detach()

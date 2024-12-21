@@ -18,6 +18,7 @@ from spd.experiments.resid_mlp.models import (
     ResidualMLPSPDRankPenaltyConfig,
     ResidualMLPSPDRankPenaltyModel,
 )
+from spd.utils import SPDOutputs
 
 
 def plot_individual_feature_response(
@@ -660,3 +661,29 @@ def plot_virtual_weights_target_spd(
             norm=norm,
         )
     return fig
+
+
+def get_feature_subnet_map(
+    top1_model_fn: Callable[
+        [
+            Float[Tensor, "batch n_instances n_features"],
+            Float[Tensor, "batch n_instances k"] | None,
+        ],
+        SPDOutputs,
+    ],
+    device: str,
+    model_config: ResidualMLPConfig | ResidualMLPSPDRankPenaltyConfig,
+    instance_idx: int = 0,
+) -> dict[int, int]:
+    n_instances = model_config.n_instances
+    n_features = model_config.n_features
+    batch_size = n_features
+    batch = torch.zeros(batch_size, n_instances, n_features, device=device)
+    batch[torch.arange(n_features), instance_idx, torch.arange(n_features)] = 1
+    top1_out = top1_model_fn(batch, None)
+    top1_mask = top1_out.topk_mask[:, instance_idx, :]
+    subnet_indices = {
+        int(feature_idx.item()): int(subnet_idx.item())
+        for feature_idx, subnet_idx in top1_mask.nonzero()
+    }
+    return subnet_indices
