@@ -276,7 +276,7 @@ if __name__ == "__main__":
             out_bias=False,
         ),
         label_fn_seed=0,
-        label_type="abs",
+        label_type="act_plus_resid",
         use_trivial_label_coeffs=True,
         feature_probability=0.5,
         importance_val=0.97,
