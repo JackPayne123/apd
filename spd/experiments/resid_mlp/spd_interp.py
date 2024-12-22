@@ -14,6 +14,7 @@ from spd.experiments.resid_mlp.models import ResidualMLPModel, ResidualMLPSPDRan
 from spd.experiments.resid_mlp.plotting import (
     analyze_per_feature_performance,
     get_feature_subnet_map,
+    plot_feature_response_with_subnets,
     plot_individual_feature_response,
     plot_spd_feature_contributions_truncated,
     plot_spd_relu_contribution,
@@ -308,6 +309,36 @@ ax.spines["right"].set_visible(False)
 fig.savefig(out_dir / f"resid_mlp_scrub_hist_{n_layers}layers.png", bbox_inches="tight", dpi=300)
 print(f"Saved figure to {out_dir / f'resid_mlp_scrub_hist_{n_layers}layers.png'}")
 fig.show()
+
+
+# %% Linearity test: Enable one subnet after the other
+# candlestick plot
+
+# # Dictionary feature_idx -> subnet_idx
+subnet_indices = get_feature_subnet_map(top1_model_fn, device, model.config, instance_idx=0)
+
+n_features = model.config.n_features
+feature_idx = 42
+subtract_inputs = True  # TODO TRUE subnet
+fig = plot_feature_response_with_subnets(
+    topk_model_fn=top1_model_fn,
+    device=device,
+    model_config=model.config,
+    feature_idx=feature_idx,
+    subnet_idx=subnet_indices[feature_idx],
+    batch_size=10000,
+    plot_type="errorbar",
+)["feature_response_with_subnets"]
+if fig is not None:
+    fig.savefig(  # type: ignore
+        out_dir / f"feature_response_with_subnets_{feature_idx}_{n_layers}layers.png",
+        bbox_inches="tight",
+        dpi=300,
+    )
+    print(
+        f"Saved figure to {out_dir / f'feature_response_with_subnets_{feature_idx}_{n_layers}layers.png'}"
+    )
+    plt.show()
 
 
 ################## End of current paper plots ##################

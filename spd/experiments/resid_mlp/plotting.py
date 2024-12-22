@@ -663,6 +663,121 @@ def plot_virtual_weights_target_spd(
     return fig
 
 
+def plot_feature_response_with_subnets(
+    topk_model_fn: Callable[
+        [Float[Tensor, "batch n_instances n_features"], Float[Tensor, "batch n_instances k"]],
+        SPDOutputs,
+    ],
+    device: str,
+    model_config: ResidualMLPSPDRankPenaltyConfig,
+    feature_idx: int = 0,
+    subnet_idx: int = 0,
+    instance_idx: int = 0,
+    ax: plt.Axes | None = None,
+    batch_size: int | None = None,
+    plot_type: Literal["line", "errorbar"] = "errorbar",
+):
+    n_instances = model_config.n_instances
+    n_features = model_config.n_features
+    batch_size = batch_size or n_features
+    k = model_config.k
+
+    if ax is None:
+        fig, ax = plt.subplots(constrained_layout=True, figsize=(10, 5))
+    else:
+        fig = ax.figure
+
+    batch = torch.zeros(batch_size, n_instances, n_features, device=device)
+    batch[:, instance_idx, feature_idx] = 1
+    topk_mask_blue = torch.zeros(batch_size, n_instances, k, device=device)
+    topk_mask_red = torch.zeros(batch_size, n_instances, k, device=device)
+    topk_mask_blue[:, :, subnet_idx] = 1
+    for s in range(batch_size):
+        # Randomly ablate half the features
+        half_n_features = n_features // 2
+        choice = torch.randperm(n_features - 1)[:half_n_features]
+        # Exclude feature_idx from choice
+        choice[choice >= subnet_idx] += 1
+        topk_mask_blue[s, :, choice] = 1
+        topk_mask_red[s, :, choice] = 1
+    assert torch.allclose(
+        topk_mask_blue[:, :, subnet_idx], torch.ones_like(topk_mask_blue[:, :, subnet_idx])
+    )
+    assert torch.allclose(
+        topk_mask_red[:, :, subnet_idx], torch.zeros_like(topk_mask_red[:, :, subnet_idx])
+    )
+    zero_topk_mask = torch.zeros(batch_size, n_instances, k, device=device)
+    out_WE_WU_only = topk_model_fn(batch, zero_topk_mask).spd_topk_model_output[:, instance_idx, :]
+
+    out_red = topk_model_fn(batch, topk_mask_red)
+    out_blue = topk_model_fn(batch, topk_mask_blue)
+    mlp_out_blue_spd = out_blue.spd_topk_model_output[:, instance_idx, :] - out_WE_WU_only
+    mlp_out_red_spd = out_red.spd_topk_model_output[:, instance_idx, :] - out_WE_WU_only
+    mlp_out_target = out_blue.target_model_output[:, instance_idx, :] - out_WE_WU_only
+
+    x = torch.arange(n_features)
+
+    if plot_type == "errorbar":
+        # Calculate means and stds across batch dimension
+        blue_mean = mlp_out_blue_spd.mean(dim=0).detach().cpu()
+        blue_std = mlp_out_blue_spd.std(dim=0).detach().cpu()
+        red_mean = mlp_out_red_spd.mean(dim=0).detach().cpu()
+        red_std = mlp_out_red_spd.std(dim=0).detach().cpu()
+
+        # Plot errorbars
+        ax.errorbar(
+            x,
+            blue_mean,
+            yerr=blue_std,
+            color="tab:purple",
+            label="APD (scrubbed)",
+            fmt="o",
+            markersize=2,
+        )
+        ax.errorbar(
+            x,
+            red_mean,
+            yerr=red_std,
+            color="tab:orange",
+            label="APD (anti-scrubbed)",
+            fmt="o",
+            markersize=2,
+        )
+
+        # Plot target model output
+        yt = mlp_out_target[0, :].detach().cpu()
+        ax.scatter(x, yt, color="red", label="Target model", marker="x", s=10)
+        # Remove all axes lines
+        ax.spines["top"].set_visible(False)
+        ax.spines["right"].set_visible(False)
+        ax.set_xticks([])
+    elif plot_type == "line":
+        cmap1 = plt.get_cmap("Purples")
+        cmap2 = plt.get_cmap("Oranges")
+        for s in range(batch_size):
+            yb = mlp_out_blue_spd[s, :].detach().cpu()
+            yr = mlp_out_red_spd[s, :].detach().cpu()
+            if plot_type == "line":
+                ax.plot(x, yb, color=cmap1(s / batch_size), lw=0.3)
+                ax.plot(x, yr, color=cmap2(s / batch_size), lw=0.3)
+        ax.plot([], [], color=cmap1(0), label="APD (scrubbed)")
+        ax.plot([], [], color=cmap2(0), label="APD (anti-scrubbed)")
+        yt = mlp_out_target[0, :].detach().cpu()
+        ax.plot(x, yt, color="red", lw=0.5, label="Target model")
+    else:
+        raise ValueError(f"Invalid plot type: {plot_type}")
+
+    ax.set_ylabel("MLP output (forward pass minus W_E W_U contribution)")
+    ax.set_xlabel("Output index")
+
+    # I only need 0, feature_idx, and 100 as x ticks
+    ax.set_xticks([0, feature_idx, 100])
+    ax.set_xticklabels(["0", str(feature_idx), "100"])
+    # ax.set_title(f"APD model when ablating parameter components. One-hot $x_{{{feature_idx}}}=1$")
+    ax.legend()
+    return {"feature_response_with_subnets": fig}
+
+
 def get_feature_subnet_map(
     top1_model_fn: Callable[
         [
