@@ -199,8 +199,9 @@ def plot_single_feature_response(
     ax.set_ylabel(f"Output value $x̂_{{{feature_idx}}}$")
     ax.set_title(f"Output for a single input $x_{{{feature_idx}}}=1$")
 
-    ax.set_xticks([0, n_features])
-    ax.set_xticklabels([0, n_features])
+    # Only need feature indices 0, feature_idx, n_features.
+    ax.set_xticks([0, feature_idx, n_features])
+    ax.set_xticklabels(["0", str(feature_idx), str(n_features)])
 
     # Remove top and right spines
     ax.spines["top"].set_visible(False)

@@ -26,7 +26,7 @@ from spd.utils import set_seed
 
 # %% Load model and config
 
-out_dir = REPO_ROOT / "spd/experiments/resid_mlp/figures/"
+out_dir = REPO_ROOT / "spd/experiments/resid_mlp/out/"
 out_dir.mkdir(parents=True, exist_ok=True)
 
 set_seed(0)
@@ -76,7 +76,7 @@ plot_single_feature_response(
     model_config=train_config.resid_mlp_config,
     device=device,
     subtract_inputs=False,
-    feature_idx=15,
+    feature_idx=42,
     ax=ax1,
 )
 plot_single_relu_curve(
@@ -84,7 +84,7 @@ plot_single_relu_curve(
     model_config=train_config.resid_mlp_config,
     device=device,
     subtract_inputs=False,
-    feature_idx=15,
+    feature_idx=42,
     ax=ax2,
 )
 fig.savefig(
