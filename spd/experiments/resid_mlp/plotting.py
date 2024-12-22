@@ -74,7 +74,7 @@ def plot_individual_feature_response(
             ax.scatter(
                 x[order],
                 y[order],
-                c=cmap_viridis(f / n_features),
+                color=cmap_viridis(f / n_features),
                 marker=".",
                 s=s[order],
                 alpha=alpha[order],
@@ -175,19 +175,26 @@ def plot_single_feature_response(
         )
     elif plot_type == "scatter":
         ax.scatter(
-            x, y, c=cmap_viridis(feature_idx / n_features), label="Target Model", marker=".", s=20
+            x,
+            y,
+            color=cmap_viridis(feature_idx / n_features),
+            label="Target Model",
+            marker=".",
+            s=20,
         )
         ax.scatter(
             torch.arange(n_features),
             targets.cpu().detach(),
-            c="red",
+            color="red",
             label="Label ($x+\mathrm{ReLU}(x)$)",
             marker="x",
             s=5,
         )
     else:
         raise ValueError("Unknown plot_type")
-    ax.legend()
+    handles, labels = ax.get_legend_handles_labels()
+    if handles:
+        ax.legend()
     ax.set_xlabel("Output index")
     ax.set_ylabel(f"Output value $x̂_{{{feature_idx}}}$")
     ax.set_title(f"Output for a single input $x_{{{feature_idx}}}=1$")
@@ -238,7 +245,9 @@ def plot_single_relu_curve(
         label="Label ($x+\mathrm{ReLU}(x)$)" if label else None,
         ls="--",
     )
-    ax.legend()
+    handles, labels = ax.get_legend_handles_labels()
+    if handles:
+        ax.legend()
     ax.set_xlabel(f"Input value $x_{{{feature_idx}}}$")
     ax.set_ylabel(f"Output value $x̂_{{{feature_idx}}}$")
     ax.set_title(f"Input-output response for input feature {feature_idx}")
