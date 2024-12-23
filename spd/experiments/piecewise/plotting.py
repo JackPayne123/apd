@@ -421,12 +421,12 @@ def plot_model_functions_paper(
         s = slice(cb * n_samples, (cb + 1) * n_samples)
         ax = axs[cb]
         ax.plot(input_xs[s], model_output_hardcoded[s], color=color0, label="Target model")
-        ax.plot(input_xs[s], out_topk[s], ls="--", color=color1, label="SPD top-k")
+        ax.plot(input_xs[s], out_topk[s], ls="--", color=color1, label="APD top-k")
         ax.legend(loc="lower left")
         assert target_model.controlled_resnet is not None
         ax.set_xlabel("Input x")
         ax.set_title(f"Feature {cb}")
-    axs[0].set_ylabel("Output f(x)")
+    axs[0].set_ylabel("Output F(x)")
     return {"model_functions_paper": fig}
 
 
@@ -597,7 +597,7 @@ def plot_piecewise_network(
     )
     axs = np.array(axs)
     for i, k in enumerate(np.arange(-1, n_components)):
-        axs[i].set_title(f"Subnet {k}")
+        axs[i].set_title(f"Component {k}")
         plot_single_network(axs[i], subnetworks[k], colors[k])
     axs[0].set_title(first_column)
     axs[0].text(0.275, 0.01, "Outputs", ha="center", va="center", transform=axs[0].transAxes)
