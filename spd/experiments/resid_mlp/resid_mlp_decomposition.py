@@ -14,6 +14,7 @@ import wandb
 import yaml
 from jaxtyping import Float
 from matplotlib.colors import CenteredNorm
+from pydantic import PositiveFloat
 from torch import Tensor
 from tqdm import tqdm
 
@@ -222,9 +223,11 @@ def plot_multiple_subnetwork_params(
     return fig
 
 
-def plot_subnet_categories(model: ResidualMLPSPDRankPenaltyModel, device: str) -> plt.Figure:
+def plot_subnet_categories(
+    model: ResidualMLPSPDRankPenaltyModel, device: str, cutoff: float = 4e-2
+) -> plt.Figure:
     n_active_features_per_subnet, active_feature_counts_per_subnet = (
-        calc_n_active_features_per_subnet(model, cutoff=4e-2, device=device)
+        calc_n_active_features_per_subnet(model, cutoff=cutoff, device=device)
     )
     n_dead_subnets = (n_active_features_per_subnet == 0).sum(dim=-1).detach().tolist()
     n_monosemantic_subnets = (n_active_features_per_subnet == 1).sum(dim=-1).detach().tolist()
@@ -308,22 +311,22 @@ def resid_mlp_plot_results_fn(
     # Individual feature responses + per-feature performance
     ############################################################################################
     def spd_model_fn(
-        batch: Float[Tensor, "batch n_instances"],
+        batch: Float[Tensor, "batch n_instances n_features"],
+        topk: PositiveFloat | None = config.topk,
+        batch_topk: bool = config.batch_topk,
     ) -> Float[Tensor, "batch n_instances n_features"]:
-        assert config.topk is not None
+        assert topk is not None
         return run_spd_forward_pass(
             spd_model=model,
             target_model=target_model,
             input_array=batch,
             attribution_type=config.attribution_type,
-            batch_topk=config.batch_topk,
-            topk=config.topk,
+            batch_topk=batch_topk,
+            topk=topk,
             distil_from_target=config.distil_from_target,
         ).spd_topk_model_output
 
-    def target_model_fn(
-        batch: Float[Tensor, "batch n_instances"],
-    ) -> Float[Tensor, "batch n_instances n_features"]:
+    def target_model_fn(batch: Float[Tensor, "batch n_instances"]):
         return target_model(batch)[0]
 
     fig, axes = plt.subplots(nrows=2, ncols=2, figsize=(15, 15), constrained_layout=True)
@@ -366,11 +369,34 @@ def resid_mlp_plot_results_fn(
     axes[0, 1].set_xlabel("")
     fig_dict["individual_feature_responses"] = fig
 
-    fig, ax = plt.subplots(figsize=(15, 5))
+    # Plot per-feature performance when setting topk=1 and batch_topk=False
+    fig, ax1 = plt.subplots(figsize=(15, 5))
     sorted_indices = analyze_per_feature_performance(
         model_fn=target_model_fn,
         model_config=target_model.config,
-        ax=ax,
+        ax=ax1,
+        label="Target",
+        device=device,
+        sorted_indices=None,
+    )
+    fn_without_batch_topk = lambda batch: spd_model_fn(batch, topk=1, batch_topk=False)  # type: ignore
+    analyze_per_feature_performance(
+        model_fn=fn_without_batch_topk,
+        model_config=model.config,
+        ax=ax1,
+        label="SPD",
+        device=device,
+        sorted_indices=sorted_indices,
+    )
+    ax1.legend()
+    fig_dict["loss_by_feature_topk_1"] = fig
+
+    # Plot per-feature performance when using batch_topk
+    fig, ax2 = plt.subplots(figsize=(15, 5))
+    sorted_indices = analyze_per_feature_performance(
+        model_fn=target_model_fn,
+        model_config=target_model.config,
+        ax=ax2,
         label="Target",
         device=device,
         sorted_indices=None,
@@ -378,13 +404,15 @@ def resid_mlp_plot_results_fn(
     analyze_per_feature_performance(
         model_fn=spd_model_fn,
         model_config=model.config,
-        ax=ax,
+        ax=ax2,
         label="SPD",
         device=device,
         sorted_indices=sorted_indices,
     )
-    ax.legend()
-    fig_dict["loss_by_feature"] = fig
+    ax2.legend()
+    # Use the same y-axis limits as the topk=1 plot
+    ax2.set_ylim(ax1.get_ylim())
+    fig_dict["loss_by_feature_batch_topk"] = fig
 
     ############################################################################################
     # Virtual weights

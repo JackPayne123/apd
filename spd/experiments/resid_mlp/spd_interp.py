@@ -33,16 +33,12 @@ device = "cuda" if torch.cuda.is_available() else "cpu"
 print(f"Using device: {device}")
 set_seed(0)  # You can change this seed if needed
 
-# wandb_path = "wandb:spd-resid-mlp/runs/8qz1si1l"  # 1 layer (40k steps. 15 cross 98 mono) R6
-wandb_path = "wandb:spd-resid-mlp/runs/cb0ej7hj"  # 2 layer 2LR4
+wandb_path = "wandb:spd-resid-mlp/runs/8qz1si1l"  # 1 layer (40k steps. 15 cross 98 mono) R6
+# wandb_path = "wandb:spd-resid-mlp/runs/yk6we9kl"  # New 1 layer with 100 mono
+# wandb_path = "wandb:spd-resid-mlp/runs/cb0ej7hj"  # 2 layer 2LR4
 # Load the pretrained SPD model
 model, config, label_coeffs = ResidualMLPSPDRankPenaltyModel.from_pretrained(wandb_path)
 assert isinstance(config.task_config, ResidualMLPTaskConfig)
-# %%
-fig = plot_subnet_categories(model, device)
-fig.show()
-
-# %%
 
 # Path must be local
 target_model, target_model_train_config_dict, target_label_coeffs = (
@@ -55,6 +51,80 @@ target_label_coeffs = target_label_coeffs.to(device)
 assert torch.allclose(target_label_coeffs, torch.tensor(label_coeffs))
 
 n_layers = target_model.config.n_layers
+# %%
+fig = plot_subnet_categories(model, device, cutoff=4e-2)
+fig.show()
+
+# %%
+
+
+def spd_model_fn(
+    batch: Float[Tensor, "batch n_instances n_features"],
+    topk: PositiveFloat | None = config.topk,
+    batch_topk: bool = config.batch_topk,
+) -> Float[Tensor, "batch n_instances n_features"]:
+    assert topk is not None
+    return run_spd_forward_pass(
+        spd_model=model,
+        target_model=target_model,
+        input_array=batch,
+        attribution_type=config.attribution_type,
+        batch_topk=batch_topk,
+        topk=topk,
+        distil_from_target=config.distil_from_target,
+    ).spd_topk_model_output
+
+
+def target_model_fn(batch: Float[Tensor, "batch n_instances"]):
+    return target_model(batch)[0]
+
+
+# Plot per-feature performance when setting topk=1 and batch_topk=False
+fig, ax1 = plt.subplots(figsize=(15, 5))
+sorted_indices = analyze_per_feature_performance(
+    model_fn=target_model_fn,
+    model_config=target_model.config,
+    ax=ax1,
+    label="Target",
+    device=device,
+    sorted_indices=None,
+)
+fn_without_batch_topk = lambda batch: spd_model_fn(batch, topk=1, batch_topk=False)  # type: ignore
+analyze_per_feature_performance(
+    model_fn=fn_without_batch_topk,
+    model_config=model.config,
+    ax=ax1,
+    label="SPD",
+    device=device,
+    sorted_indices=sorted_indices,
+)
+ax1.legend()
+fig.show()
+
+# Plot per-feature performance when using batch_topk
+fig, ax2 = plt.subplots(figsize=(15, 5))
+sorted_indices = analyze_per_feature_performance(
+    model_fn=target_model_fn,
+    model_config=target_model.config,
+    ax=ax2,
+    label="Target",
+    device=device,
+    sorted_indices=None,
+)
+analyze_per_feature_performance(
+    model_fn=spd_model_fn,
+    model_config=model.config,
+    ax=ax2,
+    label="SPD",
+    device=device,
+    sorted_indices=sorted_indices,
+)
+ax2.legend()
+# Use the same y-axis limits as the topk=1 plot
+ax2.set_ylim(ax1.get_ylim())
+fig.show()
+
+
 # %%
 # Plot the main truncated feature contributions figure for the paper
 fig = plot_spd_feature_contributions_truncated(
@@ -142,27 +212,6 @@ def top1_model_fn(
         distil_from_target=config.distil_from_target,
         topk_mask=topk_mask,
     )
-
-
-def spd_model_fn(
-    batch: Float[Tensor, "batch n_instances n_features"],
-    topk: PositiveFloat = config.topk,
-    batch_topk: bool = config.batch_topk,
-) -> Float[Tensor, "batch n_instances n_features"]:
-    assert config.topk is not None
-    return run_spd_forward_pass(
-        spd_model=model,
-        target_model=target_model,
-        input_array=batch,
-        attribution_type=config.attribution_type,
-        batch_topk=batch_topk,
-        topk=topk,
-        distil_from_target=config.distil_from_target,
-    ).spd_topk_model_output
-
-
-def target_model_fn(batch: Float[Tensor, "batch n_instances"]):
-    return target_model(batch)[0]
 
 
 # Dictionary feature_idx -> subnet_idx
