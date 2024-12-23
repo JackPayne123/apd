@@ -81,20 +81,24 @@ def get_run_name(
 
 def calc_n_active_features_per_subnet(
     model: ResidualMLPSPDRankPenaltyModel, cutoff: float, device: str
-) -> Float[Tensor, "n_instances k"] | Float[Tensor, " k"]:
+) -> tuple[Float[Tensor, "n_instances k"], Float[Tensor, "n_instances n_features"]]:
     """Calculate the number of active features per subnet (and per instance if n_instances > 1)."""
-    n_active_features_per_subnet: Float[Tensor, "n_instances k"] | Float[Tensor, " k"] = (
-        torch.zeros((model.config.n_instances, model.k), device=device)
+    n_active_features_per_subnet: Float[Tensor, "n_instances k"] = torch.zeros(
+        (model.config.n_instances, model.k), device=device
     )
-
+    active_feature_counts_per_subnet: Float[Tensor, "n_instances n_features"] = torch.zeros(
+        (model.config.n_instances, model.config.n_features), device=device
+    )
     for k in range(model.k):
         relu_conns: Float[Tensor, "n_instances n_features d_mlp"] = spd_calculate_diag_relu_conns(
             model, device, k_select=k
         )
         # Count the number of features for which each subnet fires beyond the cutoff
-        n_active_features_per_subnet[:, k] = (relu_conns.max(dim=-1).values > cutoff).sum(dim=-1)
+        above_cutoff = relu_conns.max(dim=-1).values > cutoff
+        n_active_features_per_subnet[:, k] = above_cutoff.sum(dim=-1)
+        active_feature_counts_per_subnet[:] += above_cutoff
 
-    return n_active_features_per_subnet
+    return n_active_features_per_subnet, active_feature_counts_per_subnet
 
 
 def plot_subnetwork_attributions(
@@ -219,20 +223,23 @@ def plot_multiple_subnetwork_params(
 
 
 def plot_subnet_categories(model: ResidualMLPSPDRankPenaltyModel, device: str) -> plt.Figure:
-    n_active_features_per_subnet = calc_n_active_features_per_subnet(
-        model, cutoff=4e-2, device=device
+    n_active_features_per_subnet, active_feature_counts_per_subnet = (
+        calc_n_active_features_per_subnet(model, cutoff=4e-2, device=device)
     )
-    n_dead_subnets = (n_active_features_per_subnet == 0).sum(dim=-1).detach().cpu().tolist()
-    n_monosemantic_subnets = (n_active_features_per_subnet == 1).sum(dim=-1).detach().cpu().tolist()
-    n_duosemantic_subnets = (n_active_features_per_subnet == 2).sum(dim=-1).detach().cpu().tolist()
-    n_polysemantic_subnets = (n_active_features_per_subnet > 2).sum(dim=-1).detach().cpu().tolist()
+    n_dead_subnets = (n_active_features_per_subnet == 0).sum(dim=-1).detach().tolist()
+    n_monosemantic_subnets = (n_active_features_per_subnet == 1).sum(dim=-1).detach().tolist()
+    n_duosemantic_subnets = (n_active_features_per_subnet == 2).sum(dim=-1).detach().tolist()
+    n_polysemantic_subnets = (n_active_features_per_subnet > 2).sum(dim=-1).detach().tolist()
+    n_unique_features_represented = (
+        (active_feature_counts_per_subnet > 0).sum(dim=-1).detach().tolist()
+    )
 
     n_instances = len(n_dead_subnets)
     fig, ax = plt.subplots(
         nrows=1, ncols=n_instances, figsize=(5 * n_instances, 5), constrained_layout=True
     )
     axs = np.array([ax]) if n_instances == 1 else np.array(ax)
-    categories = ["Dead", "Monosemantic", "Duosemantic", "Polysemantic"]
+    categories = ["Dead", "Mono", "Duo", "Poly", "Represented"]
 
     for i in range(n_instances):
         counts = [
@@ -240,6 +247,7 @@ def plot_subnet_categories(model: ResidualMLPSPDRankPenaltyModel, device: str) -
             n_monosemantic_subnets[i],
             n_duosemantic_subnets[i],
             n_polysemantic_subnets[i],
+            n_unique_features_represented[i],
         ]
         bars = axs[i].bar(categories, counts)
         axs[i].set_xlabel("Category")

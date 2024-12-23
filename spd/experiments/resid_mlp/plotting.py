@@ -340,6 +340,8 @@ def spd_calculate_virtual_weights(
     model: ResidualMLPSPDRankPenaltyModel, device: str
 ) -> dict[str, Tensor]:
     """Currently ignoring interactions between layers. Just flattening (n_layers, d_mlp)"""
+    old_device = next(model.parameters()).device
+    model.to(device)
     n_instances = model.config.n_instances
     n_features = model.config.n_features
     d_embed = model.config.d_embed
@@ -406,6 +408,8 @@ def spd_calculate_virtual_weights(
         virtual_weights["b_in"] = b_in
     if b_out is not None:
         virtual_weights["b_out"] = b_out
+
+    model.to(old_device)
     return virtual_weights
 
 
