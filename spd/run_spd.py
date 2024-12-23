@@ -779,6 +779,7 @@ def optimize(
             pre_acts=pre_acts,
             post_acts=post_acts,
             inner_acts=inner_acts,
+            layer_acts=layer_acts,
             attribution_type=config.attribution_type,
         )
 

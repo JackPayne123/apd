@@ -248,9 +248,14 @@ def make_plots(
         assert topk_mask is not None
         assert isinstance(config.task_config, TMSTaskConfig)
         n_instances = model.config.n_instances if hasattr(model, "config") else model.n_instances
+        # attribution_scores = collect_subnetwork_attributions(
+        #     spd_model=model,
+        #     target_model=target_model,
+        #     device=device,
+        #     n_instances=n_instances,
+        # )
         attribution_scores = collect_subnetwork_attributions(
-            spd_model=model,
-            target_model=target_model,
+            model=model,
             device=device,
             n_instances=n_instances,
         )

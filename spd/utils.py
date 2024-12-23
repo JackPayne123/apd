@@ -204,71 +204,119 @@ class BatchedDataLoader(DataLoader[Q], Generic[Q]):
             yield batch[0], label[0]
 
 
+# def calc_grad_attributions(
+#     target_out: Float[Tensor, "batch out_dim"] | Float[Tensor, "batch n_instances out_dim"],
+#     pre_acts: dict[str, Float[Tensor, "batch d_in"] | Float[Tensor, "batch n_instances d_in"]],
+#     post_acts: dict[str, Float[Tensor, "batch d_out"] | Float[Tensor, "batch n_instances d_out"]],
+#     subnet_params: dict[
+#         str, Float[Tensor, "k d_in d_out"] | Float[Tensor, "n_instances k d_in d_out"]
+#     ],
+#     k: int,
+# ) -> Float[Tensor, "batch k"] | Float[Tensor, "batch n_instances k"]:
+#     """Calculate the sum of the (squared) attributions from each output dimension.
+
+#     An attribution is the product of the gradient of the target model output w.r.t. the post acts
+#     and the inner acts (i.e. the output of each subnetwork before being summed).
+
+#     Note that we don't use the inner_acts collected from the SPD model, because this includes the
+#     computational graph of the full model. We only want the subnetwork parameters of the current
+#     layer to be in the computational graph. To do this, we multiply a detached version of the
+#     pre_acts by the subnet parameters.
+
+#     NOTE: Multplying the pre_acts by the subnet parameters would be less efficient than multiplying
+#     the pre_acts by A and then B in the case where subnet_params is rank one or rank penalty. In
+#     the future, we can implement this more efficient version. For now, this simpler version is fine.
+
+#     Note: This code may be run in between the training forward pass, and the loss.backward() and
+#     opt.step() calls; it must not mess with the training. The reason the current implementation is
+#     fine to run anywhere is that we just use autograd rather than backward which does not
+#     populate the .grad attributes. Unrelatedly, we use retain_graph=True in a bunch of cases
+#     where we want to later use the `out` variable in e.g. the loss function.
+
+#     Args:
+#         target_out: The output of the target model.
+#         pre_acts: The activations at the output of each subnetwork before being summed.
+#         post_acts: The activations at the output of each layer after being summed.
+#         subnet_params: The subnet parameter matrix at each layer.
+#         k: The number of subnetwork parameters.
+#     Returns:
+#         The sum of the (squared) attributions from each output dimension.
+#     """
+#     assert post_acts.keys() == pre_acts.keys() == subnet_params.keys()
+#     attr_shape = target_out.shape[:-1] + (k,)  # (batch, k) or (batch, n_instances, k)
+#     attribution_scores: Float[Tensor, "batch k"] | Float[Tensor, "batch n_instances k"] = (
+#         torch.zeros(attr_shape, device=target_out.device, dtype=target_out.dtype)
+#     )
+
+#     out_dim = target_out.shape[-1]
+#     for feature_idx in range(out_dim):
+#         feature_attributions: Float[Tensor, "batch k"] | Float[Tensor, "batch n_instances k"] = (
+#             torch.zeros(attr_shape, device=target_out.device, dtype=target_out.dtype)
+#         )
+#         grad_post_acts: tuple[
+#             Float[Tensor, "batch d_out"] | Float[Tensor, "batch n_instances d_out"], ...
+#         ] = torch.autograd.grad(
+#             target_out[..., feature_idx].sum(), list(post_acts.values()), retain_graph=True
+#         )
+#         for i, param_matrix_name in enumerate(post_acts.keys()):
+#             # Note that this operation would be equivalent to:
+#             # einsum(grad_inner_acts, inner_acts, "... k d_out ,... k d_out -> ... k")
+#             # since the gradient distributes over the sum.
+#             inner_acts = einops.einsum(
+#                 pre_acts[param_matrix_name].detach().clone(),
+#                 subnet_params[param_matrix_name],
+#                 "... d_in, ... k d_in d_out -> ... k d_out",
+#             )
+#             feature_attributions += einops.einsum(
+#                 grad_post_acts[i], inner_acts, "... d_out ,... k d_out -> ... k"
+#             )
+
+#         attribution_scores += feature_attributions**2
+
+#     return attribution_scores
+
+
 def calc_grad_attributions(
-    target_out: Float[Tensor, "batch out_dim"] | Float[Tensor, "batch n_instances out_dim"],
-    pre_acts: dict[str, Float[Tensor, "batch d_in"] | Float[Tensor, "batch n_instances d_in"]],
-    post_acts: dict[str, Float[Tensor, "batch d_out"] | Float[Tensor, "batch n_instances d_out"]],
-    subnet_params: dict[
-        str, Float[Tensor, "k d_in d_out"] | Float[Tensor, "n_instances k d_in d_out"]
-    ],
-    k: int,
-) -> Float[Tensor, "batch k"] | Float[Tensor, "batch n_instances k"]:
+    out: Float[Tensor, "... out_dim"],
+    inner_acts: dict[str, Float[Tensor, "... k d_out"]],
+    layer_acts: dict[str, Float[Tensor, "... d_out"]],
+) -> Float[Tensor, "... k"]:
     """Calculate the sum of the (squared) attributions from each output dimension.
-
-    An attribution is the product of the gradient of the target model output w.r.t. the post acts
-    and the inner acts (i.e. the output of each subnetwork before being summed).
-
-    Note that we don't use the inner_acts collected from the SPD model, because this includes the
-    computational graph of the full model. We only want the subnetwork parameters of the current
-    layer to be in the computational graph. To do this, we multiply a detached version of the
-    pre_acts by the subnet parameters.
-
-    NOTE: Multplying the pre_acts by the subnet parameters would be less efficient than multiplying
-    the pre_acts by A and then B in the case where subnet_params is rank one or rank penalty. In
-    the future, we can implement this more efficient version. For now, this simpler version is fine.
-
+    An attribution is the element-wise product of the gradient of the output dimension w.r.t. the
+    layer acts and the inner acts.
     Note: This code may be run in between the training forward pass, and the loss.backward() and
     opt.step() calls; it must not mess with the training. The reason the current implementation is
-    fine to run anywhere is that we just use autograd rather than backward which does not
-    populate the .grad attributes. Unrelatedly, we use retain_graph=True in a bunch of cases
     where we want to later use the `out` variable in e.g. the loss function.
-
     Args:
-        target_out: The output of the target model.
-        pre_acts: The activations at the output of each subnetwork before being summed.
-        post_acts: The activations at the output of each layer after being summed.
-        subnet_params: The subnet parameter matrix at each layer.
-        k: The number of subnetwork parameters.
+        out: The output of the model.
+        inner_acts: The activations at the output of each subnetwork before being summed.
+        layer_acts: The activations at the output of each layer after being summed.
     Returns:
         The sum of the (squared) attributions from each output dimension.
     """
-    assert post_acts.keys() == pre_acts.keys() == subnet_params.keys()
-    attr_shape = target_out.shape[:-1] + (k,)  # (batch, k) or (batch, n_instances, k)
-    attribution_scores: Float[Tensor, "batch k"] | Float[Tensor, "batch n_instances k"] = (
-        torch.zeros(attr_shape, device=target_out.device, dtype=target_out.dtype)
+    assert inner_acts.keys() == layer_acts.keys()
+    first_param_matrix_name = next(iter(inner_acts.keys()))
+    attribution_scores: Float[Tensor, "... k"] = torch.zeros(
+        inner_acts[first_param_matrix_name].shape[:-1],
+        device=inner_acts[first_param_matrix_name].device,
     )
-
-    out_dim = target_out.shape[-1]
+    out_dim = out.shape[-1]
     for feature_idx in range(out_dim):
-        feature_attributions: Float[Tensor, "batch k"] | Float[Tensor, "batch n_instances k"] = (
-            torch.zeros(attr_shape, device=target_out.device, dtype=target_out.dtype)
+        feature_attributions: Float[Tensor, "... k"] = torch.zeros(
+            inner_acts[first_param_matrix_name].shape[:-1],
+            device=inner_acts[first_param_matrix_name].device,
         )
-        grad_post_acts: tuple[
-            Float[Tensor, "batch d_out"] | Float[Tensor, "batch n_instances d_out"], ...
-        ] = torch.autograd.grad(
-            target_out[..., feature_idx].sum(), list(post_acts.values()), retain_graph=True
+        grad_layer_acts: tuple[Float[Tensor, "... d_out"], ...] = torch.autograd.grad(
+            out[..., feature_idx].sum(), list(layer_acts.values()), retain_graph=True
         )
-        for i, param_matrix_name in enumerate(post_acts.keys()):
+        for i, param_matrix_name in enumerate(layer_acts.keys()):
             # Note that this operation would be equivalent to:
             # einsum(grad_inner_acts, inner_acts, "... k d_out ,... k d_out -> ... k")
             # since the gradient distributes over the sum.
-            inner_acts = einops.einsum(
-                pre_acts[param_matrix_name].detach().clone(),
-                subnet_params[param_matrix_name],
-                "... d_in, ... k d_in d_out -> ... k d_out",
-            )
             feature_attributions += einops.einsum(
-                grad_post_acts[i], inner_acts, "... d_out ,... k d_out -> ... k"
+                grad_layer_acts[i].detach(),
+                inner_acts[param_matrix_name],
+                "... d_out ,... k d_out -> ... k",
             )
 
         attribution_scores += feature_attributions**2
@@ -328,41 +376,71 @@ def calc_grad_attributions_full_rank_per_layer(
     return layer_attribution_scores
 
 
+# def collect_subnetwork_attributions(
+#     spd_model: SPDModel | SPDFullRankModel | SPDRankPenaltyModel,
+#     target_model: Model,
+#     device: str,
+#     n_instances: int | None = None,
+# ) -> Float[Tensor, "batch k"] | Float[Tensor, "batch n_instances k"]:
+#     """
+#     Collect subnetwork attributions.
+
+#     This function creates a test batch using an identity matrix, passes it through the model,
+#     and collects the attributions.
+
+#     Args:
+#         spd_model: The model to collect attributions on.
+#         target_model: The target model to collect attributions on.
+#         pre_acts: The activations after the parameter matrix in the target model.
+#         device: The device to run computations on.
+#         n_instances: The number of instances in the batch.
+
+#     Returns:
+#         The attribution scores.
+#     """
+#     test_batch = torch.eye(spd_model.n_features, device=device)
+#     if n_instances is not None:
+#         test_batch = einops.repeat(
+#             test_batch, "batch n_features -> batch n_instances n_features", n_instances=n_instances
+#         )
+
+#     target_out, pre_acts, post_acts = target_model(test_batch)
+#     attribution_scores = calc_grad_attributions(
+#         target_out=target_out,
+#         subnet_params=spd_model.all_subnetwork_params(),
+#         pre_acts=pre_acts,
+#         post_acts=post_acts,
+#         k=spd_model.k,
+#     )
+#     return attribution_scores
+
+
 def collect_subnetwork_attributions(
-    spd_model: SPDModel | SPDFullRankModel | SPDRankPenaltyModel,
-    target_model: Model,
+    model: SPDModel | SPDFullRankModel | SPDRankPenaltyModel,
     device: str,
     n_instances: int | None = None,
 ) -> Float[Tensor, "batch k"] | Float[Tensor, "batch n_instances k"]:
+    """Collect subnetwork attributions.
+
+        This function creates a test batch using an identity matrix, passes it through the model,
+        and collects the attributions.
+    tee
+        Args:
+            model: The model to collect attributions on.
+            device: The device to run computations on.
+            n_instances: The number of instances in the batch.
+        Returns:
+            The attribution scores.
     """
-    Collect subnetwork attributions.
-
-    This function creates a test batch using an identity matrix, passes it through the model,
-    and collects the attributions.
-
-    Args:
-        spd_model: The model to collect attributions on.
-        target_model: The target model to collect attributions on.
-        pre_acts: The activations after the parameter matrix in the target model.
-        device: The device to run computations on.
-        n_instances: The number of instances in the batch.
-
-    Returns:
-        The attribution scores.
-    """
-    test_batch = torch.eye(spd_model.n_features, device=device)
+    test_batch = torch.eye(model.n_features, device=device)
     if n_instances is not None:
         test_batch = einops.repeat(
             test_batch, "batch n_features -> batch n_instances n_features", n_instances=n_instances
         )
 
-    target_out, pre_acts, post_acts = target_model(test_batch)
+    out, test_layer_acts, test_inner_acts = model(test_batch)
     attribution_scores = calc_grad_attributions(
-        target_out=target_out,
-        subnet_params=spd_model.all_subnetwork_params(),
-        pre_acts=pre_acts,
-        post_acts=post_acts,
-        k=spd_model.k,
+        out=out, inner_acts=test_inner_acts, layer_acts=test_layer_acts
     )
     return attribution_scores
 
@@ -417,18 +495,24 @@ def calculate_attributions(
     pre_acts: dict[str, Float[Tensor, "batch n_instances d_in"] | Float[Tensor, "batch d_in"]],
     post_acts: dict[str, Float[Tensor, "batch n_instances d_out"] | Float[Tensor, "batch d_out"]],
     inner_acts: dict[str, Float[Tensor, "batch n_instances k"] | Float[Tensor, "batch k"]],
+    layer_acts: dict[str, Float[Tensor, "batch n_instances d_out"] | Float[Tensor, "batch d_out"]],
     attribution_type: Literal["ablation", "gradient", "activation"],
 ) -> Float[Tensor, "batch n_instances k"] | Float[Tensor, "batch k"]:
     attributions = None
     if attribution_type == "ablation":
         attributions = calc_ablation_attributions(model=model, batch=batch, out=out)
     elif attribution_type == "gradient":
+        # attributions = calc_grad_attributions(
+        #     target_out=target_out,
+        #     pre_acts=pre_acts,
+        #     subnet_params=model.all_subnetwork_params(),
+        #     post_acts=post_acts,
+        #     k=model.k,
+        # )
         attributions = calc_grad_attributions(
-            target_out=target_out,
-            pre_acts=pre_acts,
-            subnet_params=model.all_subnetwork_params(),
-            post_acts=post_acts,
-            k=model.k,
+            out=out,
+            inner_acts=inner_acts,
+            layer_acts=layer_acts,
         )
     elif attribution_type == "activation":
         attributions = calc_activation_attributions(inner_acts=inner_acts)
@@ -571,6 +655,7 @@ def run_spd_forward_pass(
         pre_acts=pre_acts,
         post_acts=post_acts,
         inner_acts=inner_acts,
+        layer_acts=layer_acts,
         attribution_type=attribution_type,
     )
 
