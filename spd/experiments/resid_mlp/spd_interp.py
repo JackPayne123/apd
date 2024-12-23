@@ -87,6 +87,7 @@ sorted_indices = analyze_per_feature_performance(
     ax=ax1,
     label="Target",
     device=device,
+    batch_size=config.batch_size,
     sorted_indices=None,
 )
 fn_without_batch_topk = lambda batch: spd_model_fn(batch, topk=1, batch_topk=False)  # type: ignore
@@ -96,6 +97,7 @@ analyze_per_feature_performance(
     ax=ax1,
     label="SPD",
     device=device,
+    batch_size=config.batch_size,
     sorted_indices=sorted_indices,
 )
 ax1.legend()
@@ -109,6 +111,7 @@ sorted_indices = analyze_per_feature_performance(
     ax=ax2,
     label="Target",
     device=device,
+    batch_size=config.batch_size,
     sorted_indices=None,
 )
 analyze_per_feature_performance(
@@ -118,6 +121,7 @@ analyze_per_feature_performance(
     label="SPD",
     device=device,
     sorted_indices=sorted_indices,
+    batch_size=config.batch_size,
 )
 ax2.legend()
 # Use the same y-axis limits as the topk=1 plot

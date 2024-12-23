@@ -377,6 +377,7 @@ def resid_mlp_plot_results_fn(
         ax=ax1,
         label="Target",
         device=device,
+        batch_size=config.batch_size,
         sorted_indices=None,
     )
     fn_without_batch_topk = lambda batch: spd_model_fn(batch, topk=1, batch_topk=False)  # type: ignore
@@ -386,6 +387,7 @@ def resid_mlp_plot_results_fn(
         ax=ax1,
         label="SPD",
         device=device,
+        batch_size=config.batch_size,
         sorted_indices=sorted_indices,
     )
     ax1.legend()
@@ -400,6 +402,7 @@ def resid_mlp_plot_results_fn(
         label="Target",
         device=device,
         sorted_indices=None,
+        batch_size=config.batch_size,
     )
     analyze_per_feature_performance(
         model_fn=spd_model_fn,
@@ -408,6 +411,7 @@ def resid_mlp_plot_results_fn(
         label="SPD",
         device=device,
         sorted_indices=sorted_indices,
+        batch_size=config.batch_size,
     )
     ax2.legend()
     # Use the same y-axis limits as the topk=1 plot
