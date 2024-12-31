@@ -48,6 +48,7 @@ def get_run_name(config: Config, tms_model_config: TMSModelConfig) -> str:
         run_suffix += f"ft{tms_model_config.n_features}_"
         run_suffix += f"hid{tms_model_config.n_hidden}"
         run_suffix += f"hid-layers{tms_model_config.n_hidden_layers}"
+        run_suffix += f"k{config.task_config.k}"
     return config.wandb_run_name_prefix + run_suffix
 
 
