@@ -316,7 +316,7 @@ fig, ax = plt.subplots(figsize=(15, 5))
 log_bins = np.geomspace(1e-7, loss_zero.max().item(), 50).tolist()
 ax.hist(
     loss_spd,
-    bins=log_bins,
+    bins=log_bins,  # type: ignore
     label="APD (top-k)",
     histtype="step",
     lw=2,
@@ -325,7 +325,7 @@ ax.hist(
 ax.axvline(loss_spd.mean().item(), color="tab:purple", linestyle="--")
 ax.hist(
     loss_scrubbed,
-    bins=log_bins,
+    bins=log_bins,  # type: ignore
     label="APD (scrubbed)",
     histtype="step",
     lw=2,
@@ -334,7 +334,7 @@ ax.hist(
 ax.axvline(loss_scrubbed.mean().item(), color="tab:orange", linestyle="--")
 ax.hist(
     loss_antiscrubbed,
-    bins=log_bins,
+    bins=log_bins,  # type: ignore
     label="APD (anti-scrubbed)",
     histtype="step",
     lw=2,
