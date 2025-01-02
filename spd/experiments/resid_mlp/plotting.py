@@ -77,7 +77,10 @@ def plot_individual_feature_response(
                 c=cmap_viridis(f / n_features),
                 marker=".",
                 s=s[order],
-                alpha=alpha[order],
+                alpha=alpha[order].numpy(),  # type: ignore
+                # According to the announcement, alpha is allowed to be an iterable since v3.4.0,
+                # but the docs & type annotations seem to be wrong. Here's the announcement:
+                # https://matplotlib.org/stable/users/prev_whats_new/whats_new_3.4.0.html#transparency-alpha-can-be-set-as-an-array-in-collections
             )
         else:
             raise ValueError("Unknown plot_type")
@@ -91,7 +94,7 @@ def plot_individual_feature_response(
             torch.arange(n_features),
             targets.cpu().detach(),
             color="red",
-            label="Label ($x+\mathrm{ReLU}(x)$)",
+            label=r"Label ($x+\mathrm{ReLU}(x)$)",
         )
         ax.plot(
             torch.arange(n_features),
@@ -105,7 +108,7 @@ def plot_individual_feature_response(
             torch.arange(n_features),
             targets.cpu().detach(),
             color="red",
-            label="Label ($x+\mathrm{ReLU}(x)$)",
+            label=r"Label ($x+\mathrm{ReLU}(x)$)",
             marker="x",
             s=5,
         )
@@ -116,13 +119,13 @@ def plot_individual_feature_response(
         # Colorbar
         sm = plt.cm.ScalarMappable(cmap=cmap_viridis, norm=plt.Normalize(0, n_features))
         sm.set_array([])
-        cbar = plt.colorbar(sm, ax=ax, orientation="vertical")
-        cbar.set_label("Active input feature index")
+        bar = plt.colorbar(sm, ax=ax, orientation="vertical")
+        bar.set_label("Active input feature index")
     ax.set_xlabel("Output index")
     ax.set_ylabel("Output values $x̂_i$")
 
     ax.set_xticks([0, n_features])
-    ax.set_xticklabels([0, n_features])
+    ax.set_xticklabels(["0", str(n_features)])
     return fig
 
 
@@ -166,7 +169,7 @@ def plot_single_feature_response(
             torch.arange(n_features),
             targets.cpu().detach(),
             color="red",
-            label="Label ($x+\mathrm{ReLU}(x)$)",
+            label=r"Label ($x+\mathrm{ReLU}(x)$)",
         )
     elif plot_type == "scatter":
         ax.scatter(
@@ -176,7 +179,7 @@ def plot_single_feature_response(
             torch.arange(n_features),
             targets.cpu().detach(),
             c="red",
-            label="Label ($x+\mathrm{ReLU}(x)$)",
+            label=r"Label ($x+\mathrm{ReLU}(x)$)",
             marker="x",
             s=5,
         )
@@ -188,7 +191,7 @@ def plot_single_feature_response(
     ax.set_title(f"Output for a single input $x_{{{feature_idx}}}=1$")
 
     ax.set_xticks([0, n_features])
-    ax.set_xticklabels([0, n_features])
+    ax.set_xticklabels(["0", str(n_features)])
     return fig
 
 
@@ -225,7 +228,7 @@ def plot_single_relu_curve(
         x,
         targets.cpu().detach(),
         color="red",
-        label="Label ($x+\mathrm{ReLU}(x)$)" if label else None,
+        label=r"Label ($x+\mathrm{ReLU}(x)$)" if label else None,
         ls="--",
     )
     ax.legend()
@@ -239,13 +242,14 @@ def plot_all_relu_curves(
     model_fn: Callable[[Tensor], Tensor],
     device: str,
     model_config: ResidualMLPConfig | ResidualMLPSPDRankPenaltyConfig,
+    ax: plt.Axes,
     subtract_inputs: bool = True,
     instance_idx: int = 0,
-    ax: plt.Axes | None = None,
 ):
     n_features = model_config.n_features
+    fig = ax.figure
     for feature_idx in range(n_features):
-        fig = plot_single_relu_curve(
+        plot_single_relu_curve(
             model_fn=model_fn,
             device=device,
             model_config=model_config,
@@ -628,7 +632,6 @@ def analyze_per_feature_performance(
     # Plot the losses as bar chart with x labels corresponding to feature index
     if ax is None:
         fig, ax = plt.subplots(figsize=(15, 5))
-    color = f"C{zorder%10}"
     ax.bar(features, losses[sorted_indices], alpha=0.5, label=label, zorder=zorder)
     ax.set_xticks(features, features[sorted_indices].numpy(), fontsize=6, rotation=90)
     ax.set_xlabel("Feature index")
@@ -829,15 +832,14 @@ def plot_feature_response_with_subnets(
     ax: plt.Axes | None = None,
     batch_size: int | None = None,
     plot_type: Literal["line", "errorbar"] = "errorbar",
-):
+) -> dict[str, plt.Figure]:
     n_instances = model_config.n_instances
     n_features = model_config.n_features
     batch_size = batch_size or n_features
 
     if ax is None:
-        fig, ax = plt.subplots(constrained_layout=True, figsize=(10, 5))
-    else:
-        fig = ax.figure
+        _, ax = plt.subplots(constrained_layout=True, figsize=(10, 5))
+    fig = ax.figure
 
     batch = torch.zeros(batch_size, n_instances, n_features, device=device)
     batch[:, instance_idx, feature_idx] = 1
@@ -926,6 +928,7 @@ def plot_feature_response_with_subnets(
     ax.set_xlabel("Output index")
     ax.set_title(f"SPD model output for increasing number of subnets, feature {feature_idx}")
     ax.legend()
+    assert fig is not None
     return {"feature_response_with_subnets": fig}
 
 

@@ -248,10 +248,9 @@ fig = plot_feature_response_with_subnets(
     batch_size=100,
     plot_type="errorbar",
 )["feature_response_with_subnets"]
-if fig is not None:
-    fig.suptitle(f"Model {path}")
-    fig.savefig(f"feature_response_with_subnets_{feature_idx}.png", bbox_inches="tight", dpi=300)
-    plt.show()
+fig.suptitle(f"Model {path}")
+fig.savefig(f"feature_response_with_subnets_{feature_idx}.png", bbox_inches="tight", dpi=300)
+plt.show()
 
 
 # %% Causal Scrubbing-esque test
@@ -279,8 +278,8 @@ def target_model_fn(batch: Float[Tensor, "batch n_instances"]):
 # Dictionary feature_idx -> subnet_idx
 subnet_indices = get_feature_subnet_map(top1_model_fn, device, model.config, instance_idx=0)
 
-# for data_generation_type in data_generation_types:
-for data_generation_type in ["at_least_zero_active"]:
+for data_generation_type in data_generation_types:
+    # for data_generation_type in ["at_least_zero_active"]:
     batch_size = config.batch_size
     # make sure to use config.batch_size because
     # it's tuned to config.topk!

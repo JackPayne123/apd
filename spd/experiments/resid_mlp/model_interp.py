@@ -70,7 +70,8 @@ plt.show()
 
 # %% Simple plot for paper appendix
 
-fig, [ax1, ax2] = plt.subplots(ncols=2, figsize=(10, 5), constrained_layout=True, sharey=True)
+fig, axes = plt.subplots(ncols=2, figsize=(10, 5), constrained_layout=True, sharey=True)
+ax1, ax2 = axes  # type: ignore
 plot_single_feature_response(
     lambda batch: model(batch)[0],
     model_config=train_config.resid_mlp_config,
@@ -94,7 +95,8 @@ fig.savefig(
 )
 print(f"Saved figure to {out_dir / f'resid_mlp_feature_response_single_{n_layers}layers.png'}")
 
-fig, [ax1, ax2] = plt.subplots(ncols=2, figsize=(10, 5), constrained_layout=True, sharey=True)
+fig, axes = plt.subplots(ncols=2, figsize=(10, 5), constrained_layout=True, sharey=True)
+ax1, ax2 = axes  # type: ignore
 plot_individual_feature_response(
     lambda batch: model(batch)[0],
     model_config=train_config.resid_mlp_config,
@@ -108,9 +110,9 @@ ax1.set_title("Outputs one-hot inputs (coloured by input index)")
 plot_all_relu_curves(
     lambda batch: model(batch)[0],
     model_config=train_config.resid_mlp_config,
+    ax=ax2,
     device=device,
     subtract_inputs=False,
-    ax=ax2,
 )
 # Colorbar
 cmap_viridis = plt.get_cmap("viridis")
@@ -121,7 +123,7 @@ sm.set_array([])
 cbar = plt.colorbar(sm, ax=ax2, orientation="vertical")
 cbar.set_label("Active input feature index")
 
-ax2.plot([], [], color="red", ls="--", label="Label ($x+\mathrm{ReLU}(x)$)")
+ax2.plot([], [], color="red", ls="--", label=r"Label ($x+\mathrm{ReLU}(x)$)")
 ax2.legend(loc="upper left")
 
 fig.savefig(
