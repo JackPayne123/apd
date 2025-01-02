@@ -129,7 +129,8 @@ for subnet_idx in range(model.config.k):
     duplicity[subnet_idx] = len([f for f, s in subnet_indices.items() if s == subnet_idx])
 duplicity_vals = np.array(list(duplicity.values()))
 fig, ax = plt.subplots(figsize=(15, 5))
-ax.hist(duplicity_vals, bins=[*np.arange(0, 10, 1)])
+int_bins: list[int] = [*np.arange(0, 10, 1)]
+ax.hist(duplicity_vals, bins=int_bins)
 counts = np.bincount(duplicity_vals)
 for i, count in enumerate(counts):
     if i == 0:
@@ -311,7 +312,7 @@ print(f"Loss zero:          {loss_zero.mean().item():.6f}")
 # and random (which is just scrubbed + antiscrubbed) too.
 
 fig, ax = plt.subplots(figsize=(15, 5))
-log_bins = np.geomspace(1e-7, loss_zero.max().item(), 50).tolist()
+log_bins: list[int] = np.geomspace(1e-7, loss_zero.max().item(), 50).tolist()
 ax.hist(
     loss_spd,
     bins=log_bins,
