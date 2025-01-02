@@ -129,7 +129,7 @@ for subnet_idx in range(model.config.k):
     duplicity[subnet_idx] = len([f for f, s in subnet_indices.items() if s == subnet_idx])
 duplicity_vals = np.array(list(duplicity.values()))
 fig, ax = plt.subplots(figsize=(15, 5))
-int_bins: list[int] = [*np.arange(0, 10, 1)]
+int_bins: list[int] = np.arange(0, 10, 1).tolist()
 ax.hist(duplicity_vals, bins=int_bins)
 counts = np.bincount(duplicity_vals)
 for i, count in enumerate(counts):
