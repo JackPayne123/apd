@@ -221,7 +221,10 @@ def plot_combined(
 
 # %%
 device = "cuda" if torch.cuda.is_available() else "cpu"
-path = "wandb:spd-tms/runs/bft0pgi8"  # Old run with attributions from spd model
+# path = "wandb:spd-tms/runs/bft0pgi8"  # Old run with attributions from spd model
+path = "wandb:spd-tms/runs/sv9padmo"  # 10-5
+
+run_id = path.split("/")[-1]
 
 # Plot showing polygons for each subnet
 model, config = TMSSPDRankPenaltyModel.from_pretrained(path)
@@ -237,8 +240,8 @@ out_dir = REPO_ROOT / "spd/experiments/tms/out"
 target_weights = target_model.W.detach().cpu()
 
 fig = plot_combined(subnets, target_weights, n_instances=1)
-fig.savefig(out_dir / "tms_combined_diagram.png", bbox_inches="tight", dpi=400)
-print(f"Saved figure to {out_dir / 'tms_combined_diagram.png'}")
+fig.savefig(out_dir / f"tms_combined_diagram_{run_id}.png", bbox_inches="tight", dpi=400)
+print(f"Saved figure to {out_dir / f'tms_combined_diagram_{run_id}.png'}")
 
 # %%
 # Get the entries for the main loss table in the paper
@@ -254,6 +257,7 @@ gen_types: list[DataGenerationType] = [
     "at_least_zero_active",
     "exactly_one_active",
     "exactly_two_active",
+    "exactly_three_active",
 ]
 assert config.topk is not None
 results = collect_sparse_dataset_mse_losses(
@@ -283,9 +287,9 @@ label_map = {
     "target": "Target model",
     "spd": "APD model",
 }
-fig = plot_sparse_feature_mse_line_plot(results, label_map=label_map)
+fig = plot_sparse_feature_mse_line_plot(results, label_map=label_map, log_scale=True)
 fig.show()
-fig.savefig(out_dir / "tms_mse.png", dpi=400)
-print(f"Saved figure to {out_dir / 'tms_mse.png'}")
+fig.savefig(out_dir / f"tms_mse_{run_id}.png", dpi=400)
+print(f"Saved figure to {out_dir / f'tms_mse_{run_id}.png'}")
 
 # %%
