@@ -232,7 +232,7 @@ def collect_sparse_dataset_mse_losses(
 
 
 def plot_sparse_feature_mse_line_plot(
-    results: dict[str, dict[str, float]], label_map: dict[str, str]
+    results: dict[str, dict[str, float]], label_map: dict[str, str], log_scale: bool = False
 ) -> plt.Figure:
     xtick_label_map = {
         "at_least_zero_active": "Training distribution",
@@ -262,6 +262,9 @@ def plot_sparse_feature_mse_line_plot(
     ax.set_xticklabels(xtick_labels)
     ax.legend()
     ax.grid(True, alpha=0.3, axis="y")
+
+    if log_scale:
+        ax.set_yscale("log")
 
     # Remove top and right spines
     ax.spines["top"].set_visible(False)
