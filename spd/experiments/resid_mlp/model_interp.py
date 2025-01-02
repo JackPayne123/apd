@@ -26,13 +26,13 @@ from spd.utils import set_seed
 
 # %% Load model and config
 
-out_dir = REPO_ROOT / "spd/experiments/resid_mlp/figures/"
+out_dir = REPO_ROOT / "spd/experiments/resid_mlp/out/"
 out_dir.mkdir(parents=True, exist_ok=True)
 
 set_seed(0)
 device = "cpu" if torch.cuda.is_available() else "cpu"
-# path: ModelPath = "wandb:spd-train-resid-mlp/runs/zas5yjdl"  # 1 layer
-path: ModelPath = "wandb:spd-train-resid-mlp/runs/sv23xrhj"  # 2 layers
+path: ModelPath = "wandb:spd-train-resid-mlp/runs/zas5yjdl"  # 1 layer
+# path: ModelPath = "wandb:spd-train-resid-mlp/runs/sv23xrhj"  # 2 layers
 model, train_config_dict, label_coeffs = ResidualMLPModel.from_pretrained(path)
 model = model.to(device)
 train_config = ResidMLPTrainConfig(**train_config_dict)
@@ -77,7 +77,7 @@ plot_single_feature_response(
     model_config=train_config.resid_mlp_config,
     device=device,
     subtract_inputs=False,
-    feature_idx=15,
+    feature_idx=42,
     ax=ax1,
 )
 plot_single_relu_curve(
@@ -85,7 +85,7 @@ plot_single_relu_curve(
     model_config=train_config.resid_mlp_config,
     device=device,
     subtract_inputs=False,
-    feature_idx=15,
+    feature_idx=42,
     ax=ax2,
 )
 fig.savefig(
