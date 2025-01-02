@@ -313,7 +313,7 @@ print(f"Loss zero:          {loss_zero.mean().item():.6f}")
 
 fig, ax = plt.subplots(figsize=(15, 5))
 log_bins = np.geomspace(1e-7, loss_zero.max().item(), 50).tolist()
-assert isinstance(log_bins, list)
+assert isinstance(log_bins, list) and all(isinstance(x, float) for x in log_bins)
 ax.hist(
     loss_spd,
     bins=log_bins,
