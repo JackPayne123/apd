@@ -813,11 +813,16 @@ def optimize(
                     "i.e. corresponds to subnetworks"
                 )
                 topk_mask = (batch != 0).float().to(device=device)
+                # Note, the below won't actually work when there is an n_instance dimension because
+                # there needs to be a different topk for each instance, and torch.topk only takes
+                # in an int. Would need code that calculates the topk mask over a for loop and
+                # concatenates the results.
+                # elif config.exact_topk:
+                #     # Instead of config.topk, use the exact number of active features over the batch
+                #     n_active = (batch != 0).sum()
+                #     topk = n_active / batch.shape[0]
+                #     topk_mask = calc_topk_mask(topk_attrs, topk, batch_topk=config.batch_topk)
             else:
-                # # Instead of config.topk, use the exact number of active features over the batch
-                # n_active = (batch != 0).sum()
-                # topk = n_active / batch.shape[0]
-                # topk_mask = calc_topk_mask(topk_attrs, topk, batch_topk=config.batch_topk)
                 topk_mask = calc_topk_mask(topk_attrs, config.topk, batch_topk=config.batch_topk)
             if config.distil_from_target:
                 # Add back the final subnetwork index to the topk mask and set it to True
@@ -1000,6 +1005,7 @@ def optimize(
                 config=config,
                 topk_mask=topk_mask,
                 pre_acts=pre_acts,
+                batch=batch,
             )
             if config.wandb_project:
                 wandb.log(
