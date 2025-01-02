@@ -312,7 +312,7 @@ print(f"Loss zero:          {loss_zero.mean().item():.6f}")
 # and random (which is just scrubbed + antiscrubbed) too.
 
 fig, ax = plt.subplots(figsize=(15, 5))
-log_bins: list[int] = np.geomspace(1e-7, loss_zero.max().item(), 50).tolist()
+log_bins: list[float] = np.geomspace(1e-7, loss_zero.max().item(), 50).tolist()
 ax.hist(
     loss_spd,
     bins=log_bins,
