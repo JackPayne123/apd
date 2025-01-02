@@ -28,7 +28,9 @@ def plot_individual_feature_response(
     sweep: bool = False,
     subtract_inputs: bool = True,
     instance_idx: int = 0,
+    plot_type: Literal["line", "scatter"] = "scatter",
     ax: plt.Axes | None = None,
+    cbar: bool = True,
 ):
     """Plot the response of the model to a single feature being active.
 
@@ -60,22 +62,229 @@ def plot_individual_feature_response(
     for f in range(n_features):
         x = torch.arange(n_features)
         y = out[f, :].detach().cpu()
-        ax.plot(x, y, color=cmap_viridis(f / n_features))
+        if plot_type == "line":
+            ax.plot(x, y, color=cmap_viridis(f / n_features))
+        elif plot_type == "scatter":
+            s = torch.ones_like(x)
+            alpha = torch.ones_like(x) * 0.33
+            s[f] = 20
+            alpha[f] = 1
+            # Permute order to make zorder random
+            order = torch.randperm(n_features)
+            ax.scatter(
+                x[order],
+                y[order],
+                color=cmap_viridis(f / n_features),
+                marker=".",
+                s=s[order],
+                alpha=alpha[order].numpy(),  # type: ignore
+                # According to the announcement, alpha is allowed to be an iterable since v3.4.0,
+                # but the docs & type annotations seem to be wrong. Here's the announcement:
+                # https://matplotlib.org/stable/users/prev_whats_new/whats_new_3.4.0.html#transparency-alpha-can-be-set-as-an-array-in-collections
+            )
+        else:
+            raise ValueError("Unknown plot_type")
     # Plot labels
     label_fn = F.relu if model_config.act_fn_name == "relu" else F.gelu
     inputs = batch[torch.arange(n_features), instance_idx, torch.arange(n_features)].detach().cpu()
     targets = label_fn(inputs) if subtract_inputs else inputs + label_fn(inputs)
-    ax.plot(torch.arange(n_features), targets.cpu().detach(), color="red", label="Target")
     baseline = torch.zeros(n_features) if subtract_inputs else inputs
-    ax.plot(torch.arange(n_features), baseline, color="red", linestyle=":", label="Baseline")
+    if plot_type == "line":
+        ax.plot(
+            torch.arange(n_features),
+            targets.cpu().detach(),
+            color="red",
+            label=r"Label ($x+\mathrm{ReLU}(x)$)",
+        )
+        ax.plot(
+            torch.arange(n_features),
+            baseline,
+            color="red",
+            linestyle=":",
+            label="Baseline (Identity)",
+        )
+    elif plot_type == "scatter":
+        ax.scatter(
+            torch.arange(n_features),
+            targets.cpu().detach(),
+            color="red",
+            label=r"Label ($x+\mathrm{ReLU}(x)$)",
+            marker="x",
+            s=5,
+        )
+    else:
+        raise ValueError("Unknown plot_type")
     ax.legend()
-    # Colorbar
-    sm = plt.cm.ScalarMappable(cmap=cmap_viridis, norm=plt.Normalize(0, n_features))
-    sm.set_array([])
-    cbar = plt.colorbar(sm, ax=ax, orientation="vertical")
-    cbar.set_label("Active input feature index")
-    ax.set_xlabel("Output feature index")
-    ax.set_ylabel("Output (all inputs superimposed)")
+    if cbar:
+        # Colorbar
+        sm = plt.cm.ScalarMappable(cmap=cmap_viridis, norm=plt.Normalize(0, n_features))
+        sm.set_array([])
+        bar = plt.colorbar(sm, ax=ax, orientation="vertical")
+        bar.set_label("Active input feature index")
+    ax.set_xlabel("Output index")
+    ax.set_ylabel("Output values $x̂_i$")
+
+    ax.set_xticks([0, n_features])
+    ax.set_xticklabels(["0", str(n_features)])
+    return fig
+
+
+def plot_single_feature_response(
+    model_fn: Callable[[Tensor], Tensor],
+    device: str,
+    model_config: ResidualMLPConfig | ResidualMLPSPDRankPenaltyConfig,
+    subtract_inputs: bool = True,
+    instance_idx: int = 0,
+    feature_idx: int = 15,
+    plot_type: Literal["line", "scatter"] = "scatter",
+    ax: plt.Axes | None = None,
+):
+    """Plot the response of the model to a single feature being active.
+
+    If sweep is False then the amplitude of the active feature is 1.
+    If sweep is True then the amplitude of the active feature is swept from -1 to 1. This is an
+    arbitrary choice (choosing feature 0 to be the one where we test x=-1 etc) made for convenience.
+    """
+    n_instances = model_config.n_instances
+    n_features = model_config.n_features
+    batch_size = 1
+    batch_idx = 0
+    batch = torch.zeros(batch_size, n_instances, n_features, device=device)
+    batch[batch_idx, instance_idx, feature_idx] = 1
+    out = model_fn(batch)
+
+    out = out[:, instance_idx, :]
+    cmap_viridis = plt.get_cmap("viridis")
+    fig, ax = plt.subplots(constrained_layout=True) if ax is None else (ax.figure, ax)
+    if subtract_inputs:
+        out = out - batch[:, instance_idx, :]
+    x = torch.arange(n_features)
+    y = out[batch_idx, :].detach().cpu()
+    inputs = batch[batch_idx, instance_idx, :].detach().cpu()
+    label_fn = F.relu if model_config.act_fn_name == "relu" else F.gelu
+    targets = label_fn(inputs) if subtract_inputs else inputs + label_fn(inputs)
+    if plot_type == "line":
+        ax.plot(x, y, color=cmap_viridis(feature_idx / n_features), label="Target Model")
+        ax.plot(
+            torch.arange(n_features),
+            targets.cpu().detach(),
+            color="red",
+            label=r"Label ($x+\mathrm{ReLU}(x)$)",
+        )
+    elif plot_type == "scatter":
+        ax.scatter(
+            x,
+            y,
+            color=cmap_viridis(feature_idx / n_features),
+            label="Target Model",
+            marker=".",
+            s=20,
+        )
+        ax.scatter(
+            torch.arange(n_features),
+            targets.cpu().detach(),
+            color="red",
+            label=r"Label ($x+\mathrm{ReLU}(x)$)",
+            marker="x",
+            s=5,
+        )
+    else:
+        raise ValueError("Unknown plot_type")
+    handles, labels = ax.get_legend_handles_labels()
+    if handles:
+        ax.legend()
+    ax.set_xlabel("Output index")
+    ax.set_ylabel(f"Output value $x̂_{{{feature_idx}}}$")
+    ax.set_title(f"Output for a single input $x_{{{feature_idx}}}=1$")
+
+    # Only need feature indices 0, feature_idx, n_features.
+    ax.set_xticks([0, feature_idx, n_features])
+    ax.set_xticklabels(["0", str(feature_idx), str(n_features)])
+
+    # Remove top and right spines
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+
+    return fig
+
+
+def plot_single_relu_curve(
+    model_fn: Callable[[Tensor], Tensor],
+    device: str,
+    model_config: ResidualMLPConfig | ResidualMLPSPDRankPenaltyConfig,
+    subtract_inputs: bool = True,
+    instance_idx: int = 0,
+    feature_idx: int = 15,
+    ax: plt.Axes | None = None,
+    label: bool = True,
+):
+    n_instances = model_config.n_instances
+    n_features = model_config.n_features
+    batch_size = 1000
+    x = torch.linspace(-1, 1, batch_size)
+    batch = torch.zeros(batch_size, n_instances, n_features, device=device)
+    batch[:, instance_idx, feature_idx] = x
+    out = model_fn(batch)
+    out = out[:, instance_idx, :]
+    cmap_viridis = plt.get_cmap("viridis")
+    fig, ax = plt.subplots(constrained_layout=True) if ax is None else (ax.figure, ax)
+    if subtract_inputs:
+        out = out - batch[:, instance_idx, :]
+
+    y = out[:, feature_idx].detach().cpu()
+    label_fn = F.relu if model_config.act_fn_name == "relu" else F.gelu
+    targets = label_fn(x) if subtract_inputs else x + label_fn(x)
+    ax.plot(
+        x, y, color=cmap_viridis(feature_idx / n_features), label="Target Model" if label else None
+    )
+    ax.plot(
+        x,
+        targets.cpu().detach(),
+        color="red",
+        label=r"Label ($x+\mathrm{ReLU}(x)$)" if label else None,
+        ls="--",
+    )
+    handles, labels = ax.get_legend_handles_labels()
+    if handles:
+        ax.legend()
+    ax.set_xlabel(f"Input value $x_{{{feature_idx}}}$")
+    ax.set_ylabel(f"Output value $x̂_{{{feature_idx}}}$")
+    ax.set_title(f"Input-output response for input feature {feature_idx}")
+
+    # Remove top and right spines
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+
+    return fig
+
+
+def plot_all_relu_curves(
+    model_fn: Callable[[Tensor], Tensor],
+    device: str,
+    model_config: ResidualMLPConfig | ResidualMLPSPDRankPenaltyConfig,
+    ax: plt.Axes,
+    subtract_inputs: bool = True,
+    instance_idx: int = 0,
+):
+    n_features = model_config.n_features
+    fig = ax.figure
+    for feature_idx in range(n_features):
+        plot_single_relu_curve(
+            model_fn=model_fn,
+            device=device,
+            model_config=model_config,
+            subtract_inputs=subtract_inputs,
+            instance_idx=instance_idx,
+            feature_idx=feature_idx,
+            ax=ax,
+            label=False,
+        )
+    ax.set_title(f"Input-output response for all {n_features} input features")
+    ax.set_xlabel("Input values $x_i$")
+    ax.set_ylabel("Output values $x̂_i$")
+    # Remove top and right spines
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
     return fig
 
 
@@ -445,7 +654,6 @@ def analyze_per_feature_performance(
     # Plot the losses as bar chart with x labels corresponding to feature index
     if ax is None:
         fig, ax = plt.subplots(figsize=(15, 5))
-    color = f"C{zorder%10}"
     ax.bar(features, losses[sorted_indices], alpha=0.5, label=label, zorder=zorder)
     ax.set_xticks(features, features[sorted_indices].numpy(), fontsize=6, rotation=90)
     ax.set_xlabel("Feature index")
@@ -639,32 +847,32 @@ def plot_feature_response_with_subnets(
         SPDOutputs,
     ],
     device: str,
-    model_config: ResidualMLPConfig | ResidualMLPSPDRankPenaltyConfig,
+    model_config: ResidualMLPSPDRankPenaltyConfig,
     feature_idx: int = 0,
     subnet_idx: int = 0,
     instance_idx: int = 0,
     ax: plt.Axes | None = None,
     batch_size: int | None = None,
-):
+    plot_type: Literal["line", "errorbar"] = "errorbar",
+) -> dict[str, plt.Figure]:
     n_instances = model_config.n_instances
     n_features = model_config.n_features
     batch_size = batch_size or n_features
+    k = model_config.k
 
     if ax is None:
-        fig, ax = plt.subplots(constrained_layout=True)
-    else:
-        fig = ax.figure
-
-    cmap_blues = plt.get_cmap("Blues")
-    cmap_reds = plt.get_cmap("Reds")
+        _, ax = plt.subplots(constrained_layout=True, figsize=(10, 5))
+    fig = ax.figure
 
     batch = torch.zeros(batch_size, n_instances, n_features, device=device)
     batch[:, instance_idx, feature_idx] = 1
-    topk_mask_blue = torch.zeros_like(batch[:, :, :])
-    topk_mask_red = torch.zeros_like(batch[:, :, :])
+    topk_mask_blue = torch.zeros(batch_size, n_instances, k, device=device)
+    topk_mask_red = torch.zeros(batch_size, n_instances, k, device=device)
     topk_mask_blue[:, :, subnet_idx] = 1
     for s in range(batch_size):
-        choice = torch.randperm(n_features - 1)[:s]
+        # Randomly ablate half the features
+        half_n_features = n_features // 2
+        choice = torch.randperm(n_features - 1)[:half_n_features]
         # Exclude feature_idx from choice
         choice[choice >= subnet_idx] += 1
         topk_mask_blue[s, :, choice] = 1
@@ -675,7 +883,7 @@ def plot_feature_response_with_subnets(
     assert torch.allclose(
         topk_mask_red[:, :, subnet_idx], torch.zeros_like(topk_mask_red[:, :, subnet_idx])
     )
-    zero_topk_mask = torch.zeros_like(batch[:, :, :])
+    zero_topk_mask = torch.zeros(batch_size, n_instances, k, device=device)
     out_WE_WU_only = topk_model_fn(batch, zero_topk_mask).spd_topk_model_output[:, instance_idx, :]
 
     out_red = topk_model_fn(batch, topk_mask_red)
@@ -685,20 +893,66 @@ def plot_feature_response_with_subnets(
     mlp_out_target = out_blue.target_model_output[:, instance_idx, :] - out_WE_WU_only
 
     x = torch.arange(n_features)
-    for s in range(batch_size):
-        y = mlp_out_blue_spd[s, :].detach().cpu()
-        ax.plot(x, y, color=cmap_blues(s / batch_size), lw=0.3)
-        y = mlp_out_red_spd[s, :].detach().cpu()
-        ax.plot(x, y, color=cmap_reds(s / batch_size), lw=0.3)
+
+    if plot_type == "errorbar":
+        # Calculate means and stds across batch dimension
+        blue_mean = mlp_out_blue_spd.mean(dim=0).detach().cpu()
+        blue_std = mlp_out_blue_spd.std(dim=0).detach().cpu()
+        red_mean = mlp_out_red_spd.mean(dim=0).detach().cpu()
+        red_std = mlp_out_red_spd.std(dim=0).detach().cpu()
+
+        # Plot errorbars
+        ax.errorbar(
+            x,
+            blue_mean,
+            yerr=blue_std,
+            color="tab:purple",
+            label="APD (scrubbed)",
+            fmt="o",
+            markersize=2,
+        )
+        ax.errorbar(
+            x,
+            red_mean,
+            yerr=red_std,
+            color="tab:orange",
+            label="APD (anti-scrubbed)",
+            fmt="o",
+            markersize=2,
+        )
+
+        # Plot target model output
+        yt = mlp_out_target[0, :].detach().cpu()
+        ax.scatter(x, yt, color="red", label="Target model", marker="x", s=10)
+        # Remove all axes lines
+        ax.spines["top"].set_visible(False)
+        ax.spines["right"].set_visible(False)
+        ax.set_xticks([])
+    elif plot_type == "line":
+        cmap1 = plt.get_cmap("Purples")
+        cmap2 = plt.get_cmap("Oranges")
+        for s in range(batch_size):
+            yb = mlp_out_blue_spd[s, :].detach().cpu()
+            yr = mlp_out_red_spd[s, :].detach().cpu()
+            if plot_type == "line":
+                ax.plot(x, yb, color=cmap1(s / batch_size), lw=0.3)
+                ax.plot(x, yr, color=cmap2(s / batch_size), lw=0.3)
+        ax.plot([], [], color=cmap1(0), label="APD (scrubbed)")
+        ax.plot([], [], color=cmap2(0), label="APD (anti-scrubbed)")
+        yt = mlp_out_target[0, :].detach().cpu()
+        ax.plot(x, yt, color="red", lw=0.5, label="Target model")
+    else:
+        raise ValueError(f"Invalid plot type: {plot_type}")
+
     ax.set_ylabel("MLP output (forward pass minus W_E W_U contribution)")
     ax.set_xlabel("Output index")
-    ax.plot([], [], color="blue", label=f"SPD with right subnet ({subnet_idx})")
-    ax.plot([], [], color="red", label=f"SPD without right subnet ({subnet_idx})")
-    ax.scatter(
-        x, mlp_out_target[0, :].detach().cpu(), color="wheat", label="Target", marker=".", zorder=-1
-    )
-    ax.set_title(f"SPD model output for increasing number of subnets, feature {feature_idx}")
+
+    # I only need 0 and 100 as x ticks
+    ax.set_xticks([0, 100])
+    ax.set_xticklabels(["0", "100"])
+    # ax.set_title(f"APD model when ablating parameter components. One-hot $x_{{{feature_idx}}}=1$")
     ax.legend()
+    assert isinstance(fig, plt.Figure)
     return {"feature_response_with_subnets": fig}
 
 
