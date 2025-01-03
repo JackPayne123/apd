@@ -61,15 +61,55 @@ def train_on_test_data(
     return loss_dict
 
 
-def plot_loss_curve(ax: plt.Axes, losses: dict[int, dict[int, float]], label: str):
+def plot_loss_curve(
+    ax: plt.Axes,
+    losses: dict[int, dict[int, float]],
+    label: str,
+    fit: Literal["linear-parabola", "log-line"] = "log-line",
+    fixed_p1: bool = True,
+):
     xvals = np.array(list(losses.keys()))
     # 2D array of y vals, due to instance dimension
     yvals = np.array([list(losses[x].values()) for x in xvals])
     yvals_mean = yvals.mean(axis=1)
     yvals_lower = yvals.min(axis=1)
     yvals_upper = yvals.max(axis=1)
-    ax.plot(xvals, yvals_mean, label=label)
+    q0, q1, q2 = None, None, None  # for Pyright
+    if fit == "log-line":
+        # Fit a line to the log-log mean
+        if fixed_p1:  # Change this to False to fit slope
+            # Fit with fixed slope -1
+            b = np.mean(np.log(yvals_mean) + np.log(xvals))
+            slope, intercept = -1, b
+        else:
+            # Fit slope and intercept
+            slope, intercept = np.polyfit(np.log(xvals), np.log(yvals_mean), 1)
+        # Add the slope as label
+        label = f"{label} (L = {np.exp(intercept):.2e} * d^{slope:.2f})"
+    elif fit == "linear-parabola":
+        if not fixed_p1:
+            # Fit a parabola to the linear mean
+            params = np.polyfit(xvals, yvals_mean, 2)
+            # F = p0 + p1 * d + p2 * d^2
+            # equivalent to F = q0 + q2*(x-q1)^2
+            # with q2 = p2, q1 = -p1/(2*p2), q0 = p0 - p1^2/(4*p2)
+            p2, p1, p0 = params
+            q2, q1, q0 = p2, -p1 / (2 * p2), p0 - p1**2 / (4 * p2)
+            label = f"{label} (L = {q0:.2e} + {q2:.2e} * (d - {q1:.2f})^2)"
+        else:
+            # Want to fix q1 = 100 so let's use X = (d - 100)
+            q1 = 100
+            X = (xvals - q1) ** 2
+            params = np.polyfit(X, yvals_mean, 1)
+            q2, q0 = params
+            label = f"{label} (L = {q0:.2e} + {q2:.2e} * (d - {q1:.2f})^2)"
+    ax.plot(xvals, yvals_mean, label=label, marker="o")
     ax.fill_between(xvals, yvals_lower, yvals_upper, alpha=0.2)
+    # Plot fit if linear-parabola
+    if fit == "linear-parabola":
+        assert q0 is not None and q2 is not None and q1 is not None
+        color_of_plot = ax.get_lines()[-1].get_color()
+        ax.plot(xvals, q0 + q2 * (xvals - q1) ** 2, linestyle=":", color=color_of_plot)
 
 
 def naive_loss(n_features: int, d_mlp: int, p: float, bias: bool, embed: str) -> float:
