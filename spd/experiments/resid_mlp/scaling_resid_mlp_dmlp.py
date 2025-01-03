@@ -14,7 +14,7 @@ from spd.settings import REPO_ROOT
 
 def tms_loss(d_embed: int) -> float:
     """Fitting formula, found in scaling_resid_mlp_embed.py"""
-    return 0.0531 / d_embed
+    return 0.0486 / d_embed
 
 
 compute = True
@@ -33,10 +33,12 @@ if __name__ == "__main__":
     bias = False
     loss_type = "readoff"
     embed = "random"
-    d_mlps = [100, 90, 85, 75, 65, 50, 25, 10]
-    d_embeds = [1000, 500, "100_id"]
-    # d_mlps = [25, 50]
-    # d_embeds = [100, 1000]
+    # d_mlps = [100, 90, 80, 75, 60, 50, 40, 25, 10]
+    # d_embeds = [1000, 500]
+    # yscale = "linear"
+    d_mlps = [100, 90, 75, 50, 25, 10]
+    d_embeds = [1000, 500, 250, 125, 100, "100_id", 90, 75, 50]
+    yscale = "log"
     naive_losses = {
         d_mlp: naive_loss(n_features, d_mlp, p, bias, embed) for d_mlp in np.arange(1, 100, 1)
     }
@@ -107,7 +109,7 @@ if __name__ == "__main__":
         )
         ax.axhline(tms_loss(d_embed), linestyle="--", color=f"C{i}")
         ax.set_title(title_str, fontsize=6)
-        # ax.set_yscale("log")
+        ax.set_yscale(yscale)
         # ax.set_xscale("log")
         ax.set_xlabel("d_mlp")
         ax.set_ylabel("Loss L")

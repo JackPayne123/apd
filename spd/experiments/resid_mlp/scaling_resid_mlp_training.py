@@ -45,7 +45,7 @@ def train_on_test_data(
         loss_type=loss_type,
         feature_probability=p,
         importance_val=None,
-        batch_size=256,
+        batch_size=2048,
         steps=n_steps,
         print_freq=100,
         lr=3e-3,
@@ -53,6 +53,7 @@ def train_on_test_data(
         fixed_random_embedding=fixed_random_embedding,
         fixed_identity_embedding=fixed_identity_embedding,
         n_batches_final_losses=100,
+        use_trivial_label_coeffs=True,
     )
 
     set_seed(config.seed)
@@ -128,7 +129,7 @@ def naive_loss(n_features: int, d_mlp: int, p: float, bias: bool, embed: str) ->
             loss = (n_features - d_mlp) * p / 12
     else:
         raise ValueError(f"Unknown embedding type {embed}")
-    return loss / n_features * correction_factor_for_filtering
+    return loss / n_features  # TODO on new branch * correction_factor_for_filtering
 
 
 if __name__ == "__main__":
