@@ -17,7 +17,7 @@ def tms_loss(d_embed: int) -> float:
     return 0.0531 / d_embed
 
 
-compute = False
+compute = True
 
 if __name__ == "__main__":
     out_dir = REPO_ROOT / "spd/experiments/resid_mlp/out"
