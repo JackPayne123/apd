@@ -38,7 +38,7 @@ if __name__ == "__main__":
     # yscale = "linear"
     d_mlps = [100, 90, 75, 50, 25, 10]
     d_embeds = [1000, 500, 250, 125, 100, "100_id", 90, 75, 50]
-    yscale = "log"
+    yscale = "linear"
     naive_losses = {
         d_mlp: naive_loss(n_features, d_mlp, p, bias, embed) for d_mlp in np.arange(1, 100, 1)
     }

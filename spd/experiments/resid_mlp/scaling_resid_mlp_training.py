@@ -66,7 +66,7 @@ def plot_loss_curve(
     ax: plt.Axes,
     losses: dict[int, dict[int, float]],
     label: str,
-    fit: Literal["linear-parabola", "log-line"] = "log-line",
+    fit: Literal["linear-parabola", "log-line", "none"] = "log-line",
     fixed_p1: bool = True,
 ):
     xvals = np.array(list(losses.keys()))
@@ -104,6 +104,8 @@ def plot_loss_curve(
             params = np.polyfit(X, yvals_mean, 1)
             q2, q0 = params
             label = f"{label} (L = {q0:.2e} + {q2:.2e} * (d - {q1:.2f})^2)"
+    else:
+        pass
     ax.plot(xvals, yvals_mean, label=label, marker="o")
     ax.fill_between(xvals, yvals_lower, yvals_upper, alpha=0.2)
     # Plot fit if linear-parabola
