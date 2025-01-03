@@ -73,6 +73,7 @@ def plot_loss_curve(ax: plt.Axes, losses: dict[int, dict[int, float]], label: st
 
 
 def naive_loss(n_features: int, d_mlp: int, p: float, bias: bool, embed: str) -> float:
+    correction_factor_for_filtering = 1 / (1 - (1 - p) ** n_features)
     if embed == "random" or embed == "identity":
         if bias:  # noqa: SIM108
             loss = (n_features - d_mlp) * (8 - 3 * p) * p / 48
@@ -87,7 +88,7 @@ def naive_loss(n_features: int, d_mlp: int, p: float, bias: bool, embed: str) ->
             loss = (n_features - d_mlp) * p / 12
     else:
         raise ValueError(f"Unknown embedding type {embed}")
-    return loss / n_features
+    return loss / n_features * correction_factor_for_filtering
 
 
 if __name__ == "__main__":
