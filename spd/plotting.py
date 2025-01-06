@@ -3,6 +3,7 @@ from typing import Any, Literal
 import einops
 import matplotlib.pyplot as plt
 import numpy as np
+import seaborn as sns
 import torch
 from jaxtyping import Float
 from mpl_toolkits.axes_grid1 import make_axes_locatable
@@ -22,6 +23,8 @@ from spd.utils import (
     calculate_attributions,
     run_spd_forward_pass,
 )
+
+color_palette = sns.color_palette("colorblind").as_hex()
 
 
 def plot_subnetwork_attributions_statistics(

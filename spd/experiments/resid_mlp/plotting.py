@@ -998,11 +998,20 @@ def plot_feature_response_with_subnets(
     ax: plt.Axes | None = None,
     batch_size: int | None = None,
     plot_type: Literal["line", "errorbar"] = "errorbar",
+    color_map: dict[str, str] | None = None,
 ) -> dict[str, plt.Figure]:
     n_instances = model_config.n_instances
     n_features = model_config.n_features
     batch_size = batch_size or n_features
     k = model_config.k
+
+    if color_map is None:
+        color_map = {
+            "apd_topk": "C1",
+            "apd_scrubbed": "C4",
+            "apd_antiscrubbed": "C2",
+            "target": "C0",
+        }
 
     if ax is None:
         _, ax = plt.subplots(constrained_layout=True, figsize=(10, 5))
@@ -1054,7 +1063,7 @@ def plot_feature_response_with_subnets(
             x,
             blue_mean,
             yerr=blue_std,
-            color="tab:red",
+            color=color_map["apd_scrubbed"],
             label="APD (scrubbed)",
             fmt="o",
             markersize=2,
@@ -1063,7 +1072,7 @@ def plot_feature_response_with_subnets(
             x,
             red_mean,
             yerr=red_std,
-            color="tab:purple",
+            color=color_map["apd_antiscrubbed"],
             label="APD (anti-scrubbed)",
             fmt="o",
             markersize=2,
@@ -1071,16 +1080,18 @@ def plot_feature_response_with_subnets(
 
         # Plot target model output
         yt = mlp_out_target[0, :].detach().cpu()
-        ax.scatter(x, yt, color="tab:blue", label="Target model", marker="x", s=10)
-        # Plot non-scrubbed SPD model output
         ax.scatter(
-            x,
-            mlp_out_spd_mean.detach().cpu(),
-            color="tab:orange",
-            label="APD (top-k)",
-            marker=".",
-            s=10,
+            x, yt, color=color_map["target"], label="Target model\n≈APD (top-k)", marker="x", s=10
         )
+        # Plot non-scrubbed SPD model output
+        # ax.scatter(
+        #     x,
+        #     mlp_out_spd_mean.detach().cpu(),
+        #     color=color_map["apd_topk"],
+        #     label="APD (top-k)",
+        #     marker=".",
+        #     s=10,
+        # )
         # Remove all axes lines
         ax.spines["top"].set_visible(False)
         ax.spines["right"].set_visible(False)

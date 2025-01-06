@@ -3,6 +3,7 @@
 
 import matplotlib.pyplot as plt
 import numpy as np
+import seaborn as sns
 import torch
 from jaxtyping import Float
 from pydantic import PositiveFloat
@@ -26,6 +27,17 @@ from spd.plotting import collect_sparse_dataset_mse_losses, plot_sparse_feature_
 from spd.run_spd import ResidualMLPTaskConfig, calc_recon_mse
 from spd.settings import REPO_ROOT
 from spd.utils import DataGenerationType, SPDOutputs, run_spd_forward_pass, set_seed
+
+# Colorblind-friendly palette
+color_palette = sns.color_palette("colorblind").as_hex()
+
+color_map = {
+    "target": color_palette[0],
+    "apd_topk": color_palette[1],
+    "apd_scrubbed": color_palette[4],
+    "apd_antiscrubbed": color_palette[2],  # alt: 3
+    "baseline_monosemantic": color_palette[3],  # alt: 2
+}
 
 out_dir = REPO_ROOT / "spd/experiments/resid_mlp/figures/"
 out_dir.mkdir(parents=True, exist_ok=True)
@@ -196,9 +208,9 @@ results = {
 # Create line plot of results
 
 label_map = [
-    ("target", "Target model", "tab:blue"),
-    ("spd", "APD model", "tab:orange"),
-    ("baseline_monosemantic", "Baseline target model (monosemantic neurons)", "grey"),
+    ("target", "Target model", color_map["target"]),
+    ("spd", "APD model", color_map["apd_topk"]),
+    ("baseline_monosemantic", "Monosemantic baseline", color_map["baseline_monosemantic"]),
 ]
 
 fig = plot_sparse_feature_mse_line_plot(results, label_map=label_map)
@@ -330,32 +342,32 @@ ax.hist(
     label="APD (top-k)",
     histtype="step",
     lw=2,
-    color="tab:orange",
+    color=color_map["apd_topk"],
 )
-ax.axvline(loss_spd.mean().item(), color="tab:orange", linestyle="--")
+ax.axvline(loss_spd.mean().item(), color=color_map["apd_topk"], linestyle="--")
 ax.hist(
     loss_scrubbed,
     bins=log_bins,  # type: ignore
     label="APD (scrubbed)",
     histtype="step",
     lw=2,
-    color="tab:red",
+    color=color_map["apd_scrubbed"],
 )
-ax.axvline(loss_scrubbed.mean().item(), color="tab:red", linestyle="--")
+ax.axvline(loss_scrubbed.mean().item(), color=color_map["apd_scrubbed"], linestyle="--")
 ax.hist(
     loss_antiscrubbed,
     bins=log_bins,  # type: ignore
     label="APD (anti-scrubbed)",
     histtype="step",
     lw=2,
-    color="tab:purple",
+    color=color_map["apd_antiscrubbed"],
 )
-ax.axvline(loss_antiscrubbed.mean().item(), color="tab:purple", linestyle="--")
+ax.axvline(loss_antiscrubbed.mean().item(), color=color_map["apd_antiscrubbed"], linestyle="--")
 # ax.hist(loss_random, bins=log_bins, label="APD (random)", histtype="step")
 # ax.hist(loss_zero, bins=log_bins, label="APD (zero)", histtype="step")
 ax.axvline(
     loss_monosemantic.mean().item(),
-    color="grey",
+    color=color_map["baseline_monosemantic"],
     linestyle="--",
     label="Monosemantic neuron solution",
 )
@@ -377,20 +389,24 @@ fig.show()
 # %% Linearity test: Enable one subnet after the other
 # candlestick plot
 
+
 # # Dictionary feature_idx -> subnet_idx
 subnet_indices = get_feature_subnet_map(top1_model_fn, device, model.config, instance_idx=0)
 
 n_features = model.config.n_features
 feature_idx = 42
 subtract_inputs = True  # TODO TRUE subnet
+
+
 fig = plot_feature_response_with_subnets(
     topk_model_fn=top1_model_fn,
     device=device,
     model_config=model.config,
     feature_idx=feature_idx,
     subnet_idx=subnet_indices[feature_idx],
-    batch_size=10000,
+    batch_size=1000,
     plot_type="errorbar",
+    color_map=color_map,
 )["feature_response_with_subnets"]
 fig.savefig(  # type: ignore
     out_dir / f"feature_response_with_subnets_{feature_idx}_{n_layers}layers.png",
@@ -608,51 +624,51 @@ print(f"Loss zero:          {loss_zero.mean().item():.6f}")
 # features? Would explain scrubbed and antiscrubbed bimodality,
 # and random (which is just scrubbed + antiscrubbed) too.
 
-fig, ax = plt.subplots(figsize=(15, 5))
-log_bins: list[float] = np.geomspace(1e-7, loss_zero.max().item(), 50).tolist()
-ax.hist(
-    loss_spd,
-    bins=log_bins,
-    label="APD (top-k)",
-    histtype="step",
-    lw=2,
-    color="tab:purple",
-)
-ax.axvline(loss_spd.mean().item(), color="tab:purple", linestyle="--")
-ax.hist(
-    loss_scrubbed,
-    bins=log_bins,
-    label="APD (scrubbed)",
-    histtype="step",
-    lw=2,
-    color="tab:orange",
-)
-ax.axvline(loss_scrubbed.mean().item(), color="tab:orange", linestyle="--")
-ax.hist(
-    loss_antiscrubbed,
-    bins=log_bins,
-    label="APD (anti-scrubbed)",
-    histtype="step",
-    lw=2,
-    color="tab:green",
-)
-ax.axvline(loss_antiscrubbed.mean().item(), color="tab:green", linestyle="--")
-# ax.hist(loss_random, bins=log_bins, label="APD (random)", histtype="step")
-# ax.hist(loss_zero, bins=log_bins, label="APD (zero)", histtype="step")
-ax.axvline(loss_naive, color="black", linestyle="--", label="Monosemantic neuron solution")
-ax.legend()
-ax.set_ylabel(f"Count (out of {batch_size * n_batches} samples)")
-ax.set_xlabel("MSE loss with target model output")
-ax.set_xscale("log")
+# fig, ax = plt.subplots(figsize=(15, 5))
+# log_bins: list[float] = np.geomspace(1e-7, loss_zero.max().item(), 50).tolist()
+# ax.hist(
+#     loss_spd,
+#     bins=log_bins,
+#     label="APD (top-k)",
+#     histtype="step",
+#     lw=2,
+#     color=color_palette[4],
+# )
+# ax.axvline(loss_spd.mean().item(), color=color_palette[4], linestyle="--")
+# ax.hist(
+#     loss_scrubbed,
+#     bins=log_bins,
+#     label="APD (scrubbed)",
+#     histtype="step",
+#     lw=2,
+#     color=color_palette[1],
+# )
+# ax.axvline(loss_scrubbed.mean().item(), color=color_palette[1], linestyle="--")
+# ax.hist(
+#     loss_antiscrubbed,
+#     bins=log_bins,
+#     label="APD (anti-scrubbed)",
+#     histtype="step",
+#     lw=2,
+#     color=color_palette[2],
+# )
+# ax.axvline(loss_antiscrubbed.mean().item(), color=color_palette[2], linestyle="--")
+# # ax.hist(loss_random, bins=log_bins, label="APD (random)", histtype="step")
+# # ax.hist(loss_zero, bins=log_bins, label="APD (zero)", histtype="step")
+# ax.axvline(loss_naive, color=color_palette[3], linestyle="--", label="Monosemantic neuron solution")
+# ax.legend()
+# ax.set_ylabel(f"Count (out of {batch_size * n_batches} samples)")
+# ax.set_xlabel("MSE loss with target model output")
+# ax.set_xscale("log")
 
-# Remove spines
-ax.spines["top"].set_visible(False)
-ax.spines["right"].set_visible(False)
+# # Remove spines
+# ax.spines["top"].set_visible(False)
+# ax.spines["right"].set_visible(False)
 
-# fig.suptitle("Losses when scrubbing set of parameter components")
-fig.savefig(out_dir / "resid_mlp_scrub_hist.png", bbox_inches="tight", dpi=300)
-print(f"Saved figure to {out_dir / 'resid_mlp_scrub_hist.png'}")
-fig.show()
+# # fig.suptitle("Losses when scrubbing set of parameter components")
+# fig.savefig(out_dir / "resid_mlp_scrub_hist.png", bbox_inches="tight", dpi=300)
+# print(f"Saved figure to {out_dir / 'resid_mlp_scrub_hist.png'}")
+# fig.show()
 
 
 # %% "Forgetting"-style test for Lee. Let's say we want to ablate performance for all odd features,

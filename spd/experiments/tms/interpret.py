@@ -3,6 +3,7 @@ import matplotlib.collections as mc
 import matplotlib.pyplot as plt
 import numpy as np
 import numpy.typing as npt
+import seaborn as sns
 import torch
 from jaxtyping import Float
 from torch import Tensor
@@ -12,6 +13,8 @@ from spd.plotting import collect_sparse_dataset_mse_losses, plot_sparse_feature_
 from spd.run_spd import TMSTaskConfig
 from spd.settings import REPO_ROOT
 from spd.utils import DataGenerationType, SparseFeatureDataset
+
+color_palette = sns.color_palette("colorblind").as_hex()
 
 
 def plot_vectors(
@@ -283,9 +286,9 @@ results = {
 # %%
 # Create line plot of results
 label_map = [
-    ("target", "Target model", "tab:blue"),
-    ("spd", "APD model", "tab:orange"),
-    ("baseline_monosemantic", "Baseline target model (monosemantic neurons)", "grey"),
+    ("target", "Target model", color_palette[0]),
+    ("spd", "APD model", color_palette[1]),
+    ("baseline_monosemantic", "Monosemantic baseline", color_palette[3]),
 ]
 
 fig = plot_sparse_feature_mse_line_plot(results, label_map=label_map, log_scale=True)
