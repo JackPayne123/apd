@@ -38,11 +38,7 @@ set_seed(0)  # You can change this seed if needed
 wandb_path = "wandb:spd-resid-mlp/runs/8qz1si1l"  # 1 layer (40k steps. 15 cross 98 mono) R6
 # wandb_path = "wandb:spd-resid-mlp/runs/yk6we9kl"  # New 1 layer with 100 mono
 # wandb_path = "wandb:spd-resid-mlp/runs/cb0ej7hj"  # 2 layer 2LR4
-path = wandb_path
-# path = "wandb:spd-resid-mlp/runs/8qz1si1l"  # Dan's 1 layer
-# path = "wandb:spd-resid-mlp/runs/cb0ej7hj"  # Dan's 2 layer
-# path = "wandb:spd-resid-mlp/runs/2ala9kjy"  # Stefan's initial try
-# path = "wandb:spd-resid-mlp/runs/qmio77cl"  # Stefan's run with initial-hardcoded topk
+
 # Load the pretrained SPD model
 model, config, label_coeffs = ResidualMLPSPDRankPenaltyModel.from_pretrained(wandb_path)
 assert isinstance(config.task_config, ResidualMLPTaskConfig)
@@ -65,7 +61,7 @@ target_label_coeffs = target_label_coeffs.to(device)
 assert torch.allclose(target_label_coeffs, torch.tensor(label_coeffs))
 
 n_layers = target_model.config.n_layers
-# %%
+# %% Plot how many subnets are monosemantic, etc.
 fig = plot_subnet_categories(model, device, cutoff=4e-2)
 fig.show()
 
@@ -196,7 +192,7 @@ results = {
     gen_type: {k: float(v.detach().cpu()) for k, v in results[gen_type].items()}
     for gen_type in gen_types
 }
-# %%
+
 # Create line plot of results
 
 label_map = {
@@ -487,7 +483,7 @@ for i, count in enumerate(counts):
     else:
         name = f"{i}-semantic: "
     ax.text(i + 0.5, count, name + str(count), ha="center", va="bottom")
-fig.suptitle(f"Polysemanticity of model: {path}")
+fig.suptitle(f"Polysemanticity of model: {wandb_path}")
 fig.show()
 
 # %% Observe how well the model reconstructs the noise
