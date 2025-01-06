@@ -877,6 +877,16 @@ def optimize(
             # act_recon_loss = calc_act_recon(
             #     target_post_acts=post_acts,
             #     layer_acts=layer_acts if layer_acts_topk is None else layer_acts_topk,
+
+            # Note: Hard-coded postReLU act recon
+            # import torch.nn.functional as F
+            # post_acts_after_relu = {"layers.0.linear1": F.relu(post_acts["layers.0.linear1"])}
+            # layer_acts_topk_after_relu = {
+            #     "layers.0.linear1": F.relu(layer_acts_topk["layers.0.linear1"])
+            # }
+            # act_recon_loss = calc_act_recon(
+            #     target_post_acts=post_acts_after_relu,
+            #     layer_acts=layer_acts_topk_after_relu,
             # )
 
         if config.schatten_coeff is not None:

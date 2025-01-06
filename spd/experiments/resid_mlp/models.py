@@ -13,6 +13,7 @@ from pydantic import BaseModel, ConfigDict, Field, PositiveInt
 from torch import Tensor, nn
 from wandb.apis.public import Run
 
+from spd.log import logger
 from spd.models.base import Model, SPDRankPenaltyModel
 from spd.models.components import InstancesParamComponentsRankPenalty
 from spd.run_spd import Config, ResidualMLPTaskConfig
@@ -280,6 +281,7 @@ class ResidualMLPModel(Model):
         )
         label_coeffs_path = download_wandb_file(run, run_dir, "label_coeffs.json")
         checkpoint_path = download_wandb_file(run, run_dir, checkpoint.name)
+        logger.info(f"Downloaded checkpoint from {checkpoint_path}")
         return ResidualMLPPaths(
             resid_mlp_train_config=resid_mlp_train_config_path,
             label_coeffs=label_coeffs_path,
@@ -544,6 +546,7 @@ class ResidualMLPSPDRankPenaltyModel(SPDRankPenaltyModel):
         )
         label_coeffs_path = download_wandb_file(run, run_dir, "label_coeffs.json")
         checkpoint_path = download_wandb_file(run, run_dir, checkpoint.name)
+        logger.info(f"Downloaded checkpoint from {checkpoint_path}")
         return ResidualMLPSPDRankPenaltyPaths(
             final_config=final_config_path,
             resid_mlp_train_config=resid_mlp_train_config_path,

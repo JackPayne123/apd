@@ -209,6 +209,7 @@ def run_train(config: ResidMLPTrainConfig, device: str) -> Float[Tensor, " n_ins
             model.W_E.data /= model.W_E.data.norm(dim=-1, keepdim=True)
             # Set W_U to W_E^T
             model.W_U.data = model.W_E.data.transpose(-2, -1)
+            assert torch.allclose(model.W_U.data, model.W_E.data.transpose(-2, -1))
         elif config.fixed_identity_embedding:
             assert (
                 model_cfg.n_features == model_cfg.d_embed
