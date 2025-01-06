@@ -1027,14 +1027,17 @@ def plot_feature_response_with_subnets(
     assert torch.allclose(
         topk_mask_red[:, :, subnet_idx], torch.zeros_like(topk_mask_red[:, :, subnet_idx])
     )
-    zero_topk_mask = torch.zeros(batch_size, n_instances, k, device=device)
-    out_WE_WU_only = topk_model_fn(batch, zero_topk_mask).spd_topk_model_output[:, instance_idx, :]
+    zeros_topk_mask = torch.zeros(batch_size, n_instances, k, device=device)
+    ones_topk_mask = torch.ones(batch_size, n_instances, k, device=device)
+    out_WE_WU_only = topk_model_fn(batch, zeros_topk_mask).spd_topk_model_output[:, instance_idx, :]
 
     out_red = topk_model_fn(batch, topk_mask_red)
     out_blue = topk_model_fn(batch, topk_mask_blue)
+    out_spd = topk_model_fn(batch, ones_topk_mask).spd_topk_model_output[:, instance_idx, :]
     mlp_out_blue_spd = out_blue.spd_topk_model_output[:, instance_idx, :] - out_WE_WU_only
     mlp_out_red_spd = out_red.spd_topk_model_output[:, instance_idx, :] - out_WE_WU_only
     mlp_out_target = out_blue.target_model_output[:, instance_idx, :] - out_WE_WU_only
+    mlp_out_spd = out_spd - out_WE_WU_only
 
     x = torch.arange(n_features)
 
@@ -1044,13 +1047,14 @@ def plot_feature_response_with_subnets(
         blue_std = mlp_out_blue_spd.std(dim=0).detach().cpu()
         red_mean = mlp_out_red_spd.mean(dim=0).detach().cpu()
         red_std = mlp_out_red_spd.std(dim=0).detach().cpu()
+        mlp_out_spd_mean = mlp_out_spd.mean(dim=0).detach().cpu()
 
         # Plot errorbars
         ax.errorbar(
             x,
             blue_mean,
             yerr=blue_std,
-            color="tab:purple",
+            color="tab:red",
             label="APD (scrubbed)",
             fmt="o",
             markersize=2,
@@ -1059,7 +1063,7 @@ def plot_feature_response_with_subnets(
             x,
             red_mean,
             yerr=red_std,
-            color="tab:orange",
+            color="tab:purple",
             label="APD (anti-scrubbed)",
             fmt="o",
             markersize=2,
@@ -1067,7 +1071,16 @@ def plot_feature_response_with_subnets(
 
         # Plot target model output
         yt = mlp_out_target[0, :].detach().cpu()
-        ax.scatter(x, yt, color="red", label="Target model", marker="x", s=10)
+        ax.scatter(x, yt, color="tab:blue", label="Target model", marker="x", s=10)
+        # Plot non-scrubbed SPD model output
+        ax.scatter(
+            x,
+            mlp_out_spd_mean.detach().cpu(),
+            color="tab:orange",
+            label="APD (top-k)",
+            marker=".",
+            s=10,
+        )
         # Remove all axes lines
         ax.spines["top"].set_visible(False)
         ax.spines["right"].set_visible(False)

@@ -195,11 +195,11 @@ results = {
 
 # Create line plot of results
 
-label_map = {
-    "baseline_monosemantic": "Baseline target model (monosemantic neurons)",
-    "target": "Target model",
-    "spd": "APD model",
-}
+label_map = [
+    ("target", "Target model", "tab:blue"),
+    ("spd", "APD model", "tab:orange"),
+    ("baseline_monosemantic", "Baseline target model (monosemantic neurons)", "grey"),
+]
 
 fig = plot_sparse_feature_mse_line_plot(results, label_map=label_map)
 fig.show()
@@ -330,32 +330,32 @@ ax.hist(
     label="APD (top-k)",
     histtype="step",
     lw=2,
-    color="tab:purple",
+    color="tab:orange",
 )
-ax.axvline(loss_spd.mean().item(), color="tab:purple", linestyle="--")
+ax.axvline(loss_spd.mean().item(), color="tab:orange", linestyle="--")
 ax.hist(
     loss_scrubbed,
     bins=log_bins,  # type: ignore
     label="APD (scrubbed)",
     histtype="step",
     lw=2,
-    color="tab:orange",
+    color="tab:red",
 )
-ax.axvline(loss_scrubbed.mean().item(), color="tab:orange", linestyle="--")
+ax.axvline(loss_scrubbed.mean().item(), color="tab:red", linestyle="--")
 ax.hist(
     loss_antiscrubbed,
     bins=log_bins,  # type: ignore
     label="APD (anti-scrubbed)",
     histtype="step",
     lw=2,
-    color="tab:green",
+    color="tab:purple",
 )
-ax.axvline(loss_antiscrubbed.mean().item(), color="tab:green", linestyle="--")
+ax.axvline(loss_antiscrubbed.mean().item(), color="tab:purple", linestyle="--")
 # ax.hist(loss_random, bins=log_bins, label="APD (random)", histtype="step")
 # ax.hist(loss_zero, bins=log_bins, label="APD (zero)", histtype="step")
 ax.axvline(
     loss_monosemantic.mean().item(),
-    color="black",
+    color="grey",
     linestyle="--",
     label="Monosemantic neuron solution",
 )

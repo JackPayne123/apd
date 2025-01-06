@@ -232,7 +232,9 @@ def collect_sparse_dataset_mse_losses(
 
 
 def plot_sparse_feature_mse_line_plot(
-    results: dict[str, dict[str, float]], label_map: dict[str, str], log_scale: bool = False
+    results: dict[str, dict[str, float]],
+    label_map: list[tuple[str, str, str]],
+    log_scale: bool = False,
 ) -> plt.Figure:
     xtick_label_map = {
         "at_least_zero_active": "Training distribution",
@@ -250,10 +252,10 @@ def plot_sparse_feature_mse_line_plot(
     width = 0.8 / n_models  # width of bars
 
     # Create bars for each model type
-    for i, (model_type, label) in enumerate(label_map.items()):
+    for i, (model_type, label, color) in enumerate(label_map):
         x_positions = np.arange(n_groups) + i * width - (n_models - 1) * width / 2
         heights = [results[gen_type][model_type] for gen_type in results]
-        ax.bar(x_positions, heights, width, label=label)
+        ax.bar(x_positions, heights, width, label=label, color=color)
 
     # Customize the plot
     ax.set_ylabel("MSE between model output and true labels")

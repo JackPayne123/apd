@@ -282,11 +282,12 @@ results = {
 
 # %%
 # Create line plot of results
-label_map = {
-    "baseline_monosemantic": "Baseline target model (monosemantic neurons)",
-    "target": "Target model",
-    "spd": "APD model",
-}
+label_map = [
+    ("target", "Target model", "tab:blue"),
+    ("spd", "APD model", "tab:orange"),
+    ("baseline_monosemantic", "Baseline target model (monosemantic neurons)", "grey"),
+]
+
 fig = plot_sparse_feature_mse_line_plot(results, label_map=label_map, log_scale=True)
 fig.show()
 fig.savefig(out_dir / f"tms_mse_{run_id}.png", dpi=400)
