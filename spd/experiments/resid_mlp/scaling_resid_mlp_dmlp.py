@@ -40,7 +40,8 @@ if __name__ == "__main__":
     d_embeds = [1000, 500, 250, 125, 100, "100_id", 90, 75, 50]
     yscale = "linear"
     naive_losses = {
-        d_mlp: naive_loss(n_features, d_mlp, p, bias, embed) for d_mlp in np.arange(1, 100, 1)
+        int(d_mlp): naive_loss(n_features, int(d_mlp), p, bias, embed)
+        for d_mlp in np.arange(1, 100, 1)
     }
     ax.plot(
         list(naive_losses.keys()),
@@ -50,9 +51,9 @@ if __name__ == "__main__":
     )
     # Label 50
     ax.text(
-        50,
-        naive_losses[50] * 1.2,
-        f"d_mlp=50: {naive_losses[50]:.2e}",
+        x=50,
+        y=naive_losses[50] * 1.2,
+        s=f"d_mlp=50: {naive_losses[50]:.2e}",
         fontsize=6,
         color="k",
     )

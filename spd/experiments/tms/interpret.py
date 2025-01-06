@@ -225,7 +225,10 @@ def plot_combined(
 # %%
 device = "cuda" if torch.cuda.is_available() else "cpu"
 # path = "wandb:spd-tms/runs/bft0pgi8"  # Old run with attributions from spd model
-path = "wandb:spd-tms/runs/sv9padmo"  # 10-5
+# path = "wandb:spd-tms/runs/sv9padmo"  # 10-5
+# path = "wandb:spd-tms/runs/vt0i4a22"  # 20-5
+path = "wandb:spd-tms/runs/tyo4serm"  # 40-10 with topk=2, topk_recon_coeff=1e1, schatten_coeff=15 # Using in paper
+# path = "wandb:spd-tms/runs/014t4f9n"  # 40-10 with topk=1, topk_recon_coeff=1e1, schatten_coeff=1e1
 
 run_id = path.split("/")[-1]
 
@@ -261,6 +264,7 @@ gen_types: list[DataGenerationType] = [
     "exactly_one_active",
     "exactly_two_active",
     "exactly_three_active",
+    "exactly_four_active",
 ]
 assert config.topk is not None
 results = collect_sparse_dataset_mse_losses(
@@ -277,11 +281,21 @@ results = collect_sparse_dataset_mse_losses(
     buffer_ratio=5,
 )
 
-# We only plot the 0th instance
-results = {
-    gen_type: {k: float(v[0].detach().cpu()) for k, v in results[gen_type].items()}
-    for gen_type in gen_types
-}
+# %%
+# Option to plot a single instance
+inst = None
+if inst is not None:
+    # We only plot the {inst}th instance
+    plot_data = {
+        gen_type: {k: float(v[inst].detach().cpu()) for k, v in results[gen_type].items()}
+        for gen_type in gen_types
+    }
+else:
+    # Take the mean over all instances
+    plot_data = {
+        gen_type: {k: float(v.mean(dim=0).detach().cpu()) for k, v in results[gen_type].items()}
+        for gen_type in gen_types
+    }
 
 # %%
 # Create line plot of results
@@ -290,9 +304,10 @@ label_map = [
     ("spd", "APD model", color_palette[1]),
     ("baseline_monosemantic", "Monosemantic baseline", color_palette[3]),
 ]
-
-fig = plot_sparse_feature_mse_line_plot(results, label_map=label_map, log_scale=True)
+fig = plot_sparse_feature_mse_line_plot(plot_data, label_map=label_map, log_scale=False)
 fig.show()
+# fig.savefig(out_dir / f"tms_mse_{run_id}_inst{inst}.png", dpi=400)
+# print(f"Saved figure to {out_dir / f'tms_mse_{run_id}_inst{inst}.png'}")
 fig.savefig(out_dir / f"tms_mse_{run_id}.png", dpi=400)
 print(f"Saved figure to {out_dir / f'tms_mse_{run_id}.png'}")
 
