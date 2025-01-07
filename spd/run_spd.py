@@ -861,33 +861,27 @@ def optimize(
 
         act_recon_loss = None
         if config.act_recon_coeff is not None:
-            assert layer_acts_topk is not None
-            post_acts_after_relu = {}
-            layer_acts_topk_after_relu = {}
-            for i in range(len(model.layers)):
-                post_acts_after_relu[f"layers.{i}.linear1"] = torch.nn.functional.relu(
-                    post_acts[f"layers.{i}.linear1"]
-                )
-                layer_acts_topk_after_relu[f"layers.{i}.linear1"] = torch.nn.functional.relu(
-                    layer_acts_topk[f"layers.{i}.linear1"]
-                )
-            act_recon_loss = calc_act_recon(
-                target_post_acts=post_acts_after_relu, layer_acts=layer_acts_topk_after_relu
-            )
-            # act_recon_loss = calc_act_recon(
-            #     target_post_acts=post_acts,
-            #     layer_acts=layer_acts if layer_acts_topk is None else layer_acts_topk,
+            if isinstance(config.task_config, ResidualMLPTaskConfig):
+                # For now, we treat resid-mlp special in that we take the post-relu activations
+                assert layer_acts_topk is not None
+                post_acts_after_relu = {}
+                layer_acts_topk_after_relu = {}
+                for i in range(len(model.layers)):
+                    post_acts_after_relu[f"layers.{i}.linear1"] = torch.nn.functional.relu(
+                        post_acts[f"layers.{i}.linear1"]
+                    )
+                    layer_acts_topk_after_relu[f"layers.{i}.linear1"] = torch.nn.functional.relu(
+                        layer_acts_topk[f"layers.{i}.linear1"]
+                    )
 
-            # Note: Hard-coded postReLU act recon
-            # import torch.nn.functional as F
-            # post_acts_after_relu = {"layers.0.linear1": F.relu(post_acts["layers.0.linear1"])}
-            # layer_acts_topk_after_relu = {
-            #     "layers.0.linear1": F.relu(layer_acts_topk["layers.0.linear1"])
-            # }
-            # act_recon_loss = calc_act_recon(
-            #     target_post_acts=post_acts_after_relu,
-            #     layer_acts=layer_acts_topk_after_relu,
-            # )
+                act_recon_loss = calc_act_recon(
+                    target_post_acts=post_acts_after_relu, layer_acts=layer_acts_topk_after_relu
+                )
+            else:
+                act_recon_loss = calc_act_recon(
+                    target_post_acts=post_acts,
+                    layer_acts=layer_acts if layer_acts_topk is None else layer_acts_topk,
+                )
 
         if config.schatten_coeff is not None:
             assert isinstance(
