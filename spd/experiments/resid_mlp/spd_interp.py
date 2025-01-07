@@ -3,7 +3,6 @@
 
 import matplotlib.pyplot as plt
 import numpy as np
-import seaborn as sns
 import torch
 from jaxtyping import Float
 from pydantic import PositiveFloat
@@ -26,17 +25,14 @@ from spd.experiments.resid_mlp.scaling_resid_mlp_training import naive_loss
 from spd.plotting import collect_sparse_dataset_mse_losses, plot_sparse_feature_mse_line_plot
 from spd.run_spd import ResidualMLPTaskConfig, calc_recon_mse
 from spd.settings import REPO_ROOT
-from spd.utils import DataGenerationType, SPDOutputs, run_spd_forward_pass, set_seed
-
-# Colorblind-friendly palette
-color_palette = sns.color_palette("colorblind").as_hex()
+from spd.utils import COLOR_PALETTE, DataGenerationType, SPDOutputs, run_spd_forward_pass, set_seed
 
 color_map = {
-    "target": color_palette[0],
-    "apd_topk": color_palette[1],
-    "apd_scrubbed": color_palette[4],
-    "apd_antiscrubbed": color_palette[2],  # alt: 3
-    "baseline_monosemantic": color_palette[3],  # alt: 2
+    "target": COLOR_PALETTE[0],
+    "apd_topk": COLOR_PALETTE[1],
+    "apd_scrubbed": COLOR_PALETTE[4],
+    "apd_antiscrubbed": COLOR_PALETTE[2],  # alt: 3
+    "baseline_monosemantic": COLOR_PALETTE[3],  # alt: 2
 }
 
 out_dir = REPO_ROOT / "spd/experiments/resid_mlp/figures/"

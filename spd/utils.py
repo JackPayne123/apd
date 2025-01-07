@@ -19,6 +19,20 @@ from spd.settings import REPO_ROOT
 T = TypeVar("T", bound=BaseModel)
 Q = TypeVar("Q")
 
+# Avoid seaborn package installation (sns.color_palette("colorblind").as_hex())
+COLOR_PALETTE = [
+    "#0173B2",
+    "#DE8F05",
+    "#029E73",
+    "#D55E00",
+    "#CC78BC",
+    "#CA9161",
+    "#FBAFE4",
+    "#949494",
+    "#ECE133",
+    "#56B4E9",
+]
+
 
 def to_root_path(path: str | Path) -> Path:
     """Converts relative paths to absolute ones, assuming they are relative to the rib root."""
