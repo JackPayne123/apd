@@ -126,7 +126,7 @@
             "type": "debugpy",
             "request": "launch",
             "program": "${workspaceFolder}/spd/experiments/resid_mlp/resid_mlp_decomposition.py",
-            "args": "${workspaceFolder}/spd/experiments/resid_mlp/f100_resid_mlp_topk_rank_penalty_config.yaml",
+            "args": "${workspaceFolder}/spd/experiments/resid_mlp/resid_mlp_topk_rank_penalty_config.yaml",
             "console": "integratedTerminal",
             "justMyCode": true,
             "env": {
