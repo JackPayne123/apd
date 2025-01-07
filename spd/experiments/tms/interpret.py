@@ -221,7 +221,7 @@ def plot_combined(
 
 # %%
 device = "cuda" if torch.cuda.is_available() else "cpu"
-# path = "wandb:spd-tms/runs/bft0pgi8"  # Old run with attributions from spd model
+# path = "wandb:spd-tms/runs/bft0pgi8"  # Old 5-2 run with attributions from spd model
 # path = "wandb:spd-tms/runs/sv9padmo"  # 10-5
 # path = "wandb:spd-tms/runs/vt0i4a22"  # 20-5
 path = "wandb:spd-tms/runs/tyo4serm"  # 40-10 with topk=2, topk_recon_coeff=1e1, schatten_coeff=15 # Using in paper
