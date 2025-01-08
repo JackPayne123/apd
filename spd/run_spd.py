@@ -103,6 +103,7 @@ class Config(BaseModel):
     topk: PositiveFloat | None = None
     batch_topk: bool = True
     hardcode_topk_mask_step: int | None = None
+    exact_topk: bool = False
     batch_size: PositiveInt
     steps: PositiveInt
     print_freq: PositiveInt
@@ -803,7 +804,14 @@ def optimize(
             topk_attrs: Float[Tensor, "batch ... k"] = (
                 attributions[..., :-1] if config.distil_from_target else attributions
             )
-            if (
+            if config.exact_topk:
+                # Only valid if n_instances = 1
+                assert has_instance_dim, "exact_topk only works if has_instance_dim is True"
+                assert model.n_instances == 1, "exact_topk only works if n_instances = 1"
+                # Get the exact number of active features over the batch
+                exact_topk = ((batch != 0).sum() / batch.shape[0]).item()
+                topk_mask = calc_topk_mask(topk_attrs, exact_topk, batch_topk=config.batch_topk)
+            elif (
                 config.hardcode_topk_mask_step is not None
                 and step <= config.hardcode_topk_mask_step
             ):
@@ -998,7 +1006,6 @@ def optimize(
             plot_results_fn is not None
             and config.image_freq is not None
             and step % config.image_freq == 0
-            and step > 0
         ):
             fig_dict = plot_results_fn(
                 model=model,

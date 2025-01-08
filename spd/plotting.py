@@ -104,7 +104,12 @@ def plot_subnetwork_correlations(
         topk_attrs = (
             attribution_scores[..., :-1] if config.distil_from_target else attribution_scores
         )
-        topk_mask = calc_topk_mask(topk_attrs, config.topk, batch_topk=config.batch_topk)
+        if config.exact_topk:
+            assert spd_model.n_instances == 1, "exact_topk only works if n_instances = 1"
+            topk = (batch != 0).sum() / batch.shape[0]
+            topk_mask = calc_topk_mask(topk_attrs, topk, batch_topk=config.batch_topk)
+        else:
+            topk_mask = calc_topk_mask(topk_attrs, config.topk, batch_topk=config.batch_topk)
 
         topk_masks.append(topk_mask)
         if len(topk_masks) > n_forward_passes:
@@ -163,6 +168,7 @@ def collect_sparse_dataset_mse_losses(
     distil_from_target: bool,
     gen_types: list[DataGenerationType],
     buffer_ratio: float = 1,
+    exact_topk: bool = False,
 ) -> dict[str, dict[str, Float[Tensor, ""] | Float[Tensor, " n_instances"]]]:
     """Collect the MSE losses for specific number of active features, as well as for
     'at_least_zero_active'.
@@ -196,6 +202,11 @@ def collect_sparse_dataset_mse_losses(
         labels = labels.to(device)
 
         target_model_output, _, _ = target_model(batch)
+
+        if exact_topk:
+            assert spd_model.n_instances == 1, "exact_topk only works if n_instances = 1"
+            # Get the exact number of active features over the batch
+            topk = ((batch != 0).sum() / batch.shape[0]).item()
 
         spd_outputs = run_spd_forward_pass(
             spd_model=spd_model,

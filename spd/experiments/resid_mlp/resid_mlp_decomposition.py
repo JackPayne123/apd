@@ -316,6 +316,9 @@ def resid_mlp_plot_results_fn(
         batch_topk: bool = config.batch_topk,
     ) -> Float[Tensor, "batch n_instances n_features"]:
         assert topk is not None
+        if config.exact_topk:
+            assert model.n_instances == 1, "exact_topk only works if n_instances = 1"
+            topk = ((batch != 0).sum() / batch.shape[0]).item()
         return run_spd_forward_pass(
             spd_model=model,
             target_model=target_model,
