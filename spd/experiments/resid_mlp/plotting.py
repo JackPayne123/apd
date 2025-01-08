@@ -711,11 +711,13 @@ def plot_spd_feature_contributions_truncated(
     target_model: ResidualMLPModel,
     device: str = "cuda",
     n_features: int | None = 10,
+    include_crossterms: bool = False,
 ):
     assert spd_model.config.n_instances == 1, "Only one instance supported for now"
 
     n_features = n_features or spd_model.config.n_features
-    fig1, axes1 = plt.subplots(2, 1, figsize=(10, 7), constrained_layout=True)
+    n_rows = 3 if include_crossterms else 2
+    fig1, axes1 = plt.subplots(n_rows, 1, figsize=(10, 7), constrained_layout=True)
     axes1 = np.atleast_1d(axes1)  # type: ignore
 
     # First plot: Target model
@@ -765,6 +767,19 @@ def plot_spd_feature_contributions_truncated(
     )["diag_relu_conns"][0, :, :n_features, :]
     k_indices = diag_relu_conns.sum(dim=-1).argmax(dim=0).tolist()
     axes1[1].set_xticklabels(k_indices)  # Labels are the subnet indices
+
+    if include_crossterms:
+        # Third plot: SPD model (with cross terms)
+        spd_relu_conns: Float[Tensor, "n_features d_mlp"] = spd_calculate_diag_relu_conns(
+            spd_model, device, k_select="sum_onlycrossterms"
+        )[0, :n_features, :]
+        feature_contribution_plot(
+            axes1[2], spd_relu_conns, model=spd_model, n_features=n_features, legend=False
+        )
+        axes1[2].set_ylabel("Neuron contribution")
+        axes1[2].set_xlabel("Input feature index")
+        axes1[2].set_title("Input feature cross terms")
+        axes1[2].set_xticks(range(n_features))
 
     return fig1
 

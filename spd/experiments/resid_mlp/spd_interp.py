@@ -43,9 +43,9 @@ device = "cuda" if torch.cuda.is_available() else "cpu"
 print(f"Using device: {device}")
 set_seed(0)  # You can change this seed if needed
 
-# wandb_path = "wandb:spd-resid-mlp/runs/8qz1si1l"  # 1 layer (40k steps. 15 cross 98 mono) R6
+wandb_path = "wandb:spd-resid-mlp/runs/8qz1si1l"  # 1 layer (40k steps. 15 cross 98 mono) R6
 # wandb_path = "wandb:spd-resid-mlp/runs/yk6we9kl"  # New 1 layer with 100 mono. Not used in paper
-wandb_path = "wandb:spd-resid-mlp/runs/cb0ej7hj"  # 2 layer 2LR4
+# wandb_path = "wandb:spd-resid-mlp/runs/cb0ej7hj"  # 2 layer 2LR4
 
 # Load the pretrained SPD model
 model, config, label_coeffs = ResidualMLPSPDRankPenaltyModel.from_pretrained(wandb_path)
@@ -154,12 +154,29 @@ fig = plot_spd_feature_contributions_truncated(
     target_model=target_model,
     device=device,
     n_features=10,
+    include_crossterms=False,
 )
 fig.show()
 # Save the figure
 out_dir = REPO_ROOT / "spd/experiments/resid_mlp/out"
 fig.savefig(out_dir / f"resid_mlp_weights_{n_layers}layers.png")
 print(f"Saved figure to {out_dir / f'resid_mlp_weights_{n_layers}layers.png'}")
+
+# %%
+# Plot the feature contributions figure with crossterms for the appendix
+fig = plot_spd_feature_contributions_truncated(
+    spd_model=model,
+    target_model=target_model,
+    device=device,
+    n_features=20,
+    include_crossterms=True,
+)
+fig.show()
+# Save the figure
+out_dir = REPO_ROOT / "spd/experiments/resid_mlp/out"
+fig.savefig(out_dir / f"resid_mlp_weights_{n_layers}layers_crossterms.png")
+print(f"Saved figure to {out_dir / f'resid_mlp_weights_{n_layers}layers_crossterms.png'}")
+
 # %%
 # Get the entries for the main loss table in the paper
 dataset = ResidualMLPDataset(
