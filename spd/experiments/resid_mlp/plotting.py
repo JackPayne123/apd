@@ -730,7 +730,7 @@ def plot_spd_feature_contributions_truncated(
         n_features=n_features,
         legend=True,
     )
-    axes1[0].set_ylabel("Neuron size")
+    axes1[0].set_ylabel("Neuron contribution")
     axes1[0].set_xlabel(f"Input feature index (first {n_features} shown)")
     axes1[0].set_title("Target model")
     axes1[0].set_xticks(range(n_features))  # Ensure all xticks have labels
@@ -747,7 +747,7 @@ def plot_spd_feature_contributions_truncated(
         pre_labelled_neurons=labelled_neurons,
         legend=False,
     )
-    axes1[1].set_ylabel("Neuron size")
+    axes1[1].set_ylabel("Neuron contribution")
     axes1[1].set_xlabel("Parameter component index")
     axes1[1].set_title("Individual APD parameter components")
     axes1[1].set_xticks(range(n_features))

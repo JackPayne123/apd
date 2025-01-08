@@ -296,11 +296,17 @@ else:
 
 # %%
 # Create line plot of results
+color_map = {
+    "target": COLOR_PALETTE[0],
+    "apd_topk": COLOR_PALETTE[1],
+    "baseline_monosemantic": "grey",
+}
 label_map = [
-    ("target", "Target model", COLOR_PALETTE[0]),
-    ("spd", "APD model", COLOR_PALETTE[1]),
-    ("baseline_monosemantic", "Monosemantic baseline", COLOR_PALETTE[3]),
+    ("target", "Target model", color_map["target"]),
+    ("spd", "APD model", color_map["apd_topk"]),
+    ("baseline_monosemantic", "Monosemantic baseline", color_map["baseline_monosemantic"]),
 ]
+
 fig = plot_sparse_feature_mse_line_plot(plot_data, label_map=label_map, log_scale=False)
 fig.show()
 # fig.savefig(out_dir / f"tms_mse_{run_id}_inst{inst}.png", dpi=400)

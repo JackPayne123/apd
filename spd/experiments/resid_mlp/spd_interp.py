@@ -32,7 +32,7 @@ color_map = {
     "apd_topk": COLOR_PALETTE[1],
     "apd_scrubbed": COLOR_PALETTE[4],
     "apd_antiscrubbed": COLOR_PALETTE[2],  # alt: 3
-    "baseline_monosemantic": COLOR_PALETTE[3],  # alt: 2
+    "baseline_monosemantic": "grey",
 }
 
 out_dir = REPO_ROOT / "spd/experiments/resid_mlp/figures/"
@@ -43,9 +43,9 @@ device = "cuda" if torch.cuda.is_available() else "cpu"
 print(f"Using device: {device}")
 set_seed(0)  # You can change this seed if needed
 
-wandb_path = "wandb:spd-resid-mlp/runs/8qz1si1l"  # 1 layer (40k steps. 15 cross 98 mono) R6
+# wandb_path = "wandb:spd-resid-mlp/runs/8qz1si1l"  # 1 layer (40k steps. 15 cross 98 mono) R6
 # wandb_path = "wandb:spd-resid-mlp/runs/yk6we9kl"  # New 1 layer with 100 mono. Not used in paper
-# wandb_path = "wandb:spd-resid-mlp/runs/cb0ej7hj"  # 2 layer 2LR4
+wandb_path = "wandb:spd-resid-mlp/runs/cb0ej7hj"  # 2 layer 2LR4
 
 # Load the pretrained SPD model
 model, config, label_coeffs = ResidualMLPSPDRankPenaltyModel.from_pretrained(wandb_path)
@@ -364,7 +364,7 @@ ax.axvline(loss_antiscrubbed.mean().item(), color=color_map["apd_antiscrubbed"],
 ax.axvline(
     loss_monosemantic.mean().item(),
     color=color_map["baseline_monosemantic"],
-    linestyle="--",
+    linestyle="-",
     label="Monosemantic neuron solution",
 )
 ax.legend()
