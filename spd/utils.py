@@ -588,10 +588,10 @@ def run_spd_forward_pass(
         attribution_type=attribution_type,
     )
 
-    # We always assume the final subnetwork is the one we want to distil
-    topk_attrs = attribution_scores[..., :-1] if distil_from_target else attribution_scores
-
     if topk_mask is None:
+        # We always assume the final subnetwork is the one we want to distil
+        topk_attrs = attribution_scores[..., :-1] if distil_from_target else attribution_scores
+
         topk_mask = calc_topk_mask(topk_attrs, topk, batch_topk=batch_topk)
         if distil_from_target:
             # Add back the final subnetwork index to the topk mask and set it to True

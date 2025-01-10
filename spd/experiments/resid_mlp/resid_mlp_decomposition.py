@@ -26,6 +26,7 @@ from spd.experiments.resid_mlp.models import (
 from spd.experiments.resid_mlp.plotting import (
     analyze_per_feature_performance,
     plot_individual_feature_response,
+    plot_per_feature_performance,
     plot_spd_relu_contribution,
     plot_virtual_weights_target_spd,
     spd_calculate_diag_relu_conns,
@@ -45,6 +46,7 @@ from spd.run_spd import (
     optimize,
 )
 from spd.utils import (
+    COLOR_PALETTE,
     DatasetGeneratedDataLoader,
     collect_subnetwork_attributions,
     load_config,
@@ -374,47 +376,70 @@ def resid_mlp_plot_results_fn(
 
     # Plot per-feature performance when setting topk=1 and batch_topk=False
     fig, ax1 = plt.subplots(figsize=(15, 5))
-    sorted_indices = analyze_per_feature_performance(
+
+    losses_target = analyze_per_feature_performance(
         model_fn=target_model_fn,
         model_config=target_model.config,
-        ax=ax1,
-        label="Target",
         device=device,
         batch_size=config.batch_size,
-        sorted_indices=None,
     )
+    indices = losses_target.argsort()
     fn_without_batch_topk = lambda batch: spd_model_fn(batch, topk=1, batch_topk=False)  # type: ignore
-    analyze_per_feature_performance(
+    losses_spd = analyze_per_feature_performance(
         model_fn=fn_without_batch_topk,
         model_config=model.config,
-        ax=ax1,
-        label="SPD",
         device=device,
         batch_size=config.batch_size,
-        sorted_indices=sorted_indices,
+    )
+
+    plot_per_feature_performance(
+        losses=losses_spd,
+        sorted_indices=indices,
+        ax=ax1,
+        label="SPD",
+        color=COLOR_PALETTE[1],
+    )
+    plot_per_feature_performance(
+        losses=losses_target,
+        sorted_indices=indices,
+        ax=ax1,
+        label="Target",
+        color=COLOR_PALETTE[0],
     )
     ax1.legend()
+
     fig_dict["loss_by_feature_topk_1"] = fig
 
     # Plot per-feature performance when using batch_topk
     fig, ax2 = plt.subplots(figsize=(15, 5))
-    sorted_indices = analyze_per_feature_performance(
+
+    target_losses_batch_topk = analyze_per_feature_performance(
         model_fn=target_model_fn,
         model_config=target_model.config,
-        ax=ax2,
-        label="Target",
         device=device,
-        sorted_indices=None,
         batch_size=config.batch_size,
     )
-    analyze_per_feature_performance(
+
+    spd_losses_batch_topk = analyze_per_feature_performance(
         model_fn=spd_model_fn,
         model_config=model.config,
+        device=device,
+        batch_size=config.batch_size,
+    )
+
+    plot_per_feature_performance(
+        losses=spd_losses_batch_topk,
+        sorted_indices=indices,
         ax=ax2,
         label="SPD",
-        device=device,
-        sorted_indices=sorted_indices,
-        batch_size=config.batch_size,
+        color=COLOR_PALETTE[1],
+    )
+    plot_per_feature_performance(
+        losses=target_losses_batch_topk,
+        sorted_indices=indices,
+        ax=ax2,
+        label="Target",
+        color=COLOR_PALETTE[0],
     )
     ax2.legend()
     # Use the same y-axis limits as the topk=1 plot

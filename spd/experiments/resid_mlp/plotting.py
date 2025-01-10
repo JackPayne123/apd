@@ -10,6 +10,7 @@ from jaxtyping import Float
 from matplotlib.colors import Normalize
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 from torch import Tensor
+from tqdm import tqdm
 
 from spd.experiments.piecewise.plotting import plot_matrix
 from spd.experiments.resid_mlp.models import (
@@ -18,7 +19,9 @@ from spd.experiments.resid_mlp.models import (
     ResidualMLPSPDRankPenaltyConfig,
     ResidualMLPSPDRankPenaltyModel,
 )
-from spd.utils import SPDOutputs
+from spd.experiments.resid_mlp.resid_mlp_dataset import ResidualMLPDataset
+from spd.run_spd import Config
+from spd.utils import SPDOutputs, calc_topk_mask, calculate_attributions
 
 
 def plot_individual_feature_response(
@@ -784,40 +787,272 @@ def plot_spd_feature_contributions_truncated(
     return fig1
 
 
+def collect_per_feature_losses(
+    target_model: ResidualMLPModel,
+    spd_model: ResidualMLPSPDRankPenaltyModel,
+    config: Config,
+    dataset: ResidualMLPDataset,
+    device: str,
+    batch_size: int,
+    n_samples: int,
+) -> tuple[
+    Float[Tensor, " n_features"], Float[Tensor, " n_features"], Float[Tensor, " n_features"]
+]:
+    """Collect the MSE losses for the target model, SPD batch topk SPD sample topk.
+
+    Returns:
+        loss_target: Float[Tensor, " n_features"]
+        loss_spd_batch_topk: Float[Tensor, " n_features"]
+        loss_spd_sample_topk: Float[Tensor, " n_features"]
+    """
+    print_every_counter = 10000
+    n_samples_acc = 0
+    feature_counts = torch.zeros(spd_model.config.n_features, device=device)
+    loss_target = torch.zeros(spd_model.config.n_features, device=device)
+    loss_spd_batch_topk = torch.zeros(spd_model.config.n_features, device=device)
+    loss_spd_sample_topk = torch.zeros(spd_model.config.n_features, device=device)
+
+    while n_samples_acc < n_samples:
+        # Generate batch with no zero samples
+        batch, labels = dataset.generate_batch(batch_size)
+        batch = batch.to(device)
+        labels = labels.to(device)
+
+        # n_instances should be 1
+        assert batch.shape[1] == 1
+
+        # Pass through the target model
+        target_model_output, pre_acts, post_acts = target_model(batch)
+        # Pass through the full SPD model
+        model_output_spd, layer_acts, inner_acts = spd_model(batch)
+        attribution_scores = calculate_attributions(
+            model=spd_model,
+            batch=batch,
+            out=model_output_spd,
+            target_out=target_model_output,
+            pre_acts=pre_acts,
+            post_acts=post_acts,
+            inner_acts=inner_acts,
+            attribution_type=config.attribution_type,
+        )
+
+        with torch.inference_mode():
+            assert config.batch_topk is True
+            assert config.topk is not None
+            # Get the topk mask for the batch topk model
+            batch_topk_mask = calc_topk_mask(
+                attribution_scores, topk=config.topk, batch_topk=config.batch_topk
+            )
+            # Get the topk mask for the sample topk model
+            sample_topk_mask = calc_topk_mask(attribution_scores, topk=1, batch_topk=False)
+
+            # Get the batch topk model output
+            model_output_spd_batch_topk, _, _ = spd_model(batch, topk_mask=batch_topk_mask)
+            # Get the sample topk model output
+            model_output_spd_sample_topk, _, _ = spd_model(batch, topk_mask=sample_topk_mask)
+
+            # Get rid of the n_instances dimension for simplicity
+            batch: Float[Tensor, "batch n_features"] = batch.squeeze(1)
+            batch_topk_mask: Float[Tensor, "batch k"] = batch_topk_mask.squeeze(1)
+            target_model_output: Float[Tensor, "batch n_features"] = target_model_output.squeeze(1)
+            model_output_spd_batch_topk: Float[Tensor, "batch n_features"] = (
+                model_output_spd_batch_topk.squeeze(1)
+            )
+            model_output_spd_sample_topk: Float[Tensor, "batch n_features"] = (
+                model_output_spd_sample_topk.squeeze(1)
+            )
+            labels: Float[Tensor, "batch n_features"] = labels.squeeze(1)
+
+            # Get the indices of samples where there is exactly one feature active
+            active_features_batch: Float[Tensor, "batch n_features"] = (batch != 0).float()
+            exactly_one_active_features_batch: Float[Tensor, "batch n_features"] = (
+                active_features_batch.sum(dim=-1) == 1
+            )
+
+            # Filter to only include the samples where there is exactly one feature active
+            batch = batch[exactly_one_active_features_batch]
+            labels = labels[exactly_one_active_features_batch]
+            target_model_output = target_model_output[exactly_one_active_features_batch]
+            model_output_spd_batch_topk = model_output_spd_batch_topk[
+                exactly_one_active_features_batch
+            ]
+            model_output_spd_sample_topk = model_output_spd_sample_topk[
+                exactly_one_active_features_batch
+            ]
+            filtered_active_features_batch: Float[Tensor, "sub_batch n_features"] = (
+                active_features_batch[exactly_one_active_features_batch]
+            )
+
+            # Get the Squared error loss for each sample
+            loss_target_batch_raw: Float[Tensor, "sub_batch 1"] = (
+                (target_model_output - labels) ** 2
+            ).sum(dim=-1, keepdim=True)
+            loss_spd_batch_topk_batch_raw: Float[Tensor, "sub_batch 1"] = (
+                (model_output_spd_batch_topk - labels) ** 2
+            ).sum(dim=-1, keepdim=True)
+            loss_spd_sample_topk_batch_raw: Float[Tensor, "sub_batch 1"] = (
+                (model_output_spd_sample_topk - labels) ** 2
+            ).sum(dim=-1, keepdim=True)
+
+            # Element-wise multiply the loss by the active features
+            loss_target_batch: Float[Tensor, "sub_batch n_features"] = (
+                loss_target_batch_raw * filtered_active_features_batch
+            )
+            loss_spd_batch_topk_batch: Float[Tensor, "sub_batch n_features"] = (
+                loss_spd_batch_topk_batch_raw * filtered_active_features_batch
+            )
+            loss_spd_sample_topk_batch: Float[Tensor, "sub_batch n_features"] = (
+                loss_spd_sample_topk_batch_raw * filtered_active_features_batch
+            )
+
+            # Count the number of times each feature was active
+            feature_counts += filtered_active_features_batch.sum(dim=0)
+
+            # Add to the losses
+            loss_target += loss_target_batch.sum(dim=0)
+            loss_spd_batch_topk += loss_spd_batch_topk_batch.sum(dim=0)
+            loss_spd_sample_topk += loss_spd_sample_topk_batch.sum(dim=0)
+            n_samples_acc += batch.shape[0]
+
+            if n_samples_acc > print_every_counter:
+                print(f"n_samples_acc: {n_samples_acc}, n_samples: {n_samples}")
+                print_every_counter += 10_000
+
+    # Normalize the losses by the number of samples each feature was active for and n_features
+    loss_target /= feature_counts * spd_model.config.n_features
+    loss_spd_batch_topk /= feature_counts * spd_model.config.n_features
+    loss_spd_sample_topk /= feature_counts * spd_model.config.n_features
+
+    print(f"n_samples_acc: {n_samples_acc}, n_samples: {n_samples}")
+    return (
+        loss_target.detach().cpu(),
+        loss_spd_batch_topk.detach().cpu(),
+        loss_spd_sample_topk.detach().cpu(),
+    )
+
+
+def collect_average_components_per_feature(
+    model_fn: Callable[
+        [Float[Tensor, "batch n_instances n_features"]],
+        SPDOutputs,
+    ],
+    dataset: ResidualMLPDataset,
+    device: str,
+    n_features: int,
+    batch_size: int,
+    n_samples: int,
+    exactly_one_active: bool = True,
+) -> Float[Tensor, " n_features"]:
+    """Collect the average number of components active per feature when that feature is active."""
+    # Initialize counters
+    feature_active_count = torch.zeros(n_features, device=device)
+    component_active_count = torch.zeros(n_features, device=device)
+
+    for _ in tqdm(range(n_samples // batch_size)):
+        # Generate batch with no zero samples
+        batch = dataset._generate_multi_feature_batch(batch_size)
+        batch = batch.to(device)
+
+        # n_instances should be 1
+        assert batch.shape[1] == 1
+
+        # Get which components were active for each feature
+        topk_mask_raw: Float[Tensor, "batch n_instances k"] = model_fn(batch).topk_mask
+
+        batch: Float[Tensor, "batch n_features"] = batch.squeeze(1)
+        topk_mask: Float[Tensor, "batch k"] = topk_mask_raw.squeeze(1)
+
+        active_features_batch: Float[Tensor, "batch n_features"] = (batch != 0).float()
+
+        if exactly_one_active:
+            # Get the indices of samples where there is exactly one feature active
+            exactly_one_active_features_batch: Float[Tensor, "batch n_features"] = (
+                active_features_batch.sum(dim=-1) == 1
+            )
+            # Filter the batch to only include the samples where there is exactly one feature active
+            # batch = batch[exactly_one_active_features_batch]
+            active_features_batch = active_features_batch[exactly_one_active_features_batch]
+            topk_mask = topk_mask[exactly_one_active_features_batch]
+
+        # Get the number of components active for each sample
+        n_components_active: Float[Tensor, "batch 1"] = topk_mask.sum(dim=-1, keepdim=True)
+
+        # Multiply the number of components active by the number of features active
+        n_components_active_times_features_active_batch: Float[Tensor, "batch n_features"] = (
+            n_components_active * active_features_batch
+        )
+
+        # Sum over the batch
+        n_components_active_times_features_active = (
+            n_components_active_times_features_active_batch.sum(dim=0)
+        )
+
+        # Get the number of features that were active
+        n_features_active = active_features_batch.sum(dim=0)
+
+        # Add to the counters
+        feature_active_count += n_features_active
+        component_active_count += n_components_active_times_features_active
+
+    # Calculate average components per feature
+    avg_components = component_active_count / feature_active_count
+    return avg_components
+
+
 def analyze_per_feature_performance(
     model_fn: Callable[[Float[Tensor, "batch n_instances"]], Float[Tensor, "batch n_instances"]],
     model_config: ResidualMLPConfig | ResidualMLPSPDRankPenaltyConfig,
     device: str,
     batch_size: int = 128,
-    ax: plt.Axes | None = None,
-    label: str | None = None,
-    sorted_indices: torch.Tensor | None = None,
-    zorder: int = 0,
-) -> torch.Tensor:
+    target_model_fn: Callable[
+        [Float[Tensor, "batch n_instances"]], Float[Tensor, "batch n_instances"]
+    ]
+    | None = None,
+) -> Float[Tensor, " n_features"]:
     """For each feature, run a bunch where only that feature varies, then measure loss"""
     n_features = model_config.n_features
     n_instances = model_config.n_instances
-    features = torch.arange(model_config.n_features)
     losses = torch.zeros(model_config.n_features)
+    assert n_instances == 1, "Only one instance supported for now"
     label_fn = F.relu if model_config.act_fn_name == "relu" else F.gelu
     for i in range(model_config.n_features):
         batch_i = torch.zeros((batch_size, n_instances, n_features), device=device)
         batch_i[:, 0, i] = torch.linspace(-1, 1, batch_size)
-        labels_i = torch.zeros((batch_size, n_instances, n_features), device=device)
-        labels_i[:, 0, i] = batch_i[:, 0, i] + label_fn(batch_i[:, 0, i])
         model_output = model_fn(batch_i)
+        if target_model_fn is not None:
+            # Get the labels from the target model if it's provided
+            labels_i = target_model_fn(batch_i)
+        else:
+            labels_i = torch.zeros((batch_size, n_instances, n_features), device=device)
+            labels_i[:, 0, i] = batch_i[:, 0, i] + label_fn(batch_i[:, 0, i])
         loss = F.mse_loss(model_output, labels_i)
         losses[i] = loss.item()
     losses = losses.detach().cpu()
+    return losses
+
+
+def plot_per_feature_performance(
+    losses: Float[Tensor, " n_features"],
+    sorted_indices: Float[Tensor, " n_features"] | None = None,
+    ax: plt.Axes | None = None,
+    label: str | None = None,
+    color: str = "C0",
+    zorder: int = 0,
+    show_xticks: bool = False,
+):
     sorted_indices = sorted_indices if sorted_indices is not None else losses.argsort()
     # Plot the losses as bar chart with x labels corresponding to feature index
     if ax is None:
         fig, ax = plt.subplots(figsize=(15, 5))
-    ax.bar(features, losses[sorted_indices], alpha=0.5, label=label, zorder=zorder)
-    ax.set_xticks(features, features[sorted_indices].numpy(), fontsize=6, rotation=90)
-    ax.set_xlabel("Feature index")
-    ax.set_ylabel("Loss")
-    return sorted_indices
+    features = torch.arange(losses.shape[0])
+    ax.bar(features, losses[sorted_indices], label=label, zorder=zorder, color=color)
+    if show_xticks:
+        ax.set_xticks(features, features[sorted_indices].numpy(), fontsize=6, rotation=90)
+    else:
+        ax.set_xticks([])
+        ax.set_xticklabels([])
+    ax.set_xlabel("Input feature index (sorted by target model MSE)")
+    ax.set_ylabel("MSE between model output and raw labels")
 
 
 def plot_virtual_weights_target_spd(
