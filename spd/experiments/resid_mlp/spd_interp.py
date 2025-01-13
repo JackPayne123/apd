@@ -9,6 +9,8 @@ from tqdm import tqdm
 from spd.experiments.resid_mlp.models import ResidualMLPModel, ResidualMLPSPDRankPenaltyModel
 from spd.experiments.resid_mlp.plotting import (
     analyze_per_feature_performance,
+    collect_average_components_per_feature,
+    collect_per_feature_losses,
     get_feature_subnet_map,
     plot_feature_response_with_subnets,
     plot_per_feature_performance,
@@ -46,6 +48,7 @@ device = "cuda" if torch.cuda.is_available() else "cpu"
 print(f"Using device: {device}")
 set_seed(0)  # You can change this seed if needed
 
+use_data_from_files = False
 wandb_path = "wandb:spd-resid-mlp/runs/8qz1si1l"  # 1 layer (40k steps. 15 cross 98 mono) R6
 # wandb_path = "wandb:spd-resid-mlp/runs/cb0ej7hj"  # 2 layer 2LR4
 
@@ -114,22 +117,21 @@ dataset = ResidualMLPDataset(
     data_generation_type="at_least_zero_active",  # We will change this in the for loop
 )
 
-from spd.experiments.resid_mlp.plotting import collect_per_feature_losses
-
-loss_target, loss_spd_batch_topk, loss_spd_sample_topk = collect_per_feature_losses(
-    target_model=target_model,
-    spd_model=model,
-    config=config,
-    dataset=dataset,
-    device=device,
-    batch_size=config.batch_size,
-    n_samples=100_000,
-)
-# Save the losses to a file
-torch.save(
-    (loss_target, loss_spd_batch_topk, loss_spd_sample_topk),
-    out_dir / f"resid_mlp_losses_{n_layers}layers_{wandb_id}.pt",
-)
+if not use_data_from_files:
+    loss_target, loss_spd_batch_topk, loss_spd_sample_topk = collect_per_feature_losses(
+        target_model=target_model,
+        spd_model=model,
+        config=config,
+        dataset=dataset,
+        device=device,
+        batch_size=config.batch_size,
+        n_samples=100_000,
+    )
+    # Save the losses to a file
+    torch.save(
+        (loss_target, loss_spd_batch_topk, loss_spd_sample_topk),
+        out_dir / f"resid_mlp_losses_{n_layers}layers_{wandb_id}.pt",
+    )
 
 # Load the losses from a file
 loss_target, loss_spd_batch_topk, loss_spd_sample_topk = torch.load(
@@ -207,18 +209,18 @@ dataset = ResidualMLPDataset(
     data_generation_type="at_least_zero_active",  # We will change this in the for loop
 )
 
-from spd.experiments.resid_mlp.plotting import collect_average_components_per_feature
 
-avg_components = collect_average_components_per_feature(
-    model_fn=spd_model_fn,
-    dataset=dataset,
-    device=device,
-    n_features=model.config.n_features,
-    batch_size=config.batch_size,
-    n_samples=500_000,
-)
-# Save the avg_components to a file
-torch.save(avg_components.cpu(), out_dir / f"avg_components_{n_layers}layers_{wandb_id}.pt")
+if not use_data_from_files:
+    avg_components = collect_average_components_per_feature(
+        model_fn=spd_model_fn,
+        dataset=dataset,
+        device=device,
+        n_features=model.config.n_features,
+        batch_size=config.batch_size,
+        n_samples=500_000,
+    )
+    # Save the avg_components to a file
+    torch.save(avg_components.cpu(), out_dir / f"avg_components_{n_layers}layers_{wandb_id}.pt")
 
 # Load the avg_components from a file
 avg_components = torch.load(
