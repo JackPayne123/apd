@@ -269,7 +269,7 @@ def plot_sparse_feature_mse_line_plot(
         ax.bar(x_positions, heights, width, label=label, color=color)
 
     # Customize the plot
-    ax.set_ylabel("MSE between model output and true labels")
+    ax.set_ylabel("MSE w.r.t true labels")
     ax.set_xticks(np.arange(n_groups))
     xtick_labels = [xtick_label_map[gen_type] for gen_type in results]
     ax.set_xticklabels(xtick_labels)

@@ -1052,7 +1052,7 @@ def plot_per_feature_performance(
         ax.set_xticks([])
         ax.set_xticklabels([])
     ax.set_xlabel("Input feature index (sorted by target model MSE)")
-    ax.set_ylabel("MSE between model output and raw labels")
+    ax.set_ylabel("MSE w.r.t true labels")
 
 
 def plot_virtual_weights_target_spd(
