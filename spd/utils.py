@@ -639,6 +639,7 @@ class SparseFeatureDataset(
         device: str,
         data_generation_type: DataGenerationType = "at_least_zero_active",
         value_range: tuple[float, float] = (0.0, 1.0),
+        synced_inputs: list[tuple[int, int]] | None = None,
     ):
         self.n_instances = n_instances
         self.n_features = n_features
@@ -646,6 +647,7 @@ class SparseFeatureDataset(
         self.device = device
         self.data_generation_type = data_generation_type
         self.value_range = value_range
+        self.synced_inputs = synced_inputs
 
     def __len__(self) -> int:
         return 2**31
@@ -672,6 +674,23 @@ class SparseFeatureDataset(
             batch = self._generate_multi_feature_batch(batch_size)
         else:
             raise ValueError(f"Invalid generation type: {self.data_generation_type}")
+
+        if self.synced_inputs is not None:
+            # synced_inputs lists the indices in the final dimension that should by synced
+            for i, j in self.synced_inputs:
+                mask = torch.zeros_like(batch, dtype=torch.bool)
+                # First, get the samples for which there is a non-zero value for either i or j
+                non_zero_samples = (batch[..., [i, j]] != 0.0).any(dim=-1)
+                for idx in [i, j]:
+                    mask[..., idx] = non_zero_samples
+
+                # Now generate random values in value_range and apply them to the masked elements
+                max_val, min_val = self.value_range
+                random_values = torch.rand(
+                    batch_size, self.n_instances, self.n_features, device=self.device
+                )
+                random_values = random_values * (max_val - min_val) + min_val
+                batch = torch.where(mask, random_values, batch)
         return batch, batch.clone().detach()
 
     def _generate_n_feature_active_batch(
