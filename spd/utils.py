@@ -677,6 +677,7 @@ class SparseFeatureDataset(
 
         if self.synced_inputs is not None:
             # synced_inputs lists the indices in the final dimension that should by synced
+            # If one input is on, we force the other to be on (and draw new random values for each)
             for i, j in self.synced_inputs:
                 mask = torch.zeros_like(batch, dtype=torch.bool)
                 # First, get the samples for which there is a non-zero value for either i or j

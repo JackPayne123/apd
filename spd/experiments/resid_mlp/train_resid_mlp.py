@@ -36,6 +36,7 @@ class ResidMLPTrainConfig(BaseModel):
     loss_type: Literal["readoff", "resid"] = "readoff"
     use_trivial_label_coeffs: bool = False
     feature_probability: PositiveFloat
+    synced_inputs: list[tuple[int, int]] | None = None
     importance_val: float | None = None
     data_generation_type: Literal[
         "exactly_one_active", "exactly_two_active", "at_least_zero_active"
@@ -236,6 +237,7 @@ def run_train(config: ResidMLPTrainConfig, device: str) -> Float[Tensor, " n_ins
         label_fn_seed=config.label_fn_seed,
         label_coeffs=label_coeffs,
         data_generation_type=config.data_generation_type,
+        synced_inputs=config.synced_inputs,
     )
     dataloader = DatasetGeneratedDataLoader(dataset, batch_size=config.batch_size, shuffle=False)
 
@@ -281,6 +283,7 @@ if __name__ == "__main__":
         loss_type="readoff",
         use_trivial_label_coeffs=True,
         feature_probability=0.01,
+        # synced_inputs=[(0, 1), (2, 3)],
         importance_val=1,
         data_generation_type="at_least_zero_active",
         batch_size=2048,

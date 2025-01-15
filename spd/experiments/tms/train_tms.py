@@ -287,6 +287,7 @@ if __name__ == "__main__":
             device=device,
         ),
         feature_probability=0.05,
+        # feature_probability=0.02, # synced inputs
         batch_size=2048,
         steps=2000,
         seed=0,
@@ -294,7 +295,7 @@ if __name__ == "__main__":
         data_generation_type="at_least_zero_active",
         fixed_identity_hidden_layers=False,
         fixed_random_hidden_layers=False,
-        synced_inputs=[(0, 1), (2, 3)],
+        # synced_inputs=[(0, 1), (2, 3)],
     )
     set_seed(config.seed)
 
