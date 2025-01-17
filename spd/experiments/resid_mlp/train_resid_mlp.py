@@ -36,7 +36,7 @@ class ResidMLPTrainConfig(BaseModel):
     loss_type: Literal["readoff", "resid"] = "readoff"
     use_trivial_label_coeffs: bool = False
     feature_probability: PositiveFloat
-    synced_inputs: list[tuple[int, int]] | None = None
+    synced_inputs: list[list[int]] | None = None
     importance_val: float | None = None
     data_generation_type: Literal[
         "exactly_one_active", "exactly_two_active", "at_least_zero_active"
@@ -59,6 +59,11 @@ class ResidMLPTrainConfig(BaseModel):
             assert (
                 self.resid_mlp_config.n_features == self.resid_mlp_config.d_embed
             ), "n_features must equal d_embed if we are using an identity embedding matrix"
+        if self.synced_inputs is not None:
+            # Ensure that the synced_inputs are non-overlapping with eachother
+            all_indices = [item for sublist in self.synced_inputs for item in sublist]
+            if len(all_indices) != len(set(all_indices)):
+                raise ValueError("Synced inputs must be non-overlapping")
         return self
 
 
@@ -283,7 +288,7 @@ if __name__ == "__main__":
         loss_type="readoff",
         use_trivial_label_coeffs=True,
         feature_probability=0.01,
-        # synced_inputs=[(0, 1), (2, 3)],
+        # synced_inputs=[[0, 1], [2, 3]],
         importance_val=1,
         data_generation_type="at_least_zero_active",
         batch_size=2048,

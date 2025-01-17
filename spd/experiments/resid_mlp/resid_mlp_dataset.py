@@ -24,7 +24,7 @@ class ResidualMLPDataset(SparseFeatureDataset):
         data_generation_type: Literal[
             "exactly_one_active", "exactly_two_active", "at_least_zero_active"
         ] = "at_least_zero_active",
-        synced_inputs: list[tuple[int, int]] | None = None,
+        synced_inputs: list[list[int]] | None = None,
     ):
         """Sparse feature dataset for use in training a resid_mlp model or running SPD on it.
 
