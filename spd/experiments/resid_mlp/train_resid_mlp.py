@@ -288,7 +288,7 @@ if __name__ == "__main__":
         loss_type="readoff",
         use_trivial_label_coeffs=True,
         feature_probability=0.01,
-        # synced_inputs=[[0, 1], [2, 3]],
+        # synced_inputs=[[0, 1], [2, 3]], # synced inputs
         importance_val=1,
         data_generation_type="at_least_zero_active",
         batch_size=2048,

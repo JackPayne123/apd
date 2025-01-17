@@ -37,8 +37,8 @@ wandb_run_name_prefix: ""
 spd_type: rank_penalty
 unit_norm_matrices: false
 seed: 0
-# topk: 2.0
-topk: 0.8 # synced inputs
+topk: 2.0
+# topk: 0.8 # synced inputs
 batch_topk: true
 param_match_coeff: 1.0
 topk_recon_coeff: 10.0
@@ -59,8 +59,8 @@ task_config:
   k: 40
   bias_val: 0.0
   train_bias: false
-  # feature_probability: 0.05
-  feature_probability: 0.02 # synced inputs
+  feature_probability: 0.05
+  # feature_probability: 0.02 # synced inputs
   data_generation_type: "at_least_zero_active"
-  # pretrained_model_path: "wandb:spd-train-tms/runs/tmzweoqk"
-  pretrained_model_path: "wandb:spd-train-tms/runs/rkflpubi" # 40-10 synced inputs
+  pretrained_model_path: "wandb:spd-train-tms/runs/tmzweoqk"
+  # pretrained_model_path: "wandb:spd-train-tms/runs/rkflpubi" # synced inputs
