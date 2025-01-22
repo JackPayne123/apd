@@ -49,8 +49,11 @@ print(f"Using device: {device}")
 set_seed(0)  # You can change this seed if needed
 
 use_data_from_files = False
-wandb_path = "wandb:spd-resid-mlp/runs/8qz1si1l"  # 1 layer (40k steps. 15 cross 98 mono) R6
-# wandb_path = "wandb:spd-resid-mlp/runs/cb0ej7hj"  # 2 layer 2LR4
+wandb_path = (
+    "wandb:spd-resid-mlp/runs/8qz1si1l"  # 1 layer (40k steps. 15 cross 98 mono) R6 in paper
+)
+# wandb_path = "wandb:spd-resid-mlp/runs/9a639c6w"  # 1 layer topk=1
+# wandb_path = "wandb:spd-resid-mlp/runs/cb0ej7hj"  # 2 layer 2LR4 in paper
 
 wandb_id = wandb_path.split("/")[-1]
 
@@ -145,11 +148,12 @@ fig, axs = plt.subplots(2, 1, figsize=(15, 10))
 axs = np.array(axs)
 
 indices = loss_target.argsort()
+topk = int(config.topk) if config.topk is not None and config.topk == 1 else config.topk
 plot_per_feature_performance(
     losses=loss_spd_batch_topk,
     sorted_indices=indices,
     ax=axs[1],
-    label="APD (per-batch top-k=1.28)",
+    label=f"APD (per-batch top-k={topk})",
     color=color_map["apd_topk"],
 )
 
@@ -191,8 +195,10 @@ for ax in axs:
     ax.spines["right"].set_visible(False)
 
 fig.show()
-fig.savefig(out_dir / f"resid_mlp_per_feature_performance_{n_layers}layers.png")
-print(f"Saved figure to {out_dir / f'resid_mlp_per_feature_performance_{n_layers}layers.png'}")
+fig.savefig(out_dir / f"resid_mlp_per_feature_performance_{n_layers}layers_{wandb_id}.png")
+print(
+    f"Saved figure to {out_dir / f'resid_mlp_per_feature_performance_{n_layers}layers_{wandb_id}.png'}"
+)
 
 
 # %%
@@ -263,8 +269,10 @@ fig = plot_avg_components_scatter(
 )
 fig.show()
 # Save the figure
-fig.savefig(out_dir / f"resid_mlp_avg_components_scatter_{n_layers}layers.png")
-print(f"Saved figure to {out_dir / f'resid_mlp_avg_components_scatter_{n_layers}layers.png'}")
+fig.savefig(out_dir / f"resid_mlp_avg_components_scatter_{n_layers}layers_{wandb_id}.png")
+print(
+    f"Saved figure to {out_dir / f'resid_mlp_avg_components_scatter_{n_layers}layers_{wandb_id}.png'}"
+)
 
 # %%
 # Plot the main truncated feature contributions figure for the paper
@@ -278,8 +286,8 @@ fig = plot_spd_feature_contributions_truncated(
 fig.show()
 # Save the figure
 out_dir = REPO_ROOT / "spd/experiments/resid_mlp/out"
-fig.savefig(out_dir / f"resid_mlp_weights_{n_layers}layers.png")
-print(f"Saved figure to {out_dir / f'resid_mlp_weights_{n_layers}layers.png'}")
+fig.savefig(out_dir / f"resid_mlp_weights_{n_layers}layers_{wandb_id}.png")
+print(f"Saved figure to {out_dir / f'resid_mlp_weights_{n_layers}layers_{wandb_id}.png'}")
 
 # %%
 # Plot the feature contributions figure with crossterms for the appendix
@@ -293,8 +301,10 @@ fig = plot_spd_feature_contributions_truncated(
 fig.show()
 # Save the figure
 out_dir = REPO_ROOT / "spd/experiments/resid_mlp/out"
-fig.savefig(out_dir / f"resid_mlp_weights_{n_layers}layers_crossterms.png")
-print(f"Saved figure to {out_dir / f'resid_mlp_weights_{n_layers}layers_crossterms.png'}")
+fig.savefig(out_dir / f"resid_mlp_weights_{n_layers}layers_crossterms_{wandb_id}.png")
+print(
+    f"Saved figure to {out_dir / f'resid_mlp_weights_{n_layers}layers_crossterms_{wandb_id}.png'}"
+)
 
 # %%
 # Get the entries for the main loss table in the paper
@@ -345,8 +355,8 @@ label_map = [
 
 fig = plot_sparse_feature_mse_line_plot(results, label_map=label_map)
 fig.show()
-fig.savefig(out_dir / f"resid_mlp_mse_{n_layers}layers.png")
-print(f"Saved figure to {out_dir / f'resid_mlp_mse_{n_layers}layers.png'}")
+fig.savefig(out_dir / f"resid_mlp_mse_{n_layers}layers_{wandb_id}.png")
+print(f"Saved figure to {out_dir / f'resid_mlp_mse_{n_layers}layers_{wandb_id}.png'}")
 
 # %% Collect data for causal scrubbing-esque test
 
@@ -511,8 +521,10 @@ ax.spines["top"].set_visible(False)
 ax.spines["right"].set_visible(False)
 
 # fig.suptitle("Losses when scrubbing set of parameter components")
-fig.savefig(out_dir / f"resid_mlp_scrub_hist_{n_layers}layers.png", bbox_inches="tight", dpi=300)
-print(f"Saved figure to {out_dir / f'resid_mlp_scrub_hist_{n_layers}layers.png'}")
+fig.savefig(
+    out_dir / f"resid_mlp_scrub_hist_{n_layers}layers_{wandb_id}.png", bbox_inches="tight", dpi=300
+)
+print(f"Saved figure to {out_dir / f'resid_mlp_scrub_hist_{n_layers}layers_{wandb_id}.png'}")
 fig.show()
 
 
@@ -539,15 +551,14 @@ fig = plot_feature_response_with_subnets(
     color_map=color_map,
 )["feature_response_with_subnets"]
 fig.savefig(  # type: ignore
-    out_dir / f"feature_response_with_subnets_{feature_idx}_{n_layers}layers.png",
+    out_dir / f"feature_response_with_subnets_{feature_idx}_{n_layers}layers_{wandb_id}.png",
     bbox_inches="tight",
     dpi=300,
 )
 print(
-    f"Saved figure to {out_dir / f'feature_response_with_subnets_{feature_idx}_{n_layers}layers.png'}"
+    f"Saved figure to {out_dir / f'feature_response_with_subnets_{feature_idx}_{n_layers}layers_{wandb_id}.png'}"
 )
 plt.show()
-
 
 ################## End of current paper plots ##################
 
