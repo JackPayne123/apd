@@ -1,4 +1,5 @@
 # %%
+
 import matplotlib.collections as mc
 import matplotlib.pyplot as plt
 import numpy as np
@@ -221,10 +222,14 @@ def plot_combined(
 
 # %%
 device = "cuda" if torch.cuda.is_available() else "cpu"
-# path = "wandb:spd-tms/runs/bft0pgi8"  # Old 5-2 run with attributions from spd model
+path = "wandb:spd-tms/runs/bft0pgi8"  # Old 5-2 run with attributions from spd model # paper run
+instance_idx = 0
 # path = "wandb:spd-tms/runs/sv9padmo"  # 10-5
 # path = "wandb:spd-tms/runs/vt0i4a22"  # 20-5
-path = "wandb:spd-tms/runs/tyo4serm"  # 40-10 with topk=2, topk_recon_coeff=1e1, schatten_coeff=15 # Using in paper
+# path = "wandb:spd-tms/runs/tyo4serm"  # 40-10 with topk=2, topk_recon_coeff=1e1, schatten_coeff=15# old paper run
+# path = "wandb:spd-tms/runs/9zzp2s68"  # 40-10 with topk=2, topk_recon_coeff=1e1, schatten_coeff=20
+# path = "wandb:spd-tms/runs/08no00iq"  # 40-10 with topk=1, topk_recon_coeff=1e1, schatten_coeff=20# new paper run
+# instance_idx = 2
 # path = "wandb:spd-tms/runs/014t4f9n"  # 40-10 with topk=1, topk_recon_coeff=1e1, schatten_coeff=1e1
 
 run_id = path.split("/")[-1]
@@ -239,15 +244,76 @@ target_model, target_model_train_config_dict = TMSModel.from_pretrained(
 )
 
 out_dir = REPO_ROOT / "spd/experiments/tms/out"
-# %%
-target_weights = target_model.W.detach().cpu()
 
-fig = plot_combined(subnets, target_weights, n_instances=1)
-fig.savefig(out_dir / f"tms_combined_diagram_{run_id}.png", bbox_inches="tight", dpi=400)
-print(f"Saved figure to {out_dir / f'tms_combined_diagram_{run_id}.png'}")
 
 # %%
-# Get the entries for the main loss table in the paper
+# Max cosine similarity between subnets and target model
+def plot_max_cosine_sim(max_cosine_sim: Float[Tensor, " n_features"]) -> plt.Figure:
+    fig, ax = plt.subplots()
+    # Make a bar plot of the max cosine similarity for each feature
+    ax.bar(range(max_cosine_sim.shape[0]), max_cosine_sim.cpu().detach().numpy())
+    # Add a grey horizontal line at 1
+    ax.axhline(1, color="grey", linestyle="--")
+    ax.set_xlabel("Input feature index")
+    ax.set_ylabel("Max cosine similarity")
+    # Remove top and right spines
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+    return fig
+
+
+# Only consider the second instance (cherry picked to the best out of 3)
+max_cosine_sim = (
+    torch.einsum(
+        "k f h, f h -> k f",
+        subnets[instance_idx] / torch.norm(subnets[instance_idx], dim=-1, keepdim=True),
+        target_model.W[instance_idx]
+        / torch.norm(target_model.W[instance_idx], dim=-1, keepdim=True),
+    )
+    .max(dim=0)
+    .values
+)
+print(f"Max cosine similarity:\n{max_cosine_sim}")
+print(f"Mean max cosine similarity: {max_cosine_sim.mean()}")
+print(f"std max cosine similarity: {max_cosine_sim.std()}")
+
+# Dot products show a little bit of shrinkage
+max_dot_prod = (
+    torch.einsum("k f h, f h -> k f", subnets[instance_idx], target_model.W[instance_idx])
+    .max(dim=0)
+    .values
+)
+print(f"Max dot product:\n{max_dot_prod}")
+print(f"Mean max dot product: {max_dot_prod.mean()}")
+print(f"std max dot product: {max_dot_prod.std()}")
+
+# Ideal dot products W^T W
+ideal_dot_prod = torch.einsum(
+    "f h, f h -> f", target_model.W[instance_idx], target_model.W[instance_idx]
+)
+print(f"Ideal dot product:\n{ideal_dot_prod}")
+print(f"Mean ideal dot product: {ideal_dot_prod.mean()}")
+print(f"std ideal dot product: {ideal_dot_prod.std()}")
+
+# Mean bias
+print(f"Mean bias: {target_model.b_final[instance_idx].mean()}")
+
+
+fig = plot_max_cosine_sim(max_cosine_sim)
+# Save figure
+fig.savefig(out_dir / f"tms_max_cosine_sim_{run_id}.png", bbox_inches="tight", dpi=400)
+print(f"Saved figure to {out_dir / f'tms_max_cosine_sim_{run_id}.png'}")
+# %%
+# Only plot if the hidden dimension is 2
+if target_model.config.n_hidden == 2:
+    # We only look at the first instance
+    fig = plot_combined(subnets, target_model.W.detach().cpu(), n_instances=1)
+    fig.savefig(out_dir / f"tms_combined_diagram_{run_id}.png", bbox_inches="tight", dpi=400)
+    print(f"Saved figure to {out_dir / f'tms_combined_diagram_{run_id}.png'}")
+
+# %%
+# This doesn't work for TMS.
+# # Get the entries for the main loss table in the paper
 dataset = SparseFeatureDataset(
     n_instances=target_model.config.n_instances,
     n_features=target_model.config.n_features,
