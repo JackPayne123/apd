@@ -1,4 +1,6 @@
 # %%
+from pathlib import Path
+
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
@@ -45,11 +47,11 @@ print(f"Using device: {device}")
 set_seed(0)  # You can change this seed if needed
 
 use_data_from_files = True
-# wandb_path = (
-#     "wandb:spd-resid-mlp/runs/8qz1si1l"  # 1 layer (40k steps. 15 cross 98 mono) R6 in paper
-# )
+wandb_path = (
+    "wandb:spd-resid-mlp/runs/8qz1si1l"  # 1 layer (40k steps. 15 cross 98 mono) R6 in paper
+)
 # wandb_path = "wandb:spd-resid-mlp/runs/9a639c6w"  # 1 layer topk=1
-wandb_path = "wandb:spd-resid-mlp/runs/cb0ej7hj"  # 2 layer 2LR4 in paper
+# wandb_path = "wandb:spd-resid-mlp/runs/cb0ej7hj"  # 2 layer 2LR4 in paper
 # wandb_path = "wandb:spd-resid-mlp/runs/wbeghftm"  # 2 layer topk=1
 # wandb_path = "wandb:spd-resid-mlp/runs/c1q3bs6f"  # 2 layer m=1
 
@@ -118,7 +120,8 @@ dataset = ResidualMLPDataset(
     data_generation_type="at_least_zero_active",  # We will change this in the for loop
 )
 
-if not use_data_from_files:
+per_feature_losses_path = Path(out_dir) / f"resid_mlp_losses_{n_layers}layers_{wandb_id}.pt"
+if not use_data_from_files or not per_feature_losses_path.exists():
     loss_target, loss_spd_batch_topk, loss_spd_sample_topk = collect_per_feature_losses(
         target_model=target_model,
         spd_model=model,
@@ -131,13 +134,12 @@ if not use_data_from_files:
     # Save the losses to a file
     torch.save(
         (loss_target, loss_spd_batch_topk, loss_spd_sample_topk),
-        out_dir / f"resid_mlp_losses_{n_layers}layers_{wandb_id}.pt",
+        per_feature_losses_path,
     )
 
 # Load the losses from a file
 loss_target, loss_spd_batch_topk, loss_spd_sample_topk = torch.load(
-    out_dir / f"resid_mlp_losses_{n_layers}layers_{wandb_id}.pt",
-    weights_only=True,
+    per_feature_losses_path, weights_only=True, map_location="cpu"
 )
 
 # %%
@@ -220,7 +222,8 @@ dataset = ResidualMLPDataset(
 )
 
 
-if not use_data_from_files:
+avg_components_path = Path(out_dir) / f"avg_components_{n_layers}layers_{wandb_id}.pt"
+if not use_data_from_files or not avg_components_path.exists():
     avg_components = collect_average_components_per_feature(
         model_fn=spd_model_fn,
         dataset=dataset,
@@ -230,14 +233,10 @@ if not use_data_from_files:
         n_samples=500_000,
     )
     # Save the avg_components to a file
-    torch.save(avg_components.cpu(), out_dir / f"avg_components_{n_layers}layers_{wandb_id}.pt")
+    torch.save(avg_components.cpu(), avg_components_path)
 
 # Load the avg_components from a file
-avg_components = torch.load(
-    out_dir / f"avg_components_{n_layers}layers_{wandb_id}.pt",
-    weights_only=True,
-    map_location=device,
-)
+avg_components = torch.load(avg_components_path, map_location=device, weights_only=True)
 
 # Get the loss of the spd model w.r.t the target model
 fn_without_batch_topk = lambda batch: spd_model_fn(
