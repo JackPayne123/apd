@@ -222,14 +222,14 @@ def plot_combined(
 
 # %%
 device = "cuda" if torch.cuda.is_available() else "cpu"
-path = "wandb:spd-tms/runs/bft0pgi8"  # Old 5-2 run with attributions from spd model # paper run
-instance_idx = 0
+# path = "wandb:spd-tms/runs/bft0pgi8"  # Old 5-2 run with attributions from spd model # paper run
+# instance_idx = 0
 # path = "wandb:spd-tms/runs/sv9padmo"  # 10-5
 # path = "wandb:spd-tms/runs/vt0i4a22"  # 20-5
 # path = "wandb:spd-tms/runs/tyo4serm"  # 40-10 with topk=2, topk_recon_coeff=1e1, schatten_coeff=15# old paper run
 # path = "wandb:spd-tms/runs/9zzp2s68"  # 40-10 with topk=2, topk_recon_coeff=1e1, schatten_coeff=20
-# path = "wandb:spd-tms/runs/08no00iq"  # 40-10 with topk=1, topk_recon_coeff=1e1, schatten_coeff=20# new paper run
-# instance_idx = 2
+path = "wandb:spd-tms/runs/08no00iq"  # 40-10 with topk=1, topk_recon_coeff=1e1, schatten_coeff=20# new paper run
+instance_idx = 2
 # path = "wandb:spd-tms/runs/014t4f9n"  # 40-10 with topk=1, topk_recon_coeff=1e1, schatten_coeff=1e1
 
 run_id = path.split("/")[-1]
@@ -262,47 +262,40 @@ def plot_max_cosine_sim(max_cosine_sim: Float[Tensor, " n_features"]) -> plt.Fig
     return fig
 
 
-# Only consider the second instance (cherry picked to the best out of 3)
-max_cosine_sim = (
-    torch.einsum(
-        "k f h, f h -> k f",
-        subnets[instance_idx] / torch.norm(subnets[instance_idx], dim=-1, keepdim=True),
-        target_model.W[instance_idx]
-        / torch.norm(target_model.W[instance_idx], dim=-1, keepdim=True),
-    )
-    .max(dim=0)
-    .values
+cosine_sims = torch.einsum(
+    "k f h, f h -> k f",
+    subnets[instance_idx] / torch.norm(subnets[instance_idx], dim=-1, keepdim=True),
+    target_model.W[instance_idx] / torch.norm(target_model.W[instance_idx], dim=-1, keepdim=True),
 )
+max_cosine_sim = cosine_sims.max(dim=0).values
 print(f"Max cosine similarity:\n{max_cosine_sim}")
 print(f"Mean max cosine similarity: {max_cosine_sim.mean()}")
 print(f"std max cosine similarity: {max_cosine_sim.std()}")
 
-# Dot products show a little bit of shrinkage
-max_dot_prod = (
-    torch.einsum("k f h, f h -> k f", subnets[instance_idx], target_model.W[instance_idx])
-    .max(dim=0)
-    .values
-)
-print(f"Max dot product:\n{max_dot_prod}")
-print(f"Mean max dot product: {max_dot_prod.mean()}")
-print(f"std max dot product: {max_dot_prod.std()}")
 
-# Ideal dot products W^T W
-ideal_dot_prod = torch.einsum(
-    "f h, f h -> f", target_model.W[instance_idx], target_model.W[instance_idx]
+# Get the subnet weights at the max cosine similarity
+subnet_weights_at_max_cosine_sim: Float[Tensor, "n_features n_hidden"] = subnets[
+    instance_idx, cosine_sims.max(dim=0).indices, torch.arange(target_model.config.n_features)
+]
+# Get the norm of the target model weights
+target_model_weights_norm = torch.norm(target_model.W[instance_idx], dim=-1, keepdim=True)
+# Get the norm of subnet_weights_at_max_cosine_sim
+subnet_weights_at_max_cosine_sim_norm = torch.norm(
+    subnet_weights_at_max_cosine_sim, dim=-1, keepdim=True
 )
-print(f"Ideal dot product:\n{ideal_dot_prod}")
-print(f"Mean ideal dot product: {ideal_dot_prod.mean()}")
-print(f"std ideal dot product: {ideal_dot_prod.std()}")
+# Divide the subnet weights by the target model weights ratio
+l2_ratio = subnet_weights_at_max_cosine_sim_norm / target_model_weights_norm
+print(f"Mean L2 ratio: {l2_ratio.mean()}")
+print(f"std L2 ratio: {l2_ratio.std()}")
 
 # Mean bias
 print(f"Mean bias: {target_model.b_final[instance_idx].mean()}")
 
 
-fig = plot_max_cosine_sim(max_cosine_sim)
-# Save figure
-fig.savefig(out_dir / f"tms_max_cosine_sim_{run_id}.png", bbox_inches="tight", dpi=400)
-print(f"Saved figure to {out_dir / f'tms_max_cosine_sim_{run_id}.png'}")
+# fig = plot_max_cosine_sim(max_cosine_sim)
+# # Save figure
+# fig.savefig(out_dir / f"tms_max_cosine_sim_{run_id}.png", bbox_inches="tight", dpi=400)
+# print(f"Saved figure to {out_dir / f'tms_max_cosine_sim_{run_id}.png'}")
 # %%
 # Only plot if the hidden dimension is 2
 if target_model.config.n_hidden == 2:
