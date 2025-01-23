@@ -19,15 +19,10 @@ from spd.experiments.resid_mlp.plotting import (
 )
 from spd.experiments.resid_mlp.resid_mlp_dataset import ResidualMLPDataset
 from spd.experiments.resid_mlp.resid_mlp_decomposition import plot_subnet_categories
-from spd.plotting import (
-    collect_sparse_dataset_mse_losses,
-    plot_sparse_feature_mse_line_plot,
-)
 from spd.run_spd import ResidualMLPTaskConfig
 from spd.settings import REPO_ROOT
 from spd.utils import (
     COLOR_PALETTE,
-    DataGenerationType,
     SPDOutputs,
     run_spd_forward_pass,
     set_seed,
@@ -50,11 +45,11 @@ print(f"Using device: {device}")
 set_seed(0)  # You can change this seed if needed
 
 use_data_from_files = True
-wandb_path = (
-    "wandb:spd-resid-mlp/runs/8qz1si1l"  # 1 layer (40k steps. 15 cross 98 mono) R6 in paper
-)
+# wandb_path = (
+#     "wandb:spd-resid-mlp/runs/8qz1si1l"  # 1 layer (40k steps. 15 cross 98 mono) R6 in paper
+# )
 # wandb_path = "wandb:spd-resid-mlp/runs/9a639c6w"  # 1 layer topk=1
-# wandb_path = "wandb:spd-resid-mlp/runs/cb0ej7hj"  # 2 layer 2LR4 in paper
+wandb_path = "wandb:spd-resid-mlp/runs/cb0ej7hj"  # 2 layer 2LR4 in paper
 # wandb_path = "wandb:spd-resid-mlp/runs/wbeghftm"  # 2 layer topk=1
 # wandb_path = "wandb:spd-resid-mlp/runs/c1q3bs6f"  # 2 layer m=1
 
@@ -302,74 +297,6 @@ out_dir = REPO_ROOT / "spd/experiments/resid_mlp/out"
 fig.savefig(out_dir / f"resid_mlp_weights_{n_layers}layers_{wandb_id}.png")
 print(f"Saved figure to {out_dir / f'resid_mlp_weights_{n_layers}layers_{wandb_id}.png'}")
 
-# %%
-# Plot the feature contributions figure with crossterms for the appendix
-fig = plot_spd_feature_contributions_truncated(
-    spd_model=model,
-    target_model=target_model,
-    device=device,
-    n_features=20,
-    include_crossterms=True,
-)
-fig.show()
-# Save the figure
-out_dir = REPO_ROOT / "spd/experiments/resid_mlp/out"
-fig.savefig(out_dir / f"resid_mlp_weights_{n_layers}layers_crossterms_{wandb_id}.png")
-print(
-    f"Saved figure to {out_dir / f'resid_mlp_weights_{n_layers}layers_crossterms_{wandb_id}.png'}"
-)
-
-# %%
-# Get the entries for the main loss table in the paper
-dataset = ResidualMLPDataset(
-    n_instances=model.config.n_instances,
-    n_features=model.config.n_features,
-    feature_probability=config.task_config.feature_probability,
-    device=device,
-    calc_labels=True,
-    label_type=target_model_train_config_dict["label_type"],
-    act_fn_name=target_model.config.act_fn_name,
-    label_coeffs=target_label_coeffs,
-    data_generation_type="at_least_zero_active",  # We will change this in the for loop
-)
-gen_types: list[DataGenerationType] = [
-    "at_least_zero_active",
-    "exactly_one_active",
-    "exactly_two_active",
-    "exactly_three_active",
-    "exactly_four_active",
-]
-assert config.topk is not None
-results = collect_sparse_dataset_mse_losses(
-    dataset=dataset,
-    target_model=target_model,
-    spd_model=model,
-    batch_size=10000,  # Similar to 1k. Only do 10k on a gpu, slow otherwise
-    device=device,
-    topk=config.topk,
-    attribution_type=config.attribution_type,
-    batch_topk=config.batch_topk,
-    distil_from_target=config.distil_from_target,
-    gen_types=gen_types,
-)
-
-# Convert all results to floats
-results = {
-    gen_type: {k: float(v.detach().cpu()) for k, v in results[gen_type].items()}
-    for gen_type in gen_types
-}
-
-# Create line plot of results
-label_map = [
-    ("target", "Target model", color_map["target"]),
-    ("spd", "APD model", color_map["apd_topk"]),
-    ("baseline_monosemantic", "Monosemantic baseline", color_map["baseline_monosemantic"]),
-]
-
-fig = plot_sparse_feature_mse_line_plot(results, label_map=label_map)
-fig.show()
-fig.savefig(out_dir / f"resid_mlp_mse_{n_layers}layers_{wandb_id}.png")
-print(f"Saved figure to {out_dir / f'resid_mlp_mse_{n_layers}layers_{wandb_id}.png'}")
 
 # %% Collect data for causal scrubbing-esque test
 
@@ -544,7 +471,6 @@ fig.show()
 # %% Linearity test: Enable one subnet after the other
 # candlestick plot
 
-
 # # Dictionary feature_idx -> subnet_idx
 subnet_indices = get_feature_subnet_map(top1_model_fn, device, model.config, instance_idx=0)
 
@@ -572,237 +498,3 @@ print(
     f"Saved figure to {out_dir / f'feature_response_with_subnets_{feature_idx}_{n_layers}layers_{wandb_id}.png'}"
 )
 plt.show()
-
-################## End of current paper plots ##################
-
-
-# Note, the plot that calculates the MSE was deleted. You should use the code at the same path
-# in feature/init-alive-subnets.
-
-# %%
-# dataset = ResidualMLPDataset(
-#     n_instances=model.config.n_instances,
-#     n_features=model.config.n_features,
-#     feature_probability=config.task_config.feature_probability,
-#     device=device,
-#     calc_labels=False,  # Our labels will be the output of the target model
-#     data_generation_type=config.task_config.data_generation_type,
-# )
-# if config.task_config.data_generation_type == "at_least_zero_active":
-#     # In the future this will be merged into generate_batch
-#     batch = dataset._generate_multi_feature_batch_no_zero_samples(config.batch_size, buffer_ratio=2)
-#     if isinstance(dataset, ResidualMLPDataset) and dataset.label_fn is not None:
-#         labels = dataset.label_fn(batch)
-#     else:
-#         labels = batch.clone().detach()
-# else:
-#     batch, labels = dataset.generate_batch(config.batch_size)
-# batch = batch.to(device)
-# labels = labels.to(device)
-
-# target_model_output, _, _ = target_model(batch)
-
-# assert config.topk is not None
-# spd_outputs = run_spd_forward_pass(
-#     spd_model=model,
-#     target_model=target_model,
-#     input_array=batch,
-#     attribution_type=config.attribution_type,
-#     batch_topk=config.batch_topk,
-#     topk=config.topk,
-#     distil_from_target=config.distil_from_target,
-# )
-# topk_recon_loss = calc_recon_mse(
-#     spd_outputs.spd_topk_model_output, target_model_output, has_instance_dim=True
-# )
-# print(f"Topk recon loss: {np.array(topk_recon_loss.detach().cpu())}")
-
-# # Print param shapes for model
-# for name, param in model.named_parameters():
-#     print(f"{name}: {param.shape}")
-
-# if torch.allclose(model.W_U.data, model.W_E.data.transpose(-2, -1)):
-#     print("W_E and W_U are tied")
-# else:
-#     print("W_E and W_U are not tied")
-
-
-# # %% Measure polysemanticity:
-
-# # Dictionary feature_idx -> subnet_idx
-# subnet_indices = get_feature_subnet_map(top1_model_fn, device, model.config, instance_idx=0)
-
-# duplicity = {}  # subnet_idx -> number of features that use it
-# for subnet_idx in range(model.config.k):
-#     duplicity[subnet_idx] = len([f for f, s in subnet_indices.items() if s == subnet_idx])
-# duplicity_vals = np.array(list(duplicity.values()))
-# fig, ax = plt.subplots(figsize=(15, 5))
-# int_bins: list[int] = np.arange(0, 10, 1).tolist()
-# ax.hist(duplicity_vals, bins=int_bins)
-# counts = np.bincount(duplicity_vals)
-# for i, count in enumerate(counts):
-#     if i == 0:
-#         name = "Dead"
-#     elif i == 1:
-#         name = "Monosemantic: "
-#     elif i == 2:
-#         name = "Duosemantic: "
-#     else:
-#         name = f"{i}-semantic: "
-#     ax.text(i + 0.5, count, name + str(count), ha="center", va="bottom")
-# fig.suptitle(f"Polysemanticity of model: {wandb_path}")
-# fig.show()
-
-# %% "Forgetting"-style test for Lee. Let's say we want to ablate performance for all odd features,
-# while preserving performance for even features.
-
-# Currently broken
-
-# # target_model_train_config_dict
-# test_dataset = ResidualMLPDataset(
-#     n_instances=model.config.n_instances,
-#     n_features=model.config.n_features,
-#     feature_probability=config.task_config.feature_probability,
-#     device=device,
-#     calc_labels=True,  # Our labels will be the output of the target model
-#     label_type=target_model_train_config_dict["label_type"],
-#     act_fn_name=target_model_train_config_dict["resid_mlp_config"]["act_fn_name"],
-#     label_fn_seed=target_model_train_config_dict["label_fn_seed"],
-#     label_coeffs=target_label_coeffs,
-#     data_generation_type="at_least_zero_active",
-# )
-# batch, labels = test_dataset.generate_batch(batch_size=1000)
-# batch = batch.to(device)
-# labels = labels.to(device)
-# instance_idx = 0
-
-# # Dictionary feature_idx -> subnet_idx
-# subnet_indices = get_feature_subnet_map(top1_model_fn, device, model.config, instance_idx=0)
-
-# subnets_corresponding_to_even_features = [
-#     subnet_indices[f] for f in range(model.config.n_features) if f % 2 == 0
-# ]
-# topk_mask = torch.zeros_like(batch)
-# for subnet_idx in subnets_corresponding_to_even_features:
-#     topk_mask[:, instance_idx, subnet_idx] = 1
-
-# out_spd = spd_model_fn(batch)
-
-# out = top1_model_fn(batch, topk_mask=topk_mask)
-# out_target = target_model_fn(batch)
-# out_ablated = out.spd_topk_model_output
-# label_loss_target = (out_target - labels) ** 2
-# label_loss_spd = (out_spd - labels) ** 2
-# label_loss_ablated = (out_ablated - labels) ** 2
-# target_loss_spd = (out_target - out_spd) ** 2
-# target_loss_ablated = (out_target - out_ablated) ** 2
-# # Find samples in batch that contain only odd features
-# # odd_features = [i for i in range(model.config.n_features) if i % 2 == 1]
-# # even_features = [i for i in range(model.config.n_features) if i % 2 == 0]
-# odd_samples = torch.where(batch[:, instance_idx, 0::2].sum(dim=-1) != 0)[0].cpu().detach()
-# even_samples = torch.where(batch[:, instance_idx, 1::2].sum(dim=-1) != 0)[0].cpu().detach()
-# # Exclude samples containing both odd and even features
-
-# both_odd_and_even_samples = np.intersect1d(odd_samples.numpy(), even_samples.numpy())
-# only_odd_samples = np.setdiff1d(odd_samples.numpy(), both_odd_and_even_samples)
-# only_even_samples = np.setdiff1d(even_samples.numpy(), both_odd_and_even_samples)
-
-# label_loss_target_odd = (
-#     label_loss_target[only_odd_samples].mean(dim=-1).flatten().detach().cpu().numpy()
-# )  # noqa: E501
-# label_loss_spd_odd = label_loss_spd[only_odd_samples].mean(dim=-1).flatten().detach().cpu().numpy()  # noqa: E501
-# label_loss_ablated_odd = (
-#     label_loss_ablated[only_odd_samples].mean(dim=-1).flatten().detach().cpu().numpy()
-# )  # noqa: E501
-# label_loss_target_even = (
-#     label_loss_target[only_even_samples].mean(dim=-1).flatten().detach().cpu().numpy()
-# )  # noqa: E501
-# label_loss_spd_even = (
-#     label_loss_spd[only_even_samples].mean(dim=-1).flatten().detach().cpu().numpy()
-# )  # noqa: E501
-# label_loss_ablated_even = (
-#     label_loss_ablated[only_even_samples].mean(dim=-1).flatten().detach().cpu().numpy()
-# )  # noqa: E501
-# target_loss_spd_odd = (
-#     target_loss_spd[only_odd_samples].mean(dim=-1).flatten().detach().cpu().numpy()
-# )  # noqa: E501
-# target_loss_spd_even = (
-#     target_loss_spd[only_even_samples].mean(dim=-1).flatten().detach().cpu().numpy()
-# )  # noqa: E501
-# target_loss_ablated_odd = (
-#     target_loss_ablated[only_odd_samples].mean(dim=-1).flatten().detach().cpu().numpy()
-# )  # noqa: E501
-# target_loss_ablated_even = (
-#     target_loss_ablated[only_even_samples].mean(dim=-1).flatten().detach().cpu().numpy()
-# )  # noqa: E501
-# target_loss_target_odd = torch.zeros_like(torch.tensor(target_loss_ablated_odd)).numpy()
-# target_loss_target_even = torch.zeros_like(torch.tensor(target_loss_ablated_even)).numpy()
-# # Boxplot chart
-# # Create a dataframe for seaborn
-# data = pd.DataFrame(
-#     {
-#         "Label Loss": np.concatenate(
-#             [
-#                 label_loss_target_odd,
-#                 label_loss_spd_odd,
-#                 label_loss_ablated_odd,
-#                 label_loss_target_even,
-#                 label_loss_spd_even,
-#                 label_loss_ablated_even,
-#             ]
-#         ),
-#         "Target Loss": np.concatenate(
-#             [
-#                 target_loss_target_odd,
-#                 target_loss_spd_odd,
-#                 target_loss_ablated_odd,
-#                 target_loss_target_even,
-#                 target_loss_spd_even,
-#                 target_loss_ablated_even,
-#             ]
-#         ),
-#         "Model": np.repeat(
-#             ["Target", "APD", "Ablated", "Target", "APD", "Ablated"],
-#             [
-#                 len(label_loss_target_odd),
-#                 len(label_loss_spd_odd),
-#                 len(label_loss_ablated_odd),
-#                 len(label_loss_target_even),
-#                 len(label_loss_spd_even),
-#                 len(label_loss_ablated_even),
-#             ],
-#         ),
-#         "Sample Type": np.repeat(
-#             ["Odd", "Odd", "Odd", "Even", "Even", "Even"],
-#             [
-#                 len(label_loss_target_odd),
-#                 len(label_loss_ablated_odd),
-#                 len(label_loss_spd_odd),
-#                 len(label_loss_target_even),
-#                 len(label_loss_ablated_even),
-#                 len(label_loss_spd_even),
-#             ],
-#         ),
-#     }
-# )
-
-# fig, axes = plt.subplots(ncols=2, figsize=(10, 3))
-# axes = np.atleast_1d(axes)  # type: ignore
-# ax = axes[0]
-# sns.boxplot(data=data, x="Sample Type", y="Label Loss", hue="Model", ax=ax)
-# ax.set_yscale("log")
-# ax.set_ylim(bottom=1e-5)
-# ax.set_title("Label loss")
-# ax.set_ylabel("")
-# # ax.axhline(y=loss_naive, color="k", linestyle="--", label="Monosemantic neuron solution", alpha=0.5)
-# ax.legend(bbox_to_anchor=(0.5, -0.05), loc="upper center", bbox_transform=fig.transFigure, ncol=3)
-
-# ax = axes[1]
-# sns.boxplot(data=data, x="Sample Type", y="Target Loss", hue="Model", ax=ax)
-# ax.set_yscale("log")
-# ax.set_ylim(bottom=1e-6)
-# ax.set_title("Target loss")
-# ax.set_ylabel("")
-# ax.legend().remove()
-# fig.savefig("ablation_story.png", bbox_inches="tight", dpi=300)
-# fig.show()
