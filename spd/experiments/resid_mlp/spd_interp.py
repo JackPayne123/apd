@@ -49,12 +49,14 @@ device = "cuda" if torch.cuda.is_available() else "cpu"
 print(f"Using device: {device}")
 set_seed(0)  # You can change this seed if needed
 
-use_data_from_files = False
+use_data_from_files = True
 wandb_path = (
     "wandb:spd-resid-mlp/runs/8qz1si1l"  # 1 layer (40k steps. 15 cross 98 mono) R6 in paper
 )
 # wandb_path = "wandb:spd-resid-mlp/runs/9a639c6w"  # 1 layer topk=1
 # wandb_path = "wandb:spd-resid-mlp/runs/cb0ej7hj"  # 2 layer 2LR4 in paper
+# wandb_path = "wandb:spd-resid-mlp/runs/wbeghftm"  # 2 layer topk=1
+# wandb_path = "wandb:spd-resid-mlp/runs/c1q3bs6f"  # 2 layer m=1
 
 wandb_id = wandb_path.split("/")[-1]
 
@@ -182,7 +184,8 @@ plot_per_feature_performance(
     color=color_map["target"],
 )
 
-axs[0].legend(loc="upper left")
+axs[0].legend(loc="upper left", fontsize=12)
+axs[1].legend(loc="upper left", fontsize=12)
 
 # Use the max y-axis limit for both subplots
 max_ylim = max(axs[0].get_ylim()[1], axs[1].get_ylim()[1])
@@ -194,6 +197,11 @@ axs[1].set_ylim(0, max_ylim)
 for ax in axs:
     ax.spines["top"].set_visible(False)
     ax.spines["right"].set_visible(False)
+
+# # Increase the fontsize of the xlabel and ylabel
+for ax in axs:
+    ax.xaxis.label.set_fontsize(12)
+    ax.yaxis.label.set_fontsize(12)
 
 fig.show()
 fig.savefig(out_dir / f"resid_mlp_per_feature_performance_{n_layers}layers_{wandb_id}.png")
@@ -262,6 +270,10 @@ def plot_avg_components_scatter(
     ax.set_ylabel("Average number of active components")
     ax.spines["top"].set_visible(False)
     ax.spines["right"].set_visible(False)
+
+    # Increase the fontsize of the xlabel and ylabel
+    ax.xaxis.label.set_fontsize(12)
+    ax.yaxis.label.set_fontsize(12)
     return fig
 
 
