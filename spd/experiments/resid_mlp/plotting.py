@@ -1267,7 +1267,7 @@ def plot_feature_response_with_subnets(
         }
 
     if ax is None:
-        _, ax = plt.subplots(constrained_layout=True, figsize=(15, 5))
+        _, ax = plt.subplots(constrained_layout=True, figsize=(10, 5))
     fig = ax.figure
 
     batch = torch.zeros(batch_size, n_instances, n_features, device=device)
