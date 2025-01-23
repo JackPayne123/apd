@@ -740,13 +740,21 @@ def plot_spd_feature_contributions_truncated(
     axes1[0].set_title("Target model")
     axes1[0].set_xticks(range(n_features))  # Ensure all xticks have labels
 
-    # Second plot: SPD model (without cross terms)
-    spd_relu_conns: Float[Tensor, "n_features d_mlp"] = spd_calculate_diag_relu_conns(
-        spd_model, device, k_select="sum_nocrossterms"
-    )[0, :n_features, :]
+    # Second plot: SPD model (without cross terms max k)
+    # Previously we would just use no_crossterms which sums over all k
+    # spd_relu_conns: Float[Tensor, "n_features d_mlp"] = spd_calculate_diag_relu_conns(
+    #     spd_model, device, k_select="sum_nocrossterms"
+    # )[0, :n_features, :]
+    # Instead, we want find the k which has the largest neuron for each feature index
+    diag_relu_conns: Float[Tensor, "k n_features d_mlp"] = spd_calculate_virtual_weights(
+        spd_model, device
+    )["diag_relu_conns"][0, :, :n_features, :]
+    max_component_indices = diag_relu_conns.max(dim=-1).values.argmax(dim=0)
+    # For each feature, use the k values based on the max_component_indices
+    max_component_contributions = diag_relu_conns[max_component_indices, torch.arange(n_features)]
     feature_contribution_plot(
         axes1[1],
-        spd_relu_conns,
+        max_component_contributions,
         model=spd_model,
         n_features=n_features,
         pre_labelled_neurons=labelled_neurons,
@@ -763,13 +771,8 @@ def plot_spd_feature_contributions_truncated(
     axes1[0].set_ylim(y_min, y_max)
     axes1[1].set_ylim(y_min, y_max)
 
-    # Label the x axis with k indices. These are the subnets with the largest sum of neurons for
-    # each feature
-    diag_relu_conns: Float[Tensor, "k n_features d_mlp"] = spd_calculate_virtual_weights(
-        spd_model, device
-    )["diag_relu_conns"][0, :, :n_features, :]
-    k_indices = diag_relu_conns.sum(dim=-1).argmax(dim=0).tolist()
-    axes1[1].set_xticklabels(k_indices)  # Labels are the subnet indices
+    # Label the x axis with the subnets that have the largest neuron for each feature
+    axes1[1].set_xticklabels(max_component_indices.tolist())  # Labels are the subnet indices
 
     if include_crossterms:
         # Third plot: SPD model (with cross terms)
@@ -1264,7 +1267,7 @@ def plot_feature_response_with_subnets(
         }
 
     if ax is None:
-        _, ax = plt.subplots(constrained_layout=True, figsize=(10, 5))
+        _, ax = plt.subplots(constrained_layout=True, figsize=(15, 5))
     fig = ax.figure
 
     batch = torch.zeros(batch_size, n_instances, n_features, device=device)
