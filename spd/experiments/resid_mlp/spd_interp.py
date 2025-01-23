@@ -47,13 +47,11 @@ print(f"Using device: {device}")
 set_seed(0)  # You can change this seed if needed
 
 use_data_from_files = True
-wandb_path = (
-    "wandb:spd-resid-mlp/runs/8qz1si1l"  # 1 layer (40k steps. 15 cross 98 mono) R6 in paper
-)
+wandb_path = "wandb:spd-resid-mlp/runs/8qz1si1l"  # 1 layer 40k steps (R6) topk=1.28
 # wandb_path = "wandb:spd-resid-mlp/runs/9a639c6w"  # 1 layer topk=1
-# wandb_path = "wandb:spd-resid-mlp/runs/cb0ej7hj"  # 2 layer 2LR4 in paper
+# wandb_path = "wandb:spd-resid-mlp/runs/cb0ej7hj"  # 2 layer 2LR4 topk=1.28
 # wandb_path = "wandb:spd-resid-mlp/runs/wbeghftm"  # 2 layer topk=1
-# wandb_path = "wandb:spd-resid-mlp/runs/c1q3bs6f"  # 2 layer m=1
+# wandb_path = "wandb:spd-resid-mlp/runs/c1q3bs6f"  # 2 layer m=1 topk=1.28 (not in paper)
 
 wandb_id = wandb_path.split("/")[-1]
 
@@ -292,7 +290,6 @@ fig = plot_spd_feature_contributions_truncated(
 )
 fig.show()
 # Save the figure
-out_dir = REPO_ROOT / "spd/experiments/resid_mlp/out"
 fig.savefig(out_dir / f"resid_mlp_weights_{n_layers}layers_{wandb_id}.png")
 print(f"Saved figure to {out_dir / f'resid_mlp_weights_{n_layers}layers_{wandb_id}.png'}")
 
