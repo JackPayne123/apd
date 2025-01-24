@@ -135,7 +135,10 @@ dataset = ResidualMLPDataset(
 
 # %% Plot how many subnets are monosemantic, etc.
 fig = plot_subnet_categories(model, device, cutoff=4e-2)
-fig.show()
+# Save the figure
+fig.savefig(out_dir / f"resid_mlp_subnet_categories_{n_layers}layers_{wandb_id}.png")
+print(f"Saved figure to {out_dir / f'resid_mlp_subnet_categories_{n_layers}layers_{wandb_id}.png'}")
+
 
 # %%
 per_feature_losses_path = Path(out_dir) / f"resid_mlp_losses_{n_layers}layers_{wandb_id}.pt"
@@ -172,7 +175,6 @@ fig.savefig(out_dir / f"resid_mlp_per_feature_performance_{n_layers}layers_{wand
 print(
     f"Saved figure to {out_dir / f'resid_mlp_per_feature_performance_{n_layers}layers_{wandb_id}.png'}"
 )
-
 
 # %%
 # Scatter plot of avg active components vs loss difference
@@ -223,11 +225,24 @@ fig = plot_spd_feature_contributions_truncated(
     n_features=10,
     include_crossterms=False,
 )
-fig.show()
-# Save the figure
 fig.savefig(out_dir / f"resid_mlp_weights_{n_layers}layers_{wandb_id}.png")
 print(f"Saved figure to {out_dir / f'resid_mlp_weights_{n_layers}layers_{wandb_id}.png'}")
 
+# Full figure for updating wandb report
+# fig = plot_spd_feature_contributions(
+#     spd_model=model,
+#     target_model=target_model,
+#     device=device,
+# )
+# fig.savefig(out_dir / f"resid_mlp_weights_full_{n_layers}layers_{wandb_id}.png")
+# plt.close(fig)
+# print(f"Saved figure to {out_dir / f'resid_mlp_weights_full_{n_layers}layers_{wandb_id}.png'}")
+# import wandb
+
+# # Restart the run and log the figure
+# run = wandb.init(project="spd-resid-mlp", id=wandb_id, resume="must")
+# run.log({"neuron_contributions": wandb.Image(fig)})
+# run.finish()
 
 # %%
 # Plot causal scrubbing-esque test

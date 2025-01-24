@@ -711,6 +711,104 @@ def plot_spd_relu_contribution(
     return fig1, fig2
 
 
+def plot_spd_feature_contributions(
+    spd_model: ResidualMLPSPDRankPenaltyModel,
+    target_model: ResidualMLPModel,
+    device: str = "cuda",
+    k_plot_limit: int | None = None,
+) -> plt.Figure:
+    instance_idx = 0
+    offset = 4
+    nrows = (k_plot_limit or spd_model.config.k) + offset
+    fig1, axes1 = plt.subplots(nrows, 1, figsize=(20, 3 + 2 * nrows), constrained_layout=True)
+    axes1 = np.atleast_1d(axes1)  # type: ignore
+
+    n_features = spd_model.config.n_features
+
+    virtual_weights = calculate_virtual_weights(target_model, device)
+    relu_conns = virtual_weights["diag_relu_conns"]
+    feature_contribution_plot(
+        ax=axes1[0],
+        all_diag_relu_conns=relu_conns[instance_idx],
+        model=target_model,
+        n_features=n_features,
+    )
+    axes1[0].set_ylabel("Target model", fontsize=8)
+    axes1[0].set_xlabel("")
+    relu_conns = spd_calculate_diag_relu_conns(spd_model, device, k_select="sum_before")
+    feature_contribution_plot(
+        ax=axes1[1],
+        all_diag_relu_conns=relu_conns[instance_idx],
+        model=spd_model,
+        n_features=n_features,
+    )
+    axes1[1].set_ylabel("SPD model full sum of all subnets", fontsize=8)
+    axes1[1].set_xlabel("")
+
+    # We now use max component instead of sum_nocrossterms now
+    # relu_conns = spd_calculate_diag_relu_conns(spd_model, device, k_select="sum_nocrossterms")
+    # relu_contribution_plot(axes1[2], axes2[2], relu_conns, spd_model, device)
+    # axes1[2].set_ylabel("SPD model sum without cross terms", fontsize=8)
+    # axes2[2].set_ylabel("SPD model sum without cross terms", fontsize=8)
+    # axes1[2].set_xlabel("")
+    # axes2[2].set_xlabel("")
+
+    diag_relu_conns: Float[Tensor, "k n_features d_mlp"] = spd_calculate_virtual_weights(
+        spd_model, device
+    )["diag_relu_conns"][instance_idx]
+    max_component_indices = diag_relu_conns.max(dim=-1).values.argmax(dim=0)
+    # For each feature, use the k values based on the max_component_indices
+    max_component_contributions: Float[Tensor, "n_features d_mlp"] = diag_relu_conns[
+        max_component_indices, torch.arange(spd_model.config.n_features)
+    ]
+    feature_contribution_plot(
+        ax=axes1[2],
+        all_diag_relu_conns=max_component_contributions,
+        model=spd_model,
+        n_features=n_features,
+    )
+    axes1[2].set_ylabel("SPD model max component", fontsize=8)
+    axes1[2].set_xlabel("")
+    # Label the x axis with the subnets that have the largest neuron for each feature
+    # Set xticks for every index
+    axes1[2].set_xticks(range(n_features))
+    axes1[2].set_xticklabels(max_component_indices.tolist())
+    axes1[2].tick_params(axis="x", labelsize=6)
+
+    relu_conns = spd_calculate_diag_relu_conns(spd_model, device, k_select="sum_onlycrossterms")
+    # relu_contribution_plot(axes1[3], relu_conns, spd_model, device)
+    feature_contribution_plot(
+        ax=axes1[3],
+        all_diag_relu_conns=relu_conns[instance_idx],
+        model=spd_model,
+        n_features=n_features,
+    )
+    axes1[3].set_ylabel("SPD model sum only cross terms", fontsize=8)
+    axes1[3].set_xlabel("")
+
+    # Use the same y-axis max for all plots
+    y_min = min([axes1[i].get_ylim()[0] for i in range(4)])
+    y_max = max([axes1[i].get_ylim()[1] for i in range(4)])
+    axes1[0].set_ylim(y_min, y_max)
+    axes1[1].set_ylim(y_min, y_max)
+    axes1[2].set_ylim(y_min, y_max)
+    axes1[3].set_ylim(y_min, y_max)
+
+    for k in range(k_plot_limit or spd_model.config.k):
+        relu_conns = spd_calculate_diag_relu_conns(spd_model, device, k_select=k)
+        # relu_contribution_plot(axes1[k + offset], relu_conns, spd_model, device)
+        feature_contribution_plot(
+            ax=axes1[k + offset],
+            all_diag_relu_conns=relu_conns[instance_idx],
+            model=spd_model,
+            n_features=n_features,
+        )
+        axes1[k + offset].set_ylabel(f"k={k}")
+        if k < (k_plot_limit or spd_model.config.k) - 1:
+            axes1[k + offset].set_xlabel("")
+    return fig1
+
+
 def plot_spd_feature_contributions_truncated(
     spd_model: ResidualMLPSPDRankPenaltyModel,
     target_model: ResidualMLPModel,
@@ -753,7 +851,9 @@ def plot_spd_feature_contributions_truncated(
     )["diag_relu_conns"][0, :, :n_features, :]
     max_component_indices = diag_relu_conns.max(dim=-1).values.argmax(dim=0)
     # For each feature, use the k values based on the max_component_indices
-    max_component_contributions = diag_relu_conns[max_component_indices, torch.arange(n_features)]
+    max_component_contributions: Float[Tensor, "n_features d_mlp"] = diag_relu_conns[
+        max_component_indices, torch.arange(n_features)
+    ]
     feature_contribution_plot(
         axes1[1],
         max_component_contributions,
