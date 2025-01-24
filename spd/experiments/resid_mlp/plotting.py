@@ -1,4 +1,5 @@
 from collections.abc import Callable
+from dataclasses import dataclass
 from typing import Literal
 
 import einops
@@ -9,6 +10,7 @@ import torch.nn.functional as F
 from jaxtyping import Float
 from matplotlib.colors import Normalize
 from mpl_toolkits.axes_grid1 import make_axes_locatable
+from pydantic import PositiveFloat
 from torch import Tensor
 from tqdm import tqdm
 
@@ -1236,6 +1238,272 @@ def plot_resid_vs_mlp_out(
     # ax.plot(W_EU * float(res.x[0]), color="C2", label="Scaled W_E W_U")
     ax.legend()
     ax.set_title(f"Instance {instance_idx}, feature {feature_idx}")
+
+
+def plot_per_feature_performance_fig(
+    loss_target: Float[Tensor, " n_features"],
+    loss_spd_batch_topk: Float[Tensor, " n_features"],
+    loss_spd_sample_topk: Float[Tensor, " n_features"],
+    config: Config,
+    color_map: dict[str, str],
+) -> plt.Figure:
+    fig, axs = plt.subplots(2, 1, figsize=(15, 10))
+    axs = np.array(axs)
+
+    indices = loss_target.argsort()
+    topk = int(config.topk) if config.topk is not None and config.topk == 1 else config.topk
+    plot_per_feature_performance(
+        losses=loss_spd_batch_topk,
+        sorted_indices=indices,
+        ax=axs[1],
+        label=f"APD (per-batch top-k={topk})",
+        color=color_map["apd_topk"],
+    )
+
+    plot_per_feature_performance(
+        losses=loss_target,
+        sorted_indices=indices,
+        ax=axs[1],
+        label="Target model",
+        color=color_map["target"],
+    )
+    axs[1].legend(loc="upper left")
+
+    plot_per_feature_performance(
+        losses=loss_spd_sample_topk,
+        sorted_indices=indices,
+        ax=axs[0],
+        label="APD (per-sample top-k=1)",
+        color=color_map["apd_topk"],
+    )
+    plot_per_feature_performance(
+        losses=loss_target,
+        sorted_indices=indices,
+        ax=axs[0],
+        label="Target model",
+        color=color_map["target"],
+    )
+
+    axs[0].legend(loc="upper left", fontsize=12)
+    axs[1].legend(loc="upper left", fontsize=12)
+
+    # Use the max y-axis limit for both subplots
+    max_ylim = max(axs[0].get_ylim()[1], axs[1].get_ylim()[1])
+    axs[0].set_ylim(0, max_ylim)
+    axs[1].set_ylim(0, max_ylim)
+
+    # Remove the top and right spines
+    for ax in axs:
+        ax.spines["top"].set_visible(False)
+        ax.spines["right"].set_visible(False)
+
+    # # Increase the fontsize of the xlabel and ylabel
+    for ax in axs:
+        ax.xaxis.label.set_fontsize(12)
+        ax.yaxis.label.set_fontsize(12)
+
+    return fig
+
+
+def plot_avg_components_scatter(
+    losses_spd_wrt_target: Float[Tensor, " n_features"],
+    avg_components: Float[Tensor, " n_features"],
+) -> plt.Figure:
+    fig, ax = plt.subplots(figsize=(15, 5))
+    ax.scatter(
+        losses_spd_wrt_target.abs().detach().cpu(),
+        avg_components.detach().cpu(),
+    )
+    ax.set_xlabel("MSE between APD (per-sample top-k=1) and target model outputs")
+    ax.set_ylabel("Average number of active components")
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+
+    # Increase the fontsize of the xlabel and ylabel
+    ax.xaxis.label.set_fontsize(12)
+    ax.yaxis.label.set_fontsize(12)
+    return fig
+
+
+@dataclass
+class ScrubbedLosses:
+    loss_scrubbed: Float[Tensor, " n_features"]
+    loss_antiscrubbed: Float[Tensor, " n_features"]
+    loss_random: Float[Tensor, " n_features"]
+    loss_spd: Float[Tensor, " n_features"]
+    loss_zero: Float[Tensor, " n_features"]
+    loss_monosemantic: Float[Tensor, " n_features"]
+
+
+def get_scrubbed_losses(
+    dataset: ResidualMLPDataset,
+    model: ResidualMLPSPDRankPenaltyModel,
+    target_model: ResidualMLPModel,
+    device: str,
+    config: Config,
+    top1_model_fn: Callable[
+        [
+            Float[Tensor, "batch n_instances n_features"],
+            Float[Tensor, "batch n_instances k"] | None,
+        ],
+        SPDOutputs,
+    ],
+    spd_model_fn: Callable[
+        [
+            Float[Tensor, "batch n_instances n_features"],  # batch
+            PositiveFloat | None,  # topk
+            bool,  # batch_topk
+        ],
+        SPDOutputs,
+    ],
+    n_batches: int,
+) -> ScrubbedLosses:
+    # Dictionary feature_idx -> subnet_idx
+    subnet_indices = get_feature_subnet_map(top1_model_fn, device, model.config, instance_idx=0)
+
+    batch_size = config.batch_size
+
+    # Initialize tensors to store all losses
+    all_loss_scrubbed = []
+    all_loss_antiscrubbed = []
+    all_loss_random = []
+    all_loss_spd = []
+    all_loss_zero = []
+    all_loss_monosemantic = []
+    for _ in tqdm(range(n_batches)):
+        # In the future this will be merged into generate_batch
+        batch = dataset._generate_multi_feature_batch_no_zero_samples(batch_size, buffer_ratio=2)
+        if isinstance(dataset, ResidualMLPDataset) and dataset.label_fn is not None:
+            labels = dataset.label_fn(batch)
+        else:
+            labels = batch.clone().detach()
+
+        batch = batch.to(device)
+        active_features = torch.where(batch != 0)
+        # Randomly assign 0 or 1 to topk mask
+        random_topk_mask = torch.randint(
+            0, 2, (batch_size, model.config.n_instances, model.config.k)
+        )
+        scrubbed_topk_mask = torch.randint(
+            0, 2, (batch_size, model.config.n_instances, model.config.k)
+        )
+        antiscrubbed_topk_mask = torch.randint(
+            0, 2, (batch_size, model.config.n_instances, model.config.k)
+        )
+        for b, i, f in zip(*active_features, strict=False):
+            s = subnet_indices[f.item()]
+            scrubbed_topk_mask[b, i, s] = 1
+            antiscrubbed_topk_mask[b, i, s] = 0
+        topk = config.topk
+        batch_topk = config.batch_topk
+
+        out_spd = spd_model_fn(batch, topk, batch_topk).spd_topk_model_output
+        out_random = top1_model_fn(batch, random_topk_mask).spd_topk_model_output
+        out_scrubbed = top1_model_fn(batch, scrubbed_topk_mask).spd_topk_model_output
+        out_antiscrubbed = top1_model_fn(batch, antiscrubbed_topk_mask).spd_topk_model_output
+        out_target = target_model(batch)[0]
+        # Monosemantic baseline
+        out_monosemantic = batch.clone()
+        d_mlp = target_model.config.d_mlp * target_model.config.n_layers  # type: ignore
+        out_monosemantic[..., :d_mlp] = labels[..., :d_mlp]
+
+        # Calc MSE losses
+        all_loss_scrubbed.append(
+            ((out_scrubbed - out_target) ** 2).mean(dim=-1).flatten().detach().cpu()
+        )
+        all_loss_antiscrubbed.append(
+            ((out_antiscrubbed - out_target) ** 2).mean(dim=-1).flatten().detach().cpu()
+        )
+        all_loss_random.append(
+            ((out_random - out_target) ** 2).mean(dim=-1).flatten().detach().cpu()
+        )
+        all_loss_spd.append(((out_spd - out_target) ** 2).mean(dim=-1).flatten().detach().cpu())
+        all_loss_zero.append(
+            ((torch.zeros_like(out_target) - out_target) ** 2).mean(dim=-1).flatten().detach().cpu()
+        )
+        all_loss_monosemantic.append(
+            ((out_monosemantic - out_target) ** 2).mean(dim=-1).flatten().detach().cpu()
+        )
+
+    # Concatenate all batches
+    loss_scrubbed = torch.cat(all_loss_scrubbed)
+    loss_antiscrubbed = torch.cat(all_loss_antiscrubbed)
+    loss_random = torch.cat(all_loss_random)
+    loss_spd = torch.cat(all_loss_spd)
+    loss_zero = torch.cat(all_loss_zero)
+    loss_monosemantic = torch.cat(all_loss_monosemantic)
+
+    print(f"Loss SPD:           {loss_spd.mean().item():.6f}")
+    print(f"Loss scrubbed:      {loss_scrubbed.mean().item():.6f}")
+    print(f"Loss antiscrubbed:  {loss_antiscrubbed.mean().item():.6f}")
+    print(f"Loss monosemantic:  {loss_monosemantic.mean().item():.6f}")
+    print(f"Loss random:        {loss_random.mean().item():.6f}")
+    print(f"Loss zero:          {loss_zero.mean().item():.6f}")
+    return ScrubbedLosses(
+        loss_scrubbed=loss_scrubbed,
+        loss_antiscrubbed=loss_antiscrubbed,
+        loss_random=loss_random,
+        loss_spd=loss_spd,
+        loss_zero=loss_zero,
+        loss_monosemantic=loss_monosemantic,
+    )
+
+
+def plot_scrub_losses(
+    losses: ScrubbedLosses, config: Config, color_map: dict[str, str], n_batches: int
+) -> plt.Figure:
+    fig, ax = plt.subplots(figsize=(15, 5))
+    log_bins: list[float] = np.geomspace(1e-7, losses.loss_zero.max().item(), 50).tolist()  # type: ignore
+    ax.hist(
+        losses.loss_spd,
+        bins=log_bins,
+        label="APD (top-k)",
+        histtype="step",
+        lw=2,
+        color=color_map["apd_topk"],
+    )
+    ax.axvline(losses.loss_spd.mean().item(), color=color_map["apd_topk"], linestyle="--")
+    ax.hist(
+        losses.loss_scrubbed,
+        bins=log_bins,
+        label="APD (scrubbed)",
+        histtype="step",
+        lw=2,
+        color=color_map["apd_scrubbed"],
+    )
+    ax.axvline(losses.loss_scrubbed.mean().item(), color=color_map["apd_scrubbed"], linestyle="--")
+    ax.hist(
+        losses.loss_antiscrubbed,
+        bins=log_bins,
+        label="APD (anti-scrubbed)",
+        histtype="step",
+        lw=2,
+        color=color_map["apd_antiscrubbed"],
+    )
+    ax.axvline(
+        losses.loss_antiscrubbed.mean().item(), color=color_map["apd_antiscrubbed"], linestyle="--"
+    )
+    # ax.hist(loss_random, bins=log_bins, label="APD (random)", histtype="step")
+    # ax.hist(loss_zero, bins=log_bins, label="APD (zero)", histtype="step")
+    ax.axvline(
+        losses.loss_monosemantic.mean().item(),
+        color=color_map["baseline_monosemantic"],
+        linestyle="-",
+        label="Monosemantic neuron solution",
+    )
+    ax.legend()
+    ax.set_ylabel(f"Count (out of {config.batch_size * n_batches} samples)")
+    ax.set_xlabel("MSE loss with target model output")
+    ax.set_xscale("log")
+
+    # Remove spines
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+
+    # Increase fontsize
+    ax.xaxis.label.set_fontsize(12)
+    ax.yaxis.label.set_fontsize(12)
+    return fig
 
 
 def plot_feature_response_with_subnets(
