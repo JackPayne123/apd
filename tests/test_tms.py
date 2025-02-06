@@ -33,7 +33,7 @@ TMS_TASK_CONFIG = TMSTaskConfig(
 def tms_spd_happy_path(config: Config, n_hidden_layers: int = 0):
     set_seed(0)
     device = "cpu"
-    assert isinstance(config.task_config, TMSTaskConfig)
+    assert isinstance(config.task_config, TMSTaskConfig), "task_config must be TMSTaskConfig"
 
     # For our pretrained model, just use a randomly initialized TMS model
     tms_model_config = TMSModelConfig(
@@ -360,3 +360,58 @@ def test_tms_equivalent_to_raw_model() -> None:
         assert torch.allclose(
             target_post_weight_acts[key_name], spd_post_weight_acts[key_name], atol=1e-6
         ), f"post-acts do not match at layer {key_name}"
+
+
+def test_tms_spd_bias_warmup():
+    """Test that bias warmup works for TMS
+
+    - Tests that bias_scale=0.5 gives output - 0.5 if all weights and inputs are 1
+    - Tests that bias_scale=0.0 is the same as zeroing out all the bias values in the model
+    """
+    set_seed(0)
+    device = "cpu"
+    config = Config(
+        C=5,
+        topk=2,
+        batch_topk=True,
+        batch_size=4,
+        steps=5,
+        print_freq=50,
+        save_freq=None,
+        lr=1e-3,
+        bias_warmup_steps=5,
+        task_config=TMS_TASK_CONFIG,
+    )
+    # For our pretrained model, just use a randomly initialized TMS model
+    tms_model_config = TMSModelConfig(
+        n_instances=2,
+        n_features=5,
+        n_hidden=2,
+        n_hidden_layers=0,
+        device=device,
+    )
+
+    assert isinstance(config.task_config, TMSTaskConfig), "task_config must be TMSTaskConfig"
+    tms_spd_model_config = TMSSPDModelConfig(
+        **tms_model_config.model_dump(mode="json"),
+        C=config.C,
+        bias_val=config.task_config.bias_val,
+    )
+    model = TMSSPDModel(config=tms_spd_model_config)
+
+    input_data: Float[torch.Tensor, "batch n_instances n_features"] = torch.ones(
+        config.batch_size, tms_model_config.n_instances, tms_model_config.n_features, device=device
+    )
+
+    # Set W and bias to all 1s
+    model.linear1.weight.data[:, :, :] = torch.ones_like(model.linear1.weight.data)
+    model.b_final.data[:, :] = torch.ones_like(model.b_final.data)
+    # Show that running with bias_scale=0.5 gives output - 0.5
+    bias_scale_half = model(input_data, bias_scale=0.5)
+    assert torch.allclose(bias_scale_half, model(input_data) - 0.5)
+
+    # Test that bias_scale 0 is equivalent to zeroing out all the bias values
+    bias_scale_zero_out = model(input_data, bias_scale=0.0)
+    # Now zero out the bias values
+    model.b_final.data[:, :] = torch.zeros_like(model.b_final.data)
+    assert torch.allclose(bias_scale_zero_out, model(input_data))

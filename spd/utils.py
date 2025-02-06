@@ -280,6 +280,7 @@ def calc_ablation_attributions(
     spd_model: SPDModel,
     batch: Float[Tensor, "batch n_features"] | Float[Tensor, "batch n_instances n_features"],
     out: Float[Tensor, "batch d_model_out"] | Float[Tensor, "batch n_instances d_model_out"],
+    step_bias_scale: float,
 ) -> Float[Tensor, "batch C"] | Float[Tensor, "batch n_instances C"]:
     """Calculate the attributions by ablating each subnetwork one at a time."""
 
@@ -288,7 +289,7 @@ def calc_ablation_attributions(
     attributions = torch.zeros(attr_shape, device=out.device, dtype=out.dtype)
     for subnet_idx in range(spd_model.C):
         stored_vals = spd_model.set_subnet_to_zero(subnet_idx, has_instance_dim)
-        ablation_out, _, _ = spd_model(batch)
+        ablation_out, _, _ = spd_model(batch, bias_scale=step_bias_scale)
         out_recon = ((out - ablation_out) ** 2).mean(dim=-1)
         attributions[..., subnet_idx] = out_recon
         spd_model.restore_subnet(subnet_idx, stored_vals, has_instance_dim)
@@ -331,10 +332,13 @@ def calculate_attributions(
     ],
     component_acts: dict[str, Float[Tensor, "batch C"] | Float[Tensor, "batch n_instances C"]],
     attribution_type: Literal["ablation", "gradient", "activation"],
+    step_bias_scale: float,
 ) -> Float[Tensor, "batch C"] | Float[Tensor, "batch n_instances C"]:
     attributions = None
     if attribution_type == "ablation":
-        attributions = calc_ablation_attributions(spd_model=model, batch=batch, out=out)
+        attributions = calc_ablation_attributions(
+            spd_model=model, batch=batch, out=out, step_bias_scale=step_bias_scale
+        )
     elif attribution_type == "gradient":
         component_weights = collect_nested_module_attrs(
             model, attr_name="component_weights", include_attr_name=False
@@ -412,6 +416,7 @@ def run_spd_forward_pass(
     batch_topk: bool,
     topk: float,
     distil_from_target: bool,
+    step_bias_scale: float = 1.0,
     topk_mask: Float[Tensor, "batch C"] | Float[Tensor, "batch n_instances C"] | None = None,
 ) -> SPDOutputs:
     # Forward pass on target model
@@ -433,6 +438,7 @@ def run_spd_forward_pass(
         post_weight_acts={k: v for k, v in target_cache.items() if k.endswith("hook_post")},
         component_acts={k: v for k, v in spd_cache.items() if k.endswith("hook_component_acts")},
         attribution_type=attribution_type,
+        step_bias_scale=step_bias_scale,
     )
 
     if topk_mask is None:
@@ -727,6 +733,10 @@ def get_lr_with_warmup(
     if step < warmup_steps:
         return lr * (step / warmup_steps)
     return lr * lr_schedule_fn(step - warmup_steps, steps - warmup_steps)
+
+
+def get_bias_scale(step: int, bias_warmup_steps: int) -> float:
+    return 1.0 if bias_warmup_steps == 0 else min(1.0, step / bias_warmup_steps)
 
 
 def replace_deprecated_param_names(

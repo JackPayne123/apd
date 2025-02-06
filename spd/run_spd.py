@@ -14,6 +14,7 @@ from pydantic import (
     ConfigDict,
     Field,
     NonNegativeFloat,
+    NonNegativeInt,
     PositiveFloat,
     PositiveInt,
     model_validator,
@@ -31,6 +32,7 @@ from spd.utils import (
     calc_recon_mse,
     calc_topk_mask,
     calculate_attributions,
+    get_bias_scale,
     get_lr_schedule_fn,
     get_lr_with_warmup,
 )
@@ -76,6 +78,7 @@ class Config(BaseModel):
     slow_images: bool = False
     save_freq: PositiveInt | None = None
     lr: PositiveFloat
+    bias_warmup_steps: NonNegativeInt = 0
     out_recon_coeff: NonNegativeFloat | None = None
     act_recon_coeff: NonNegativeFloat | None = None
     param_match_coeff: NonNegativeFloat | None = 1.0
@@ -424,6 +427,8 @@ def optimize(
         for group in opt.param_groups:
             group["lr"] = step_lr
 
+        step_bias_scale = get_bias_scale(step=step, bias_warmup_steps=config.bias_warmup_steps)
+
         opt.zero_grad(set_to_none=True)
         try:
             batch = next(data_iter)[0]  # Ignore labels here, we use the output of target_model
@@ -443,7 +448,9 @@ def optimize(
 
         # Do a forward pass with all subnetworks
         spd_cache_filter = lambda k: k.endswith((".hook_post", ".hook_component_acts"))
-        out, spd_cache = model.run_with_cache(batch, names_filter=spd_cache_filter)
+        out, spd_cache = model.run_with_cache(
+            batch, names_filter=spd_cache_filter, bias_scale=step_bias_scale
+        )
 
         # Calculate losses
         out_recon_loss = calc_recon_mse(out, target_out, has_instance_dim)
@@ -470,6 +477,7 @@ def optimize(
                 k: v for k, v in spd_cache.items() if k.endswith("hook_component_acts")
             },
             attribution_type=config.attribution_type,
+            step_bias_scale=step_bias_scale,
         )
 
         lp_sparsity_loss_per_k = None
@@ -512,7 +520,10 @@ def optimize(
 
             # Do a forward pass with only the topk subnetworks
             out_topk, topk_spd_cache = model.run_with_cache(
-                batch, names_filter=spd_cache_filter, topk_mask=topk_mask
+                batch,
+                names_filter=spd_cache_filter,
+                topk_mask=topk_mask,
+                bias_scale=step_bias_scale,
             )
             layer_acts_topk = {k: v for k, v in topk_spd_cache.items() if k.endswith("hook_post")}
 
@@ -589,6 +600,8 @@ def optimize(
             tqdm.write(f"Step {step}")
             tqdm.write(f"Total loss: {loss.item()}")
             tqdm.write(f"lr: {step_lr}")
+            if step_bias_scale < 1.0:
+                tqdm.write(f"step_bias_scale: {step_bias_scale}")
             for loss_name, (val, _) in loss_terms.items():
                 if val is not None:
                     val_repr = f"\n{val.tolist()}" if val.numel() > 1 else f" {val.item()}"
@@ -599,6 +612,7 @@ def optimize(
                     "pnorm": config.pnorm,
                     "lr": step_lr,
                     "total_loss": loss.item(),
+                    "step_bias_scale": step_bias_scale,
                     **{
                         name: val.mean().item() if val is not None else None
                         for name, (val, _) in loss_terms.items()

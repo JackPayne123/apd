@@ -10,6 +10,7 @@ from spd.utils import (
     calc_activation_attributions,
     calc_topk_mask,
     compute_feature_importances,
+    get_bias_scale,
 )
 
 
@@ -290,3 +291,13 @@ def test_sync_inputs_overlapping():
     # Should raise an assertion error with the word "overlapping"
     with pytest.raises(AssertionError, match="overlapping"):
         dataset.generate_batch(5)
+
+
+def test_get_bias_scale():
+    assert get_bias_scale(step=0, bias_warmup_steps=0) == 1.0
+    assert get_bias_scale(step=1, bias_warmup_steps=0) == 1.0
+    assert get_bias_scale(step=0, bias_warmup_steps=1) == 0.0
+    assert get_bias_scale(step=1, bias_warmup_steps=1) == 1.0
+    assert get_bias_scale(step=0, bias_warmup_steps=2) == 0.0
+    assert get_bias_scale(step=1, bias_warmup_steps=2) == 0.5
+    assert get_bias_scale(step=2, bias_warmup_steps=2) == 1.0

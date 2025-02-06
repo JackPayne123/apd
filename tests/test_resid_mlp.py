@@ -211,3 +211,62 @@ def test_resid_mlp_equivalent_to_raw_model() -> None:
         assert torch.allclose(
             target_post_weight_acts[key_name], spd_post_weight_acts[key_name], atol=1e-6
         ), f"post-acts do not match at layer {key_name}"
+
+
+def test_resid_mlp_spd_bias_warmup():
+    """Test that bias warmup works for ResidualMLP
+
+    - Tests that bias_scale=0.0 is the same as zeroing out all the bias values in the model
+    """
+    set_seed(0)
+    device = "cpu"
+    config = Config(
+        C=5,
+        topk=2,
+        batch_topk=True,
+        batch_size=4,
+        steps=5,
+        print_freq=50,
+        save_freq=None,
+        lr=1e-3,
+        bias_warmup_steps=5,
+        task_config=RESID_MLP_TASK_CONFIG,
+    )
+    resid_mlp_config = ResidualMLPConfig(
+        n_instances=2,
+        n_features=3,
+        d_embed=2,
+        d_mlp=3,
+        n_layers=2,
+        act_fn_name="relu",
+        apply_output_act_fn=False,
+        in_bias=True,
+        out_bias=True,
+    )
+
+    resid_mlp_spd_config = ResidualMLPSPDConfig(**resid_mlp_config.model_dump(), C=config.C)
+    model = ResidualMLPSPDModel(config=resid_mlp_spd_config).to(device)
+
+    # # Create input data with all 1s (we want everything to be positive to avoid relu cutoffs)
+    input_data: Float[torch.Tensor, "batch n_instances n_features"] = torch.ones(
+        config.batch_size, resid_mlp_config.n_instances, resid_mlp_config.n_features, device=device
+    )
+    # Set weights and biases to 1
+    for param in model.parameters():
+        param.data = torch.ones_like(param.data)
+
+    # Get the values after the relu
+    cached_hook_pre = model.run_with_cache(input_data)[1]["layers.0.mlp_out.hook_pre"]
+    cached_hook_pre_half = model.run_with_cache(input_data, bias_scale=0.5)[1][
+        "layers.0.mlp_out.hook_pre"
+    ]
+    # reducing the biases from 1 to 0.5 should just reduce the size of the cache by 0.5
+    assert torch.allclose(cached_hook_pre_half, cached_hook_pre - 0.5)
+
+    # Show that running with bias_scale=0 is the same as zeroing out all the bias values
+    out = model(input_data, bias_scale=0)
+    # Now zero out all the bias values
+    for i in range(resid_mlp_config.n_layers):
+        model.layers[i].bias1.data[:, :] = torch.zeros_like(model.layers[i].bias1.data)
+        model.layers[i].bias2.data[:, :] = torch.zeros_like(model.layers[i].bias2.data)
+    assert torch.allclose(out, model(input_data))
