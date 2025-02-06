@@ -148,7 +148,13 @@ class TMSModel(HookedRootModule):
         tms_config = TMSModelConfig(**tms_train_config_dict["tms_model_config"])
         tms = cls(config=tms_config)
         params = torch.load(paths.checkpoint, weights_only=True, map_location="cpu")
-        params = replace_deprecated_param_names(params, {"W": "linear1.weight"})
+        n_hidden_layers = tms_config.n_hidden_layers
+        # Rename deprecated keys
+        rename_keys = {
+            "W": "linear1.weight",
+            **{f"hidden_layers.{i}": f"hidden_layers.{i}.weight" for i in range(n_hidden_layers)},
+        }
+        params = replace_deprecated_param_names(params, rename_keys)
         tms.load_state_dict(params)
 
         return tms, tms_train_config_dict
