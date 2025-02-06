@@ -47,7 +47,6 @@ def _tms_forward(
     b_final: Float[Tensor, "n_instances n_features"],
     topk_mask: Bool[Tensor, "batch n_instances C"] | None = None,
     hidden_layers: nn.ModuleList | None = None,
-    bias_scale: float = 1.0,
 ) -> Float[Tensor, "batch n_instances n_features"]:
     """Forward pass used for TMSModel and TMSSPDModel.
 
@@ -57,7 +56,7 @@ def _tms_forward(
     if hidden_layers is not None:
         for layer in hidden_layers:
             hidden = layer(hidden, topk_mask=topk_mask)
-    out_pre_relu = linear2(hidden, topk_mask=topk_mask) + b_final * bias_scale
+    out_pre_relu = linear2(hidden, topk_mask=topk_mask) + b_final
     out = F.relu(out_pre_relu)
     return out
 
@@ -231,7 +230,6 @@ class TMSSPDModel(SPDModel):
         self,
         x: Float[Tensor, "batch n_instances n_features"],
         topk_mask: Bool[Tensor, "batch n_instances C"] | None = None,
-        bias_scale: float = 1.0,
     ) -> Float[Tensor, "batch n_instances n_features"]:
         return _tms_forward(
             x=x,
@@ -240,7 +238,6 @@ class TMSSPDModel(SPDModel):
             b_final=self.b_final,
             hidden_layers=self.hidden_layers,
             topk_mask=topk_mask,
-            bias_scale=bias_scale,
         )
 
     @staticmethod

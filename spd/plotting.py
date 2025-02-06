@@ -108,7 +108,6 @@ def plot_subnetwork_correlations(
                 k: v for k, v in spd_cache.items() if k.endswith("hook_component_acts")
             },
             attribution_type=config.attribution_type,
-            step_bias_scale=1.0,
         )
 
         # We always assume the final subnetwork is the one we want to distil

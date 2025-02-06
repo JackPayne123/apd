@@ -454,7 +454,7 @@ class HookedRootModule(nn.Module):
         reset_hooks_end: bool = True,
         clear_contexts: bool = False,
         **model_kwargs: Any,
-    ) -> tuple[Tensor, dict[str, Tensor]]:
+    ):
         """
         Runs the model and returns the model output and a Cache object.
 

@@ -943,7 +943,6 @@ def collect_per_feature_losses(
                 k: v for k, v in spd_cache.items() if k.endswith("hook_component_acts")
             },
             attribution_type=config.attribution_type,
-            step_bias_scale=1,
         )
 
         with torch.inference_mode():
