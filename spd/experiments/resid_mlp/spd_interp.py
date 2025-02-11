@@ -7,6 +7,7 @@ from jaxtyping import Float
 from pydantic import PositiveFloat
 from torch import Tensor
 
+from spd.configs import ResidualMLPTaskConfig
 from spd.experiments.resid_mlp.models import ResidualMLPModel, ResidualMLPSPDModel
 from spd.experiments.resid_mlp.plotting import (
     analyze_per_feature_performance,
@@ -22,7 +23,6 @@ from spd.experiments.resid_mlp.plotting import (
 )
 from spd.experiments.resid_mlp.resid_mlp_dataset import ResidualMLPDataset
 from spd.experiments.resid_mlp.resid_mlp_decomposition import plot_subnet_categories
-from spd.run_spd import ResidualMLPTaskConfig
 from spd.settings import REPO_ROOT
 from spd.utils import (
     COLOR_PALETTE,
@@ -89,9 +89,9 @@ def spd_model_fn(
     assert topk is not None
     return run_spd_forward_pass(
         spd_model=model,
+        config=config,
         target_model=target_model,
         input_array=batch,
-        attribution_type=config.attribution_type,
         batch_topk=batch_topk,
         topk=topk,
         distil_from_target=config.distil_from_target,
@@ -111,9 +111,9 @@ def top1_model_fn(
     assert config.topk is not None
     return run_spd_forward_pass(
         spd_model=model,
+        config=config,
         target_model=target_model,
         input_array=batch,
-        attribution_type=config.attribution_type,
         batch_topk=False,
         topk=1,
         distil_from_target=config.distil_from_target,

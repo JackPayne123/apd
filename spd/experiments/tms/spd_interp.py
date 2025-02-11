@@ -8,9 +8,9 @@ import torch
 from jaxtyping import Float
 from torch import Tensor
 
+from spd.configs import TMSTaskConfig
 from spd.experiments.tms.models import TMSModel, TMSSPDModel
 from spd.plotting import collect_sparse_dataset_mse_losses, plot_sparse_feature_mse_line_plot
-from spd.run_spd import TMSTaskConfig
 from spd.settings import REPO_ROOT
 from spd.utils import COLOR_PALETTE, DataGenerationType, SparseFeatureDataset
 
@@ -331,10 +331,10 @@ results = collect_sparse_dataset_mse_losses(
     dataset=dataset,
     target_model=target_model,
     spd_model=model,
+    config=config,
     batch_size=10000,
     device=device,
     topk=config.topk,
-    attribution_type=config.attribution_type,
     batch_topk=config.batch_topk,
     distil_from_target=config.distil_from_target,
     gen_types=gen_types,

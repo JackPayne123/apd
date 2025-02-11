@@ -1,4 +1,4 @@
-from typing import Any, Literal
+from typing import Any
 
 import einops
 import matplotlib.pyplot as plt
@@ -11,17 +11,17 @@ from mpl_toolkits.axes_grid1 import make_axes_locatable
 from torch import Tensor
 from torch.utils.data import DataLoader
 
+from spd.attributions import calculate_attributions
+from spd.configs import Config
 from spd.experiments.resid_mlp.models import ResidualMLPModel, ResidualMLPSPDModel
 from spd.experiments.tms.models import TMSModel, TMSSPDModel
 from spd.hooks import HookedRootModule
 from spd.models.base import SPDModel
-from spd.run_spd import Config
 from spd.utils import (
     DataGenerationType,
     SparseFeatureDataset,
     calc_recon_mse,
     calc_topk_mask,
-    calculate_attributions,
     run_spd_forward_pass,
 )
 
@@ -99,6 +99,7 @@ def plot_subnetwork_correlations(
         out, spd_cache = spd_model.run_with_cache(batch, names_filter=spd_cache_filter)
         attribution_scores = calculate_attributions(
             model=spd_model,
+            config=config,
             batch=batch,
             out=out,
             target_out=target_out,
@@ -107,7 +108,6 @@ def plot_subnetwork_correlations(
             component_acts={
                 k: v for k, v in spd_cache.items() if k.endswith("hook_component_acts")
             },
-            attribution_type=config.attribution_type,
         )
 
         # We always assume the final subnetwork is the one we want to distil
@@ -170,10 +170,10 @@ def collect_sparse_dataset_mse_losses(
     dataset: SparseFeatureDataset,
     target_model: ResidualMLPModel | TMSModel,
     spd_model: TMSSPDModel | ResidualMLPSPDModel,
+    config: Config,
     batch_size: int,
     device: str,
     topk: float,
-    attribution_type: Literal["gradient", "ablation", "activation"],
     batch_topk: bool,
     distil_from_target: bool,
     gen_types: list[DataGenerationType],
@@ -216,9 +216,9 @@ def collect_sparse_dataset_mse_losses(
 
         spd_outputs = run_spd_forward_pass(
             spd_model=spd_model,
+            config=config,
             target_model=target_model,
             input_array=batch,
-            attribution_type=attribution_type,
             batch_topk=run_batch_topk,
             topk=run_topk,
             distil_from_target=distil_from_target,

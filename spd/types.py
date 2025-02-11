@@ -3,9 +3,24 @@ from typing import Annotated
 
 from pydantic import BeforeValidator, Field, PlainSerializer
 
-from spd.utils import from_root_path, to_root_path
+from spd.settings import REPO_ROOT
 
 WANDB_PATH_PREFIX = "wandb:"
+
+
+def to_root_path(path: str | Path) -> Path:
+    """Converts relative paths to absolute ones, assuming they are relative to the rib root."""
+    return Path(path) if Path(path).is_absolute() else Path(REPO_ROOT / path)
+
+
+def from_root_path(path: str | Path) -> Path:
+    """Converts absolute paths to relative ones, relative to the repo root."""
+    path = Path(path)
+    try:
+        return path.relative_to(REPO_ROOT)
+    except ValueError:
+        # If the path is not relative to REPO_ROOT, return the original path
+        return path
 
 
 def validate_path(v: str | Path) -> str | Path:

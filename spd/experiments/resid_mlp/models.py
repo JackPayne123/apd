@@ -8,17 +8,18 @@ import torch
 import torch.nn.functional as F
 import wandb
 import yaml
-from jaxtyping import Bool, Float
+from jaxtyping import Float
 from pydantic import BaseModel, ConfigDict, Field, PositiveInt
 from torch import Tensor, nn
 from wandb.apis.public import Run
 
+from spd.configs import ResidualMLPTaskConfig
 from spd.hooks import HookedRootModule
 from spd.log import logger
 from spd.models.base import SPDModel
 from spd.models.components import Linear, LinearComponent
 from spd.module_utils import init_param_
-from spd.run_spd import Config, ResidualMLPTaskConfig
+from spd.run_spd import Config
 from spd.types import WANDB_PATH_PREFIX, ModelPath
 from spd.utils import replace_deprecated_param_names
 from spd.wandb_utils import download_wandb_file, fetch_latest_wandb_checkpoint, fetch_wandb_run_dir
@@ -92,7 +93,7 @@ class MLP(nn.Module):
     def forward(
         self,
         x: Float[Tensor, "batch ... d_model"],
-        topk_mask: Bool[Tensor, "batch ... C"] | None = None,
+        topk_mask: Float[Tensor, "batch ... C"] | None = None,
     ) -> tuple[Float[Tensor, "batch ... d_model"],]:
         """Run a forward pass and cache pre and post activations for each parameter.
 
@@ -326,7 +327,7 @@ class ResidualMLPSPDModel(SPDModel):
     def forward(
         self,
         x: Float[Tensor, "batch n_instances n_features"],
-        topk_mask: Bool[Tensor, "batch n_instances C"] | None = None,
+        topk_mask: Float[Tensor, "batch n_instances C"] | None = None,
     ) -> Float[Tensor, "batch n_instances d_embed"]:
         """
         Returns:
@@ -385,6 +386,11 @@ class ResidualMLPSPDModel(SPDModel):
                 form `wandb:project/run_id` and if `api.project` is set this can just be
                 `wandb:run_id`. If local path, assumes that `resid_mlp_train_config.yaml` and
                 `label_coeffs.json` are in the same directory as the checkpoint.
+
+        Returns:
+            model: The pretrained ResidualMLPSPDModel
+            config: The config used to train the model
+            label_coeffs: The label coefficients used to train the model
         """
         if isinstance(path, str) and path.startswith(WANDB_PATH_PREFIX):
             wandb_path = path.removeprefix(WANDB_PATH_PREFIX)
@@ -399,6 +405,14 @@ class ResidualMLPSPDModel(SPDModel):
 
         with open(paths.final_config) as f:
             final_config_dict = yaml.safe_load(f)
+
+        # Old configs didn't have post_relu_act_recon
+        if (
+            "post_relu_act_recon" not in final_config_dict
+            and final_config_dict["act_recon_coeff"] is not None
+        ):
+            final_config_dict["post_relu_act_recon"] = True
+
         config = Config(**final_config_dict)
 
         with open(paths.resid_mlp_train_config) as f:

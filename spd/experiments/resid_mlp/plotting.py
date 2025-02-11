@@ -934,6 +934,7 @@ def collect_per_feature_losses(
 
         attribution_scores = calculate_attributions(
             model=spd_model,
+            config=config,
             batch=batch,
             out=spd_out,
             target_out=target_out,
@@ -942,7 +943,6 @@ def collect_per_feature_losses(
             component_acts={
                 k: v for k, v in spd_cache.items() if k.endswith("hook_component_acts")
             },
-            attribution_type=config.attribution_type,
         )
 
         with torch.inference_mode():

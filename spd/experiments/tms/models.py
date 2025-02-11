@@ -4,12 +4,13 @@ from typing import Any
 import torch
 import wandb
 import yaml
-from jaxtyping import Bool, Float
+from jaxtyping import Float
 from pydantic import BaseModel, ConfigDict, NonNegativeInt, PositiveInt
 from torch import Tensor, nn
 from torch.nn import functional as F
 from wandb.apis.public import Run
 
+from spd.configs import Config, TMSTaskConfig
 from spd.hooks import HookedRootModule
 from spd.models.base import SPDModel
 from spd.models.components import (
@@ -18,7 +19,6 @@ from spd.models.components import (
     TransposedLinear,
     TransposedLinearComponent,
 )
-from spd.run_spd import Config, TMSTaskConfig
 from spd.types import WANDB_PATH_PREFIX, ModelPath
 from spd.utils import replace_deprecated_param_names
 from spd.wandb_utils import download_wandb_file, fetch_latest_wandb_checkpoint, fetch_wandb_run_dir
@@ -45,7 +45,7 @@ def _tms_forward(
     linear1: Linear | LinearComponent,
     linear2: TransposedLinear | TransposedLinearComponent,
     b_final: Float[Tensor, "n_instances n_features"],
-    topk_mask: Bool[Tensor, "batch n_instances C"] | None = None,
+    topk_mask: Float[Tensor, "batch n_instances C"] | None = None,
     hidden_layers: nn.ModuleList | None = None,
 ) -> Float[Tensor, "batch n_instances n_features"]:
     """Forward pass used for TMSModel and TMSSPDModel.
@@ -147,13 +147,7 @@ class TMSModel(HookedRootModule):
         tms_config = TMSModelConfig(**tms_train_config_dict["tms_model_config"])
         tms = cls(config=tms_config)
         params = torch.load(paths.checkpoint, weights_only=True, map_location="cpu")
-        n_hidden_layers = tms_config.n_hidden_layers
-        # Rename deprecated keys
-        rename_keys = {
-            "W": "linear1.weight",
-            **{f"hidden_layers.{i}": f"hidden_layers.{i}.weight" for i in range(n_hidden_layers)},
-        }
-        params = replace_deprecated_param_names(params, rename_keys)
+        params = replace_deprecated_param_names(params, {"W": "linear1.weight"})
         tms.load_state_dict(params)
 
         return tms, tms_train_config_dict
@@ -229,7 +223,7 @@ class TMSSPDModel(SPDModel):
     def forward(
         self,
         x: Float[Tensor, "batch n_instances n_features"],
-        topk_mask: Bool[Tensor, "batch n_instances C"] | None = None,
+        topk_mask: Float[Tensor, "batch n_instances C"] | None = None,
     ) -> Float[Tensor, "batch n_instances n_features"]:
         return _tms_forward(
             x=x,

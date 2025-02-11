@@ -18,21 +18,12 @@ from jaxtyping import Float
 from torch import Tensor
 from tqdm import tqdm
 
-from spd.experiments.tms.models import (
-    TMSModel,
-    TMSModelConfig,
-    TMSSPDModel,
-    TMSSPDModelConfig,
-)
+from spd.attributions import collect_subnetwork_attributions
+from spd.configs import Config, TMSTaskConfig
+from spd.experiments.tms.models import TMSModel, TMSModelConfig, TMSSPDModel, TMSSPDModelConfig
 from spd.log import logger
-from spd.run_spd import Config, TMSTaskConfig, get_common_run_name_suffix, optimize
-from spd.utils import (
-    DatasetGeneratedDataLoader,
-    SparseFeatureDataset,
-    collect_subnetwork_attributions,
-    load_config,
-    set_seed,
-)
+from spd.run_spd import get_common_run_name_suffix, optimize
+from spd.utils import DatasetGeneratedDataLoader, SparseFeatureDataset, load_config, set_seed
 from spd.wandb_utils import init_wandb
 
 wandb.require("core")
@@ -110,7 +101,7 @@ def plot_subnetwork_attributions_multiple_instances(
                     ha="center",
                     va="center",
                     color="black",
-                    fontsize=10,
+                    fontsize=3,
                 )
 
         ax.set_xlabel("Subnetwork Index")
@@ -349,6 +340,7 @@ def make_plots(
         n_instances = model.config.n_instances if hasattr(model, "config") else model.n_instances
         attribution_scores = collect_subnetwork_attributions(
             spd_model=model,
+            config=config,
             target_model=target_model,
             device=device,
             n_instances=n_instances,

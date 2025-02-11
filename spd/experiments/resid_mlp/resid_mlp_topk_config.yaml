@@ -13,6 +13,7 @@ batch_topk: true
 param_match_coeff: 1.0
 topk_recon_coeff: 1.0
 act_recon_coeff: 1.0
+post_relu_act_recon: true
 schatten_pnorm: 0.9
 schatten_coeff: 1e1
 lr: 1e-3

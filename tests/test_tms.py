@@ -5,20 +5,12 @@ import torch
 from jaxtyping import Float
 from torch import Tensor
 
-from spd.experiments.tms.models import (
-    TMSModel,
-    TMSModelConfig,
-    TMSSPDModel,
-    TMSSPDModelConfig,
-)
+from spd.configs import Config, TMSTaskConfig
+from spd.experiments.tms.models import TMSModel, TMSModelConfig, TMSSPDModel, TMSSPDModelConfig
 from spd.experiments.tms.train_tms import TMSTrainConfig, get_model_and_dataloader, train
 from spd.module_utils import get_nested_module_attr
-from spd.run_spd import Config, TMSTaskConfig, optimize
-from spd.utils import (
-    DatasetGeneratedDataLoader,
-    SparseFeatureDataset,
-    set_seed,
-)
+from spd.run_spd import optimize
+from spd.utils import DatasetGeneratedDataLoader, SparseFeatureDataset, set_seed
 
 # Create a simple TMS config that we can use in multiple tests
 TMS_TASK_CONFIG = TMSTaskConfig(

@@ -18,6 +18,8 @@ from pydantic import PositiveFloat
 from torch import Tensor
 from tqdm import tqdm
 
+from spd.attributions import collect_subnetwork_attributions
+from spd.configs import Config, ResidualMLPTaskConfig
 from spd.experiments.resid_mlp.models import (
     ResidualMLPModel,
     ResidualMLPSPDConfig,
@@ -31,25 +33,14 @@ from spd.experiments.resid_mlp.plotting import (
     plot_virtual_weights_target_spd,
     spd_calculate_diag_relu_conns,
 )
-from spd.experiments.resid_mlp.resid_mlp_dataset import (
-    ResidualMLPDataset,
-)
+from spd.experiments.resid_mlp.resid_mlp_dataset import ResidualMLPDataset
 from spd.log import logger
 from spd.module_utils import collect_nested_module_attrs
-from spd.plotting import (
-    plot_subnetwork_attributions_statistics,
-    plot_subnetwork_correlations,
-)
-from spd.run_spd import (
-    Config,
-    ResidualMLPTaskConfig,
-    get_common_run_name_suffix,
-    optimize,
-)
+from spd.plotting import plot_subnetwork_attributions_statistics, plot_subnetwork_correlations
+from spd.run_spd import get_common_run_name_suffix, optimize
 from spd.utils import (
     COLOR_PALETTE,
     DatasetGeneratedDataLoader,
-    collect_subnetwork_attributions,
     load_config,
     run_spd_forward_pass,
     set_seed,
@@ -320,9 +311,9 @@ def resid_mlp_plot_results_fn(
             topk = ((batch != 0).sum() / batch.shape[0]).item()
         return run_spd_forward_pass(
             spd_model=model,
+            config=config,
             target_model=target_model,
             input_array=batch,
-            attribution_type=config.attribution_type,
             batch_topk=batch_topk,
             topk=topk,
             distil_from_target=config.distil_from_target,
@@ -455,6 +446,7 @@ def resid_mlp_plot_results_fn(
     ############################################################################################
     attribution_scores = collect_subnetwork_attributions(
         spd_model=model,
+        config=config,
         target_model=target_model,
         device=device,
         n_instances=model.n_instances,
@@ -587,6 +579,7 @@ def main(
     )
     model = ResidualMLPSPDModel(config=model_config).to(device)
 
+    model = model.to(device)
     # Use the target_model's embedding matrix and don't train it further
     model.W_E.data[:, :] = target_model.W_E.data.detach().clone()
     model.W_E.requires_grad = False
