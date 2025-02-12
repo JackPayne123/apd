@@ -310,11 +310,11 @@ def optimize(
             )
 
         (
-            out_topk,
+            out_masked,
             schatten_loss,
-            topk_recon_loss,
-            topk_mask,
-            layer_acts_topk,
+            masked_recon_loss,
+            mask,
+            layer_acts_masked,
         ) = None, None, None, None, None
         if config.topk is not None:
             # We always assume the final subnetwork is the one we want to distil
@@ -330,31 +330,33 @@ def optimize(
                 ), "exact_topk only works if n_instances = 1"
                 # Get the exact number of active features over the batch
                 exact_topk = ((batch != 0).sum() / batch.shape[0]).item()
-                topk_mask = calc_topk_mask(topk_attrs, exact_topk, batch_topk=True)
+                mask = calc_topk_mask(topk_attrs, exact_topk, batch_topk=True)
             else:
-                topk_mask = calc_topk_mask(topk_attrs, config.topk, batch_topk=config.batch_topk)
+                mask = calc_topk_mask(topk_attrs, config.topk, batch_topk=config.batch_topk)
             if config.distil_from_target:
                 # Add back the final subnetwork index to the topk mask and set it to True
                 last_subnet_mask = torch.ones(
-                    (*topk_mask.shape[:-1], 1), dtype=torch.bool, device=device
+                    (*mask.shape[:-1], 1), dtype=mask.dtype, device=device
                 )
-                topk_mask = torch.cat((topk_mask, last_subnet_mask), dim=-1)
+                mask = torch.cat((mask, last_subnet_mask), dim=-1)
 
             # Do a forward pass with only the topk subnetworks
-            out_topk, topk_spd_cache = model.run_with_cache(
-                batch, names_filter=spd_cache_filter, topk_mask=topk_mask
+            out_masked, spd_cache_masked = model.run_with_cache(
+                batch, names_filter=spd_cache_filter, mask=mask
             )
-            layer_acts_topk = {k: v for k, v in topk_spd_cache.items() if k.endswith("hook_post")}
+            layer_acts_masked = {
+                k: v for k, v in spd_cache_masked.items() if k.endswith("hook_post")
+            }
 
             if config.topk_recon_coeff is not None:
-                assert out_topk is not None
-                topk_recon_loss = calc_recon_mse(out_topk, target_out, has_instance_dim)
+                assert out_masked is not None
+                masked_recon_loss = calc_recon_mse(out_masked, target_out, has_instance_dim)
 
         act_recon_loss = None
         if config.act_recon_coeff is not None:
             act_recon_layer_acts = (
-                layer_acts_topk
-                if layer_acts_topk is not None
+                layer_acts_masked
+                if layer_acts_masked is not None
                 else {k: v for k, v in spd_cache.items() if k.endswith("hook_post")}
             )
             target_post_weight_acts = post_weight_acts
@@ -374,7 +376,7 @@ def optimize(
 
         if config.schatten_coeff is not None:
             # Use the sparsity loss as the mask in the lp case, and topk_mask otherwise
-            mask = topk_mask if topk_mask is not None else lp_sparsity_loss_per_k
+            mask = mask if mask is not None else lp_sparsity_loss_per_k
             assert mask is not None
             schatten_pnorm = config.schatten_pnorm if config.schatten_pnorm is not None else 1.0
             schatten_loss = calc_schatten_loss(
@@ -395,7 +397,7 @@ def optimize(
             "param_match_loss": (param_match_loss, config.param_match_coeff),
             "out_recon_loss": (out_recon_loss, config.out_recon_coeff),
             "lp_sparsity_loss": (lp_sparsity_loss, config.lp_sparsity_coeff),
-            "topk_recon_loss": (topk_recon_loss, config.topk_recon_coeff),
+            "masked_recon_loss": (masked_recon_loss, config.topk_recon_coeff),
             "act_recon_loss": (act_recon_loss, config.act_recon_coeff),
             "schatten_loss": (schatten_loss, config.schatten_coeff),
         }
@@ -442,7 +444,7 @@ def optimize(
                 out_dir=out_dir,
                 device=device,
                 config=config,
-                topk_mask=topk_mask,
+                topk_mask=mask,
                 batch=batch,
             )
             if config.wandb_project:

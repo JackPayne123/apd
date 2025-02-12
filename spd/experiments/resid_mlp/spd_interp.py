@@ -117,7 +117,7 @@ def top1_model_fn(
         batch_topk=False,
         topk=1,
         distil_from_target=config.distil_from_target,
-        topk_mask=topk_mask,
+        mask=topk_mask,
     )
 
 
@@ -197,7 +197,7 @@ avg_components = torch.load(avg_components_path, map_location=device, weights_on
 # Get the loss of the spd model w.r.t the target model
 fn_without_batch_topk = lambda batch: spd_model_fn(
     batch, topk=1, batch_topk=False
-).spd_topk_model_output  # type: ignore
+).spd_model_masked_output  # type: ignore
 losses_spd_wrt_target = analyze_per_feature_performance(
     model_fn=fn_without_batch_topk,
     target_model_fn=target_model_fn,

@@ -83,13 +83,13 @@ class LinearComponent(nn.Module):
     def forward(
         self,
         x: Float[Tensor, "batch ... d_in"],
-        topk_mask: Float[Tensor, "batch ... C"] | None = None,
+        mask: Float[Tensor, "batch ... C"] | None = None,
     ) -> Float[Tensor, "batch ... d_out"]:
         """Forward pass through A and B matrices which make up the component for this layer.
 
         Args:
             x: Input tensor
-            topk_mask: Boolean tensor indicating which subnetworks to keep
+            mask: Tensor which masks parameter components. May be boolean or float.
         Returns:
             output: The summed output across all subnetworks
         """
@@ -97,11 +97,11 @@ class LinearComponent(nn.Module):
 
         # First multiply by A to get to intermediate dimension m
         inner_acts = einops.einsum(x, self.A, "batch ... d_in, ... C d_in m -> batch ... C m")
-        if topk_mask is not None:
+        if mask is not None:
             # We could apply the mask after component_acts, but we do it here so our matrices become
             # sparser and more efficient to compute with.
             inner_acts = einops.einsum(
-                inner_acts, topk_mask, "batch ... C m, batch ... C -> batch ... C m"
+                inner_acts, mask, "batch ... C m, batch ... C -> batch ... C m"
             )
 
         # Then multiply by B to get to output dimension

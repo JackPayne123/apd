@@ -1,5 +1,5 @@
 """
-Allow for running hooks on a model. Currently only forward hooks supported.
+Allow for running hooks on a model.
 
 Much of this code is copied from https://github.com/TransformerLensOrg/TransformerLens
 """

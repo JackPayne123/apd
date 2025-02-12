@@ -148,7 +148,7 @@ class SPDOutputs(NamedTuple):
     spd_model_output: (
         Float[Tensor, "batch d_model_out"] | Float[Tensor, "batch n_instances d_model_out"]
     )
-    spd_topk_model_output: (
+    spd_model_masked_output: (
         Float[Tensor, "batch d_model_out"] | Float[Tensor, "batch n_instances d_model_out"]
     )
     layer_acts: dict[str, Float[Tensor, "batch d_out"] | Float[Tensor, "batch n_instances d_out"]]
@@ -156,7 +156,7 @@ class SPDOutputs(NamedTuple):
         str, Float[Tensor, "batch C d_out"] | Float[Tensor, "batch n_instances C d_out"]
     ]
     attribution_scores: Float[Tensor, "batch C"] | Float[Tensor, "batch n_instances C"]
-    topk_mask: Float[Tensor, "batch C"] | Float[Tensor, "batch n_instances C"]
+    mask: Float[Tensor, "batch C"] | Float[Tensor, "batch n_instances C"]
 
 
 def calc_topk_mask(
@@ -200,7 +200,7 @@ def run_spd_forward_pass(
     batch_topk: bool,
     topk: float,
     distil_from_target: bool,
-    topk_mask: Float[Tensor, "batch C"] | Float[Tensor, "batch n_instances C"] | None = None,
+    mask: Float[Tensor, "batch C"] | Float[Tensor, "batch n_instances C"] | None = None,
 ) -> SPDOutputs:
     # Forward pass on target model
     target_cache_filter = lambda k: k.endswith((".hook_pre", ".hook_post"))
@@ -223,28 +223,28 @@ def run_spd_forward_pass(
         component_acts={k: v for k, v in spd_cache.items() if k.endswith("hook_component_acts")},
     )
 
-    if topk_mask is None:
+    if mask is None:
         # We always assume the final subnetwork is the one we want to distil
         topk_attrs = attribution_scores[..., :-1] if distil_from_target else attribution_scores
 
-        topk_mask = calc_topk_mask(topk_attrs, topk, batch_topk=batch_topk)
+        mask = calc_topk_mask(topk_attrs, topk, batch_topk=batch_topk)
         if distil_from_target:
             # Add back the final subnetwork index to the topk mask and set it to True
             last_subnet_mask = torch.ones(
-                (*topk_mask.shape[:-1], 1), dtype=torch.bool, device=attribution_scores.device
+                (*mask.shape[:-1], 1), dtype=torch.bool, device=attribution_scores.device
             )
-            topk_mask = torch.cat((topk_mask, last_subnet_mask), dim=-1)
+            mask = torch.cat((mask, last_subnet_mask), dim=-1)
 
-    topk_spd_out = spd_model(input_array, topk_mask=topk_mask)
+    spd_model_masked_output = spd_model(input_array, mask=mask)
     attribution_scores = attribution_scores.cpu().detach()
     return SPDOutputs(
         target_model_output=target_out,
         spd_model_output=out,
-        spd_topk_model_output=topk_spd_out,
+        spd_model_masked_output=spd_model_masked_output,
         layer_acts={k: v for k, v in spd_cache.items() if k.endswith("hook_post")},
         component_acts={k: v for k, v in spd_cache.items() if k.endswith("hook_component_acts")},
         attribution_scores=attribution_scores,
-        topk_mask=topk_mask,
+        mask=mask,
     )
 
 

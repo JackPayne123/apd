@@ -93,18 +93,18 @@ class MLP(nn.Module):
     def forward(
         self,
         x: Float[Tensor, "batch ... d_model"],
-        topk_mask: Float[Tensor, "batch ... C"] | None = None,
+        mask: Float[Tensor, "batch ... C"] | None = None,
     ) -> tuple[Float[Tensor, "batch ... d_model"],]:
         """Run a forward pass and cache pre and post activations for each parameter.
 
         Note that we don't need to cache pre activations for the biases. We also don't care about
         the output bias which is always zero.
         """
-        mid_pre_act_fn = self.mlp_in(x, topk_mask=topk_mask)
+        mid_pre_act_fn = self.mlp_in(x, mask=mask)
         if self.bias1 is not None:
             mid_pre_act_fn = mid_pre_act_fn + self.bias1
         mid = self.act_fn(mid_pre_act_fn)
-        out = self.mlp_out(mid, topk_mask=topk_mask)
+        out = self.mlp_out(mid, mask=mask)
         if self.bias2 is not None:
             out = out + self.bias2
         return out
@@ -327,7 +327,7 @@ class ResidualMLPSPDModel(SPDModel):
     def forward(
         self,
         x: Float[Tensor, "batch n_instances n_features"],
-        topk_mask: Float[Tensor, "batch n_instances C"] | None = None,
+        mask: Float[Tensor, "batch n_instances C"] | None = None,
     ) -> Float[Tensor, "batch n_instances d_embed"]:
         """
         Returns:
@@ -339,7 +339,7 @@ class ResidualMLPSPDModel(SPDModel):
             "batch n_instances n_features, n_instances n_features d_embed -> batch n_instances d_embed",
         )
         for layer in self.layers:
-            residual = residual + layer(residual, topk_mask)
+            residual = residual + layer(residual, mask)
         out = einops.einsum(
             residual,
             self.W_U,

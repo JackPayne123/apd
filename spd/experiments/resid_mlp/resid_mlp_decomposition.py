@@ -317,7 +317,7 @@ def resid_mlp_plot_results_fn(
             batch_topk=batch_topk,
             topk=topk,
             distil_from_target=config.distil_from_target,
-        ).spd_topk_model_output
+        ).spd_model_masked_output
 
     def target_model_fn(batch: Float[Tensor, "batch n_instances"]):
         return target_model(batch)

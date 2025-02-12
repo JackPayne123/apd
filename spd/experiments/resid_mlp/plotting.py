@@ -956,9 +956,9 @@ def collect_per_feature_losses(
             sample_topk_mask = calc_topk_mask(attribution_scores, topk=1, batch_topk=False)
 
             # Get the batch topk model output
-            spd_out_batch_topk = spd_model(batch, topk_mask=batch_topk_mask)
+            spd_out_batch_topk = spd_model(batch, mask=batch_topk_mask)
             # Get the sample topk model output
-            spd_out_sample_topk = spd_model(batch, topk_mask=sample_topk_mask)
+            spd_out_sample_topk = spd_model(batch, mask=sample_topk_mask)
 
             # Get rid of the n_instances dimension for simplicity
             batch: Float[Tensor, "batch n_features"] = batch.squeeze(1)
@@ -1058,7 +1058,7 @@ def collect_average_components_per_feature(
         assert batch.shape[1] == 1
 
         # Get which components were active for each feature
-        topk_mask_raw: Float[Tensor, "batch n_instances C"] = model_fn(batch).topk_mask
+        topk_mask_raw: Float[Tensor, "batch n_instances C"] = model_fn(batch).mask
 
         batch: Float[Tensor, "batch n_features"] = batch.squeeze(1)
         topk_mask: Float[Tensor, "batch C"] = topk_mask_raw.squeeze(1)
@@ -1284,7 +1284,9 @@ def plot_resid_vs_mlp_out(
         # Get the SPD resid contribution by running with no subnetworks. This should be equivalent
         # to W_E W_U and but doesn't require access to the ResidMLP SPD model.
         topk_mask = torch.zeros_like(batch)
-        spd_WEU = topk_model_fn(batch, topk_mask).spd_topk_model_output[batch_idx, instance_idx, :]
+        spd_WEU = topk_model_fn(batch, topk_mask).spd_model_masked_output[
+            batch_idx, instance_idx, :
+        ]
         spd_WEU = spd_WEU.detach().cpu()
         if tied_weights:
             assert torch.allclose(spd_WEU, W_EU), "Tied weights but W_EU != SPD resid contribution"
@@ -1302,7 +1304,9 @@ def plot_resid_vs_mlp_out(
         else:
             topk_mask = torch.zeros_like(batch)
             topk_mask[:, :, subnet_indices] = 1
-        topk_out = topk_model_fn(batch, topk_mask).spd_topk_model_output[batch_idx, instance_idx, :]
+        topk_out = topk_model_fn(batch, topk_mask).spd_model_masked_output[
+            batch_idx, instance_idx, :
+        ]
         topk_mlp_out = topk_out.detach().cpu() - spd_WEU
         topk_mlp_out_mse = F.mse_loss(topk_mlp_out, mlp_out).item()
         corr = np.corrcoef(topk_mlp_out[mask], W_EU[mask])[0, 1]
@@ -1315,7 +1319,9 @@ def plot_resid_vs_mlp_out(
         )
         # Full forward pass
         topk_mask = torch.ones_like(batch)
-        full_out = topk_model_fn(batch, topk_mask).spd_topk_model_output[batch_idx, instance_idx, :]
+        full_out = topk_model_fn(batch, topk_mask).spd_model_masked_output[
+            batch_idx, instance_idx, :
+        ]
         full_mlp_out = full_out.detach().cpu() - spd_WEU
         full_mlp_out_mse = F.mse_loss(full_mlp_out, mlp_out).item()
         corr = np.corrcoef(full_mlp_out[mask], W_EU[mask])[0, 1]
@@ -1500,10 +1506,10 @@ def get_scrubbed_losses(
         topk = config.topk
         batch_topk = config.batch_topk
 
-        out_spd = spd_model_fn(batch, topk, batch_topk).spd_topk_model_output
-        out_random = top1_model_fn(batch, random_topk_mask).spd_topk_model_output
-        out_scrubbed = top1_model_fn(batch, scrubbed_topk_mask).spd_topk_model_output
-        out_antiscrubbed = top1_model_fn(batch, antiscrubbed_topk_mask).spd_topk_model_output
+        out_spd = spd_model_fn(batch, topk, batch_topk).spd_model_masked_output
+        out_random = top1_model_fn(batch, random_topk_mask).spd_model_masked_output
+        out_scrubbed = top1_model_fn(batch, scrubbed_topk_mask).spd_model_masked_output
+        out_antiscrubbed = top1_model_fn(batch, antiscrubbed_topk_mask).spd_model_masked_output
         out_target = target_model(batch)
         # Monosemantic baseline
         out_monosemantic = batch.clone()
@@ -1663,13 +1669,15 @@ def plot_feature_response_with_subnets(
     )
     zeros_topk_mask = torch.zeros(batch_size, n_instances, C, device=device)
     ones_topk_mask = torch.ones(batch_size, n_instances, C, device=device)
-    out_WE_WU_only = topk_model_fn(batch, zeros_topk_mask).spd_topk_model_output[:, instance_idx, :]
+    out_WE_WU_only = topk_model_fn(batch, zeros_topk_mask).spd_model_masked_output[
+        :, instance_idx, :
+    ]
 
     out_red = topk_model_fn(batch, topk_mask_red)
     out_blue = topk_model_fn(batch, topk_mask_blue)
-    out_spd = topk_model_fn(batch, ones_topk_mask).spd_topk_model_output[:, instance_idx, :]
-    mlp_out_blue_spd = out_blue.spd_topk_model_output[:, instance_idx, :] - out_WE_WU_only
-    mlp_out_red_spd = out_red.spd_topk_model_output[:, instance_idx, :] - out_WE_WU_only
+    out_spd = topk_model_fn(batch, ones_topk_mask).spd_model_masked_output[:, instance_idx, :]
+    mlp_out_blue_spd = out_blue.spd_model_masked_output[:, instance_idx, :] - out_WE_WU_only
+    mlp_out_red_spd = out_red.spd_model_masked_output[:, instance_idx, :] - out_WE_WU_only
     mlp_out_target = out_blue.target_model_output[:, instance_idx, :] - out_WE_WU_only
     mlp_out_spd = out_spd - out_WE_WU_only
 
@@ -1767,7 +1775,7 @@ def get_feature_subnet_map(
     batch = torch.zeros(batch_size, n_instances, n_features, device=device)
     batch[torch.arange(n_features), instance_idx, torch.arange(n_features)] = 1
     top1_out = top1_model_fn(batch, None)
-    top1_mask = top1_out.topk_mask[:, instance_idx, :]
+    top1_mask = top1_out.mask[:, instance_idx, :]
     subnet_indices = {
         int(feature_idx.item()): int(subnet_idx.item())
         for feature_idx, subnet_idx in top1_mask.nonzero()

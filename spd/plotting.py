@@ -224,12 +224,12 @@ def collect_sparse_dataset_mse_losses(
             distil_from_target=distil_from_target,
         )
         # Combine the batch and n_instances dimension for batch, labels, target_model_output,
-        # spd_outputs.spd_topk_model_output
+        # spd_outputs.spd_model_masked_output
         ein_str = "batch n_instances n_features -> (batch n_instances) n_features"
         batch = einops.rearrange(batch, ein_str)
         labels = einops.rearrange(labels, ein_str)
         target_model_output = einops.rearrange(target_model_output, ein_str)
-        spd_topk_model_output = einops.rearrange(spd_outputs.spd_topk_model_output, ein_str)
+        spd_model_masked_output = einops.rearrange(spd_outputs.spd_model_masked_output, ein_str)
 
         if gen_type == "at_least_zero_active":
             # Remove all entries where there are no active features
@@ -237,10 +237,10 @@ def collect_sparse_dataset_mse_losses(
             batch = batch[mask]
             labels = labels[mask]
             target_model_output = target_model_output[mask]
-            spd_topk_model_output = spd_topk_model_output[mask]
+            spd_model_masked_output = spd_model_masked_output[mask]
 
         topk_recon_loss_labels = calc_recon_mse(
-            spd_topk_model_output, labels, has_instance_dim=False
+            spd_model_masked_output, labels, has_instance_dim=False
         )
         recon_loss = calc_recon_mse(target_model_output, labels, has_instance_dim=False)
         baseline_batch = calc_recon_mse(batch, labels, has_instance_dim=False)

@@ -69,6 +69,7 @@ known-third-party = ["wandb"]
 
 [tool.pyright]
 include = ["spd", "tests"]
+exclude = ["**/wandb/**"]
 
 strictListInference = true
 strictDictionaryInference = true
