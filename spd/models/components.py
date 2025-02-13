@@ -9,6 +9,27 @@ from spd.hooks import HookPoint
 from spd.module_utils import init_param_
 
 
+def hard_sigmoid(x: Tensor) -> Tensor:
+    return torch.nn.functional.relu(torch.clamp(x, max=1))
+
+
+class Gate(nn.Module):
+    """A gate that maps a single input to a single output."""
+
+    def __init__(self, m: int, n_instances: int | None = None):
+        super().__init__()
+        self.n_instances = n_instances
+        shape = (n_instances, m) if n_instances is not None else (m,)
+        self.weight = nn.Parameter(torch.empty(shape))
+        init_param_(self.weight, scale=1.0, init_type="kaiming_uniform")
+        self.bias = nn.Parameter(torch.zeros(shape))
+
+    def forward(
+        self, x: Float[Tensor, "batch m"] | Float[Tensor, "batch n_instances m"]
+    ) -> Float[Tensor, "batch m"] | Float[Tensor, "batch n_instances m"]:
+        return hard_sigmoid(x * self.weight + self.bias)
+
+
 class Linear(nn.Module):
     """A linear transformation with an optional n_instances dimension."""
 
@@ -47,45 +68,36 @@ class LinearComponent(nn.Module):
         self,
         d_in: int,
         d_out: int,
-        C: int,
+        m: int,
         n_instances: int | None = None,
         init_type: Literal["kaiming_uniform", "xavier_normal"] = "kaiming_uniform",
         init_scale: float = 1.0,
-        m: int | None = None,
     ):
         super().__init__()
         self.n_instances = n_instances
-        self.C = C
-        self.m = min(d_in, d_out) if m is None else m
+        self.m = m
 
         # Initialize A and B matrices
-        shape_A = (n_instances, C, d_in, self.m) if n_instances is not None else (C, d_in, self.m)
-        shape_B = (n_instances, C, self.m, d_out) if n_instances is not None else (C, self.m, d_out)
+        shape_A = (n_instances, d_in, self.m) if n_instances is not None else (d_in, self.m)
+        shape_B = (n_instances, self.m, d_out) if n_instances is not None else (self.m, d_out)
         self.A = nn.Parameter(torch.empty(shape_A))
         self.B = nn.Parameter(torch.empty(shape_B))
         self.hook_pre = HookPoint()  # (batch d_in) or (batch n_instances d_in)
-        self.hook_component_acts = HookPoint()  # (batch C d_out) or (batch n_instances C d_out)
+        self.hook_component_acts = HookPoint()  # (batch m) or (batch n_instances m)
         self.hook_post = HookPoint()  # (batch d_out) or (batch n_instances d_out)
 
         init_param_(self.A, scale=init_scale, init_type=init_type)
         init_param_(self.B, scale=init_scale, init_type=init_type)
 
     @property
-    def component_weights(self) -> Float[Tensor, "... C d_in d_out"]:
-        """A @ B before summing over the subnetwork dimension."""
-        return einops.einsum(self.A, self.B, "... C d_in m, ... C m d_out -> ... C d_in d_out")
-
-    @property
     def weight(self) -> Float[Tensor, "... d_in d_out"]:
-        """A @ B after summing over the subnetwork dimension."""
-        return einops.einsum(self.A, self.B, "... C d_in m, ... C m d_out -> ... d_in d_out")
+        """A @ B"""
+        return einops.einsum(self.A, self.B, "... d_in m, ... m d_out -> ... d_in d_out")
 
     def forward(
-        self,
-        x: Float[Tensor, "batch ... d_in"],
-        mask: Float[Tensor, "batch ... C"] | None = None,
+        self, x: Float[Tensor, "batch ... d_in"], mask: Float[Tensor, "batch ... m"] | None = None
     ) -> Float[Tensor, "batch ... d_out"]:
-        """Forward pass through A and B matrices which make up the component for this layer.
+        """Forward pass through A and B matrices.
 
         Args:
             x: Input tensor
@@ -96,23 +108,14 @@ class LinearComponent(nn.Module):
         x = self.hook_pre(x)
 
         # First multiply by A to get to intermediate dimension m
-        inner_acts = einops.einsum(x, self.A, "batch ... d_in, ... C d_in m -> batch ... C m")
+        component_acts = einops.einsum(x, self.A, "batch ... d_in, ... d_in m -> batch ... m")
         if mask is not None:
-            # We could apply the mask after component_acts, but we do it here so our matrices become
-            # sparser and more efficient to compute with.
-            inner_acts = einops.einsum(
-                inner_acts, mask, "batch ... C m, batch ... C -> batch ... C m"
-            )
+            component_acts *= mask
 
+        component_acts = self.hook_component_acts(component_acts)
         # Then multiply by B to get to output dimension
-        component_acts = einops.einsum(
-            inner_acts, self.B, "batch ... C m, ... C m d_out -> batch ... C d_out"
-        )
+        out = einops.einsum(component_acts, self.B, "batch ... m, ... m d_out -> batch ... d_out")
 
-        self.hook_component_acts(component_acts)
-
-        # Sum over subnetwork dimension
-        out = einops.einsum(component_acts, "batch ... C d_out -> batch ... d_out")
         out = self.hook_post(out)
         return out
 
@@ -147,31 +150,26 @@ class TransposedLinearComponent(LinearComponent):
         # Copy the relevant parts from LinearComponent.__init__. Don't copy operations that will
         # call TransposedLinear.A or TransposedLinear.B.
         nn.Module.__init__(self)
-        self.n_instances, self.C, _, self.m = original_A.shape
+        self.n_instances, _, self.m = original_A.shape
 
         self.hook_pre = HookPoint()  # (batch ... d_out)
-        self.hook_component_acts = HookPoint()  # (batch ... C d_in)
+        self.hook_component_acts = HookPoint()  # (batch ... m)
         self.hook_post = HookPoint()  # (batch ... d_in)
 
         self.register_buffer("original_A", original_A, persistent=False)
         self.register_buffer("original_B", original_B, persistent=False)
 
     @property
-    def A(self) -> Float[Tensor, "... C d_out m"]:
+    def A(self) -> Float[Tensor, "... d_out m"]:
         # New A is the transpose of the original B
-        return einops.rearrange(self.original_B, "... C m d_out -> ... C d_out m")
+        return einops.rearrange(self.original_B, "... m d_out -> ... d_out m")
 
     @property
-    def B(self) -> Float[Tensor, "... C d_in m"]:
+    def B(self) -> Float[Tensor, "... d_in m"]:
         # New B is the transpose of the original A
-        return einops.rearrange(self.original_A, "... C d_in m -> ... C m d_in")
-
-    @property
-    def component_weights(self) -> Float[Tensor, "... C d_out d_in"]:
-        """A @ B before summing over the subnetwork dimension."""
-        return einops.einsum(self.A, self.B, "... C d_out m, ... C m d_in -> ... C d_out d_in")
+        return einops.rearrange(self.original_A, "... d_in m -> ... m d_in")
 
     @property
     def weight(self) -> Float[Tensor, "... d_out d_in"]:
-        """A @ B after summing over the subnetwork dimension."""
-        return einops.einsum(self.A, self.B, "... C d_out m, ... C m d_in -> ... d_out d_in")
+        """A @ B"""
+        return einops.einsum(self.A, self.B, "... d_out m, ... m d_in -> ... d_out d_in")

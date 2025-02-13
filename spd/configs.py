@@ -45,57 +45,35 @@ class Config(BaseModel):
     wandb_run_name: str | None = None
     wandb_run_name_prefix: str = ""
     seed: int = 0
-    topk: PositiveFloat | None = None
-    batch_topk: bool = True
-    exact_topk: bool = False
     batch_size: PositiveInt
     steps: PositiveInt
     print_freq: PositiveInt
     image_freq: PositiveInt | None = None
     image_on_first_step: bool = True
-    slow_images: bool = False
     save_freq: PositiveInt | None = None
     lr: PositiveFloat
     out_recon_coeff: NonNegativeFloat | None = None
     act_recon_coeff: NonNegativeFloat | None = None
     param_match_coeff: NonNegativeFloat | None = 1.0
-    topk_recon_coeff: NonNegativeFloat | None = None
-    schatten_coeff: NonNegativeFloat | None = None
-    schatten_pnorm: NonNegativeFloat | None = None
-    lp_sparsity_coeff: NonNegativeFloat | None = None
+    masked_recon_coeff: NonNegativeFloat | None = None
+    lp_sparsity_coeff: NonNegativeFloat
+    pnorm: PositiveFloat
     post_relu_act_recon: bool = False
-    distil_from_target: bool = False
-    pnorm: PositiveFloat | None = None
-    C: PositiveInt
-    m: PositiveInt | None = None
+    m: PositiveInt
     lr_schedule: Literal["linear", "constant", "cosine", "exponential"] = "constant"
     lr_exponential_halflife: PositiveFloat | None = None
     lr_warmup_pct: Probability = 0.0
     sparsity_loss_type: Literal["jacobian"] = "jacobian"
     unit_norm_matrices: bool = False
-    attribution_type: Literal["gradient", "ablation", "activation"] = "gradient"
+    attribution_type: Literal["gradient"] = "gradient"
     task_config: TMSTaskConfig | ResidualMLPTaskConfig = Field(..., discriminator="task_name")
 
-    DEPRECATED_CONFIG_KEYS: ClassVar[list[str]] = [
-        "topk_param_attrib_coeff",
-        "orthog_coeff",
-        "hardcode_topk_mask_step",
-        "pnorm_end",
-        "topk_l2_coeff",
-        "spd_type",
-        "sparsity_warmup_pct",
-    ]
-    RENAMED_CONFIG_KEYS: ClassVar[dict[str, str]] = {"topk_act_recon_coeff": "act_recon_coeff"}
+    DEPRECATED_CONFIG_KEYS: ClassVar[list[str]] = []
+    RENAMED_CONFIG_KEYS: ClassVar[dict[str, str]] = {}
 
     @model_validator(mode="before")
     def handle_deprecated_config_keys(cls, config_dict: dict[str, Any]) -> dict[str, Any]:
         """Remove deprecated config keys and change names of any keys that have been renamed."""
-        # Move k from task_config to Config and rename it to C
-        if "task_config" in config_dict and "k" in config_dict["task_config"]:
-            logger.warning("task_config.k is deprecated, please use C in the main Config instead")
-            config_dict["C"] = config_dict["task_config"]["k"]
-            del config_dict["task_config"]["k"]
-
         for key in list(config_dict.keys()):
             val = config_dict[key]
             if key in cls.DEPRECATED_CONFIG_KEYS:
@@ -109,34 +87,9 @@ class Config(BaseModel):
 
     @model_validator(mode="after")
     def validate_model(self) -> Self:
-        # Check valid combinations of topk and batch_size
-        if self.topk is not None:
-            if self.batch_topk:
-                if not (self.batch_size * self.topk).is_integer():
-                    logger.warning(
-                        f"batch_size * topk={self.batch_size * self.topk} is not an integer, will "
-                        f"round down from {self.batch_size * self.topk} to "
-                        f"{int(self.batch_size * self.topk)} when calculating topk_mask"
-                    )
-            else:
-                if not self.topk.is_integer():
-                    raise ValueError("topk must be an integer when not using batch_topk")
-
-        # Warn if neither topk_recon_coeff nor lp_sparsity_coeff is set
-        if not self.topk_recon_coeff and not self.lp_sparsity_coeff:
-            logger.warning("Neither topk_recon_coeff nor lp_sparsity_coeff is set")
-
-        # If topk_recon_coeff is set, topk must be set
-        if self.topk_recon_coeff is not None:
-            assert self.topk is not None, "topk must be set if topk_recon_coeff is set"
-
-        # If lp_sparsity_coeff is set, pnorm must be set
-        if self.lp_sparsity_coeff is not None:
-            assert self.pnorm is not None, "pnorm must be set if lp_sparsity_coeff is set"
-
-        # Check that topk_recon_coeff is None if topk is None
-        if self.topk is None:
-            assert self.topk_recon_coeff is None, "topk_recon_coeff is not None but topk is"
+        # Warn if neither masked_recon_coeff nor lp_sparsity_coeff is set
+        if not self.masked_recon_coeff and not self.lp_sparsity_coeff:
+            logger.warning("Neither masked_recon_coeff nor lp_sparsity_coeff is set")
 
         # Give a warning if both out_recon_coeff and param_match_coeff are > 0
         if (
@@ -151,8 +104,8 @@ class Config(BaseModel):
 
         # If any of the coeffs are 0, raise a warning
         msg = "is 0, you may wish to instead set it to null to avoid calculating the loss"
-        if self.topk_recon_coeff == 0:
-            logger.warning(f"topk_recon_coeff {msg}")
+        if self.masked_recon_coeff == 0:
+            logger.warning(f"masked_recon_coeff {msg}")
         if self.lp_sparsity_coeff == 0:
             logger.warning(f"lp_sparsity_coeff {msg}")
         if self.param_match_coeff == 0:
@@ -163,10 +116,5 @@ class Config(BaseModel):
             assert (
                 self.lr_exponential_halflife is not None
             ), "lr_exponential_halflife must be set if lr_schedule is exponential"
-
-        if self.schatten_coeff is not None:
-            assert (
-                self.schatten_pnorm is not None
-            ), "schatten_pnorm must be set if schatten_coeff is set"
 
         return self

@@ -1,6 +1,5 @@
 # %% Imports
 
-import einops
 import matplotlib.pyplot as plt
 import torch
 
@@ -8,18 +7,13 @@ from spd.experiments.resid_mlp.models import (
     ResidualMLPModel,
 )
 from spd.experiments.resid_mlp.plotting import (
-    calculate_virtual_weights,
-    plot_2d_snr,
     plot_all_relu_curves,
     plot_individual_feature_response,
-    plot_resid_vs_mlp_out,
     plot_single_feature_response,
     plot_single_relu_curve,
-    relu_contribution_plot,
 )
 from spd.experiments.resid_mlp.resid_mlp_dataset import ResidualMLPDataset
 from spd.experiments.resid_mlp.train_resid_mlp import ResidMLPTrainConfig
-from spd.plotting import plot_matrix
 from spd.settings import REPO_ROOT
 from spd.types import ModelPath
 from spd.utils import set_seed
@@ -140,81 +134,3 @@ fig.savefig(
     out_dir / f"resid_mlp_feature_response_multi_{n_layers}layers.png", bbox_inches="tight", dpi=300
 )
 print(f"Saved figure to {out_dir / f'resid_mlp_feature_response_multi_{n_layers}layers.png'}")
-
-# %%
-
-
-instance_idx = 0
-nrows = 10
-fig, axs = plt.subplots(nrows=nrows, ncols=1, constrained_layout=True, figsize=(10, 3 + 4 * nrows))
-fig.suptitle(f"Model {path}")
-for i in range(nrows):
-    ax = axs[i]  # type: ignore
-    plot_resid_vs_mlp_out(
-        target_model=model, device=device, ax=ax, instance_idx=instance_idx, feature_idx=i
-    )
-plt.show()
-
-
-# %% Show connection strength between ReLUs and features
-virtual_weights = calculate_virtual_weights(target_model=model, device=device)
-fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 5), constrained_layout=True)  # type: ignore
-
-relu_contribution_plot(
-    ax1=ax1,
-    ax2=ax2,
-    all_diag_relu_conns=virtual_weights["diag_relu_conns"],
-    model=model,
-    device=device,
-    instance_idx=0,
-)
-plt.show()
-
-# %% Calculate S/N ratio for 1 and 2 active features.
-fig = plot_2d_snr(model, device)
-plt.show()
-
-# %% Plot virtual weights
-
-fig = plt.figure(constrained_layout=True, figsize=(20, 20))
-gs = fig.add_gridspec(ncols=2, nrows=3)
-ax1 = fig.add_subplot(gs[0, 0])
-ax2 = fig.add_subplot(gs[0, 1])
-ax3 = fig.add_subplot(gs[1:, :])
-virtual_weights = calculate_virtual_weights(target_model=model, device=device)
-instance_idx = 0
-in_conns = virtual_weights["in_conns"][instance_idx].cpu().detach()
-out_conns = virtual_weights["out_conns"][instance_idx].cpu().detach()
-W_E_W_U = einops.einsum(
-    virtual_weights["W_E"][instance_idx],
-    virtual_weights["W_U"][instance_idx],
-    "n_features1 d_embed, d_embed n_features2 -> n_features1 n_features2",
-)
-plot_matrix(
-    ax1,
-    in_conns.T,
-    "Virtual input weights $(W_E W_{in})^T$",
-    "Features",
-    "Neurons",
-    colorbar_format="%.2f",
-)
-plot_matrix(
-    ax2,
-    out_conns,
-    "Virtual output weights $W_{out} W_U$",
-    "Features",
-    "Neurons",
-    colorbar_format="%.2f",
-)
-ax2.xaxis.set_label_position("top")
-plot_matrix(
-    ax3,
-    W_E_W_U,
-    "Virtual weights $W_E W_U$",
-    "Features",
-    "Features",
-    colorbar_format="%.2f",
-)
-plt.show()
-
-# %%

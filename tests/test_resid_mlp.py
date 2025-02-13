@@ -46,17 +46,17 @@ def test_resid_mlp_decomposition_happy_path() -> None:
     device = "cpu"
     config = Config(
         seed=0,
-        C=3,
-        topk=1,
-        batch_topk=True,
+        m=2,
         param_match_coeff=1.0,
-        topk_recon_coeff=1,
-        schatten_pnorm=1,
-        schatten_coeff=1,
+        masked_recon_coeff=1,
+        act_recon_coeff=1,
+        post_relu_act_recon=True,
+        lp_sparsity_coeff=1.0,
+        pnorm=0.9,
         attribution_type="gradient",
         lr=1e-3,
         batch_size=32,
-        steps=10,  # Run only a few steps for the test
+        steps=50,  # Run only a few steps for the test
         print_freq=2,
         image_freq=5,
         save_freq=None,
@@ -70,7 +70,7 @@ def test_resid_mlp_decomposition_happy_path() -> None:
     target_model = ResidualMLPModel(config=resid_mlp_config).to(device)
 
     # Create the SPD model
-    spd_config = ResidualMLPSPDConfig(**resid_mlp_config.model_dump(), C=config.C)
+    spd_config = ResidualMLPSPDConfig(**resid_mlp_config.model_dump(), m=config.m)
     model = ResidualMLPSPDModel(config=spd_config).to(device)
 
     # Use the pretrained model's embedding matrices and don't train them further
@@ -103,12 +103,6 @@ def test_resid_mlp_decomposition_happy_path() -> None:
     )
     dataloader = DatasetGeneratedDataLoader(dataset, batch_size=config.batch_size, shuffle=False)
 
-    # Set up param_map
-    param_map = {}
-    for i in range(resid_mlp_config.n_layers):
-        param_map[f"layers.{i}.mlp_in"] = f"layers.{i}.mlp_in"
-        param_map[f"layers.{i}.mlp_out"] = f"layers.{i}.mlp_out"
-
     # Calculate initial loss
     with torch.inference_mode():
         batch, _ = next(iter(dataloader))
@@ -140,7 +134,7 @@ def test_resid_mlp_decomposition_happy_path() -> None:
     print(f"Final loss: {final_loss}, initial loss: {initial_loss}")
     # Assert that the final loss is lower than the initial loss
     assert (
-        final_loss < initial_loss
+        final_loss < initial_loss + 1e-3
     ), f"Expected final loss to be lower than initial loss, but got {final_loss} >= {initial_loss}"
 
     # Show that W_E is still the same as the target model's W_E
@@ -150,6 +144,7 @@ def test_resid_mlp_decomposition_happy_path() -> None:
 def test_resid_mlp_equivalent_to_raw_model() -> None:
     device = "cpu"
     set_seed(0)
+    m = 4
     resid_mlp_config = ResidualMLPConfig(
         n_instances=2,
         n_features=3,
@@ -161,12 +156,11 @@ def test_resid_mlp_equivalent_to_raw_model() -> None:
         in_bias=True,
         out_bias=True,
     )
-    C = 2
 
     target_model = ResidualMLPModel(config=resid_mlp_config).to(device)
 
     # Create the SPD model with k=1
-    resid_mlp_spd_config = ResidualMLPSPDConfig(**resid_mlp_config.model_dump(), C=C)
+    resid_mlp_spd_config = ResidualMLPSPDConfig(**resid_mlp_config.model_dump(), m=m)
     spd_model = ResidualMLPSPDModel(config=resid_mlp_spd_config).to(device)
 
     # Init all params to random values

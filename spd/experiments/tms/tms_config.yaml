@@ -4,15 +4,10 @@
 # wandb_run_name_prefix: ""
 # unit_norm_matrices: false
 # seed: 0
-# C: 5
-# topk: 0.211
-# batch_topk: true
 # param_match_coeff: 1.0
-# topk_recon_coeff: 1
-# attribution_type: gradient
-# pnorm: null
-# schatten_pnorm: 1.0
-# schatten_coeff: 7e-1
+# masked_recon_coeff: 1
+# pnorm: 0.9
+# lp_sparsity_coeff: 1.0
 # batch_size: 2048
 # steps: 20_000
 # image_freq: 5_000
@@ -35,16 +30,11 @@ wandb_run_name: null
 wandb_run_name_prefix: ""
 unit_norm_matrices: false
 seed: 0
-topk: 2.0
-# topk: 0.8 # synced inputs
-C: 40
-batch_topk: true
+m: 10
 param_match_coeff: 1.0
-topk_recon_coeff: 10.0
-attribution_type: gradient
-pnorm: null
-schatten_pnorm: 0.9
-schatten_coeff: 15.0
+masked_recon_coeff: 10.0
+pnorm: 0.9
+lp_sparsity_coeff: 1.0
 batch_size: 2048
 steps: 20_000
 image_freq: 5_000
@@ -58,7 +48,5 @@ task_config:
   bias_val: 0.0
   train_bias: false
   feature_probability: 0.05
-  # feature_probability: 0.02 # synced inputs
   data_generation_type: "at_least_zero_active"
   pretrained_model_path: "wandb:spd-train-tms/runs/tmzweoqk"
-  # pretrained_model_path: "wandb:spd-train-tms/runs/rkflpubi" # synced inputs

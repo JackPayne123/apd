@@ -45,18 +45,21 @@ def _tms_forward(
     linear1: Linear | LinearComponent,
     linear2: TransposedLinear | TransposedLinearComponent,
     b_final: Float[Tensor, "n_instances n_features"],
-    mask: Float[Tensor, "batch n_instances C"] | None = None,
+    masks: dict[str, Float[Tensor, "batch n_instances m"]] | None = None,
     hidden_layers: nn.ModuleList | None = None,
 ) -> Float[Tensor, "batch n_instances n_features"]:
     """Forward pass used for TMSModel and TMSSPDModel.
 
-    Note that topk_mask is only used for TMSSPDModel.
+    Note that masks have no effect for TMSModel.
     """
-    hidden = linear1(x, mask=mask)
+    linear1_mask = masks["linear1"] if masks is not None else None
+    hidden = linear1(x, mask=linear1_mask)
     if hidden_layers is not None:
-        for layer in hidden_layers:
-            hidden = layer(hidden, mask=mask)
-    out_pre_relu = linear2(hidden, mask=mask) + b_final
+        for i, layer in enumerate(hidden_layers):
+            hidden_mask = masks[f"hidden_layers.{i}"] if masks is not None else None
+            hidden = layer(hidden, mask=hidden_mask)
+    linear2_mask = masks["linear2"] if masks is not None else None
+    out_pre_relu = linear2(hidden, mask=linear2_mask) + b_final
     out = F.relu(out_pre_relu)
     return out
 
@@ -167,10 +170,9 @@ class TMSSPDModelConfig(BaseModel):
     n_features: PositiveInt
     n_hidden: PositiveInt
     n_hidden_layers: NonNegativeInt
-    C: PositiveInt | None = None
     bias_val: float
     device: str
-    m: PositiveInt | None = None
+    m: PositiveInt
 
 
 class TMSSPDModel(SPDModel):
@@ -179,10 +181,8 @@ class TMSSPDModel(SPDModel):
         self.config = config
         self.n_instances = config.n_instances  # Required for backwards compatibility
         self.n_features = config.n_features  # Required for backwards compatibility
-        self.C = config.C if config.C is not None else config.n_features
         self.bias_val = config.bias_val
-
-        self.m = min(config.n_features, config.n_hidden) + 1 if config.m is None else config.m
+        self.m = config.m
 
         self.linear1 = LinearComponent(
             d_in=config.n_features,
@@ -190,7 +190,6 @@ class TMSSPDModel(SPDModel):
             n_instances=config.n_instances,
             init_type="xavier_normal",
             init_scale=1.0,
-            C=self.C,
             m=self.m,
         )
         self.linear2 = TransposedLinearComponent(self.linear1.A, self.linear1.B)
@@ -211,7 +210,6 @@ class TMSSPDModel(SPDModel):
                         n_instances=config.n_instances,
                         init_type="xavier_normal",
                         init_scale=1.0,
-                        C=self.C,
                         m=self.m,
                     )
                     for _ in range(config.n_hidden_layers)
@@ -223,7 +221,7 @@ class TMSSPDModel(SPDModel):
     def forward(
         self,
         x: Float[Tensor, "batch n_instances n_features"],
-        mask: Float[Tensor, "batch n_instances C"] | None = None,
+        masks: dict[str, Float[Tensor, "batch n_instances m"]] | None = None,
     ) -> Float[Tensor, "batch n_instances n_features"]:
         return _tms_forward(
             x=x,
@@ -231,7 +229,7 @@ class TMSSPDModel(SPDModel):
             linear2=self.linear2,
             b_final=self.b_final,
             hidden_layers=self.hidden_layers,
-            mask=mask,
+            masks=masks,
         )
 
     @staticmethod
@@ -286,7 +284,6 @@ class TMSSPDModel(SPDModel):
         assert isinstance(spd_config.task_config, TMSTaskConfig)
         tms_spd_config = TMSSPDModelConfig(
             **tms_train_config_dict["tms_model_config"],
-            C=spd_config.C,
             m=spd_config.m,
             bias_val=spd_config.task_config.bias_val,
         )

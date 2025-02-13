@@ -53,7 +53,6 @@ class MLP(nn.Module):
                 n_instances=n_instances,
                 init_type=init_type,
                 init_scale=init_scale,
-                C=spd_kwargs["C"],
                 m=spd_kwargs["m"],
             )
             self.mlp_out = LinearComponent(
@@ -62,7 +61,6 @@ class MLP(nn.Module):
                 n_instances=n_instances,
                 init_type=init_type,
                 init_scale=init_scale,
-                C=spd_kwargs["C"],
                 m=spd_kwargs["m"],
             )
         else:
@@ -93,18 +91,20 @@ class MLP(nn.Module):
     def forward(
         self,
         x: Float[Tensor, "batch ... d_model"],
-        mask: Float[Tensor, "batch ... C"] | None = None,
+        mlp_in_mask: Float[Tensor, "batch ... d_mlp"] | None = None,
+        mlp_out_mask: Float[Tensor, "batch ... d_model"] | None = None,
     ) -> tuple[Float[Tensor, "batch ... d_model"],]:
         """Run a forward pass and cache pre and post activations for each parameter.
 
         Note that we don't need to cache pre activations for the biases. We also don't care about
         the output bias which is always zero.
         """
-        mid_pre_act_fn = self.mlp_in(x, mask=mask)
+        mid_pre_act_fn = self.mlp_in(x, mask=mlp_in_mask)
         if self.bias1 is not None:
             mid_pre_act_fn = mid_pre_act_fn + self.bias1
         mid = self.act_fn(mid_pre_act_fn)
-        out = self.mlp_out(mid, mask=mask)
+
+        out = self.mlp_out(mid, mask=mlp_out_mask)
         if self.bias2 is not None:
             out = out + self.bias2
         return out
@@ -280,8 +280,7 @@ class ResidualMLPSPDConfig(BaseModel):
     in_bias: bool
     out_bias: bool
     init_scale: float
-    C: PositiveInt
-    m: PositiveInt | None = None
+    m: PositiveInt
     init_type: Literal["kaiming_uniform", "xavier_normal"] = "xavier_normal"
 
 
@@ -294,7 +293,6 @@ class ResidualMLPSPDModel(SPDModel):
         self.config = config
         self.n_features = config.n_features  # Required for backward compatibility
         self.n_instances = config.n_instances  # Required for backward compatibility
-        self.C = config.C  # Required for backward compatibility
 
         assert config.act_fn_name in ["gelu", "relu"]
         self.act_fn = F.gelu if config.act_fn_name == "gelu" else F.relu
@@ -304,7 +302,7 @@ class ResidualMLPSPDModel(SPDModel):
         init_param_(self.W_E, init_type=config.init_type)
         init_param_(self.W_U, init_type=config.init_type)
 
-        self.m = min(config.d_embed, config.d_mlp) if config.m is None else config.m
+        self.m = config.m
 
         self.layers = nn.ModuleList(
             [
@@ -317,7 +315,7 @@ class ResidualMLPSPDModel(SPDModel):
                     in_bias=config.in_bias,
                     out_bias=config.out_bias,
                     act_fn=self.act_fn,
-                    spd_kwargs={"C": config.C, "m": self.m},
+                    spd_kwargs={"m": self.m},
                 )
                 for _ in range(config.n_layers)
             ]
@@ -327,7 +325,7 @@ class ResidualMLPSPDModel(SPDModel):
     def forward(
         self,
         x: Float[Tensor, "batch n_instances n_features"],
-        mask: Float[Tensor, "batch n_instances C"] | None = None,
+        masks: dict[str, Float[Tensor, "batch n_instances m"]] | None = None,
     ) -> Float[Tensor, "batch n_instances d_embed"]:
         """
         Returns:
@@ -338,8 +336,12 @@ class ResidualMLPSPDModel(SPDModel):
             self.W_E,
             "batch n_instances n_features, n_instances n_features d_embed -> batch n_instances d_embed",
         )
-        for layer in self.layers:
-            residual = residual + layer(residual, mask)
+        for i, layer in enumerate(self.layers):
+            mlp_in_mask = masks[f"layers.{i}.mlp_in"] if masks is not None else None
+            mlp_out_mask = masks[f"layers.{i}.mlp_out"] if masks is not None else None
+            residual = residual + layer(
+                residual, mlp_in_mask=mlp_in_mask, mlp_out_mask=mlp_out_mask
+            )
         out = einops.einsum(
             residual,
             self.W_U,
@@ -423,7 +425,7 @@ class ResidualMLPSPDModel(SPDModel):
 
         assert isinstance(config.task_config, ResidualMLPTaskConfig)
         resid_mlp_spd_config = ResidualMLPSPDConfig(
-            **resid_mlp_train_config_dict["resid_mlp_config"], C=config.C, m=config.m
+            **resid_mlp_train_config_dict["resid_mlp_config"], m=config.m
         )
         model = cls(config=resid_mlp_spd_config)
         params = torch.load(paths.checkpoint, weights_only=True, map_location="cpu")

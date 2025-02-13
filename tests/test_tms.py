@@ -1,6 +1,5 @@
 from pathlib import Path
 
-import pytest
 import torch
 from jaxtyping import Float
 from torch import Tensor
@@ -38,9 +37,7 @@ def tms_spd_happy_path(config: Config, n_hidden_layers: int = 0):
     target_model = TMSModel(config=tms_model_config)
 
     tms_spd_model_config = TMSSPDModelConfig(
-        **tms_model_config.model_dump(mode="json"),
-        C=config.C,
-        bias_val=config.task_config.bias_val,
+        **tms_model_config.model_dump(mode="json"), m=config.m, bias_val=config.task_config.bias_val
     )
     model = TMSSPDModel(config=tms_spd_model_config)
     # Randomly initialize the bias for the pretrained model
@@ -85,66 +82,9 @@ def tms_spd_happy_path(config: Config, n_hidden_layers: int = 0):
     ), "Model A matrix should have changed after optimization"
 
 
-def test_tms_batch_topk_no_schatten():
+def test_tms_happy_path():
     config = Config(
-        C=5,
-        topk=2,
-        batch_topk=True,
-        batch_size=4,
-        steps=4,
-        print_freq=2,
-        save_freq=None,
-        lr=1e-3,
-        topk_recon_coeff=1,
-        schatten_pnorm=None,
-        schatten_coeff=None,
-        task_config=TMS_TASK_CONFIG,
-    )
-    tms_spd_happy_path(config)
-
-
-@pytest.mark.parametrize("n_hidden_layers", [0, 2])
-def test_tms_batch_topk_and_schatten(n_hidden_layers: int):
-    config = Config(
-        C=5,
-        topk=2,
-        batch_topk=True,
-        batch_size=4,
-        steps=4,
-        print_freq=2,
-        save_freq=None,
-        lr=1e-3,
-        topk_recon_coeff=1,
-        schatten_pnorm=0.9,
-        schatten_coeff=1e-1,
-        task_config=TMS_TASK_CONFIG,
-    )
-    tms_spd_happy_path(config, n_hidden_layers)
-
-
-def test_tms_topk_and_l2():
-    config = Config(
-        C=5,
-        topk=2,
-        batch_topk=False,
-        batch_size=4,
-        steps=4,
-        print_freq=2,
-        save_freq=None,
-        lr=1e-3,
-        topk_recon_coeff=1,
-        schatten_pnorm=0.9,
-        schatten_coeff=1e-1,
-        task_config=TMS_TASK_CONFIG,
-    )
-    tms_spd_happy_path(config)
-
-
-def test_tms_lp():
-    config = Config(
-        C=5,
-        topk=None,
-        batch_topk=False,
+        m=10,
         batch_size=4,
         steps=4,
         print_freq=2,
@@ -155,25 +95,6 @@ def test_tms_lp():
         task_config=TMS_TASK_CONFIG,
     )
     tms_spd_happy_path(config)
-
-
-@pytest.mark.parametrize("n_hidden_layers", [0, 2])
-def test_tms_topk_and_lp(n_hidden_layers: int):
-    config = Config(
-        C=5,
-        topk=2,
-        batch_topk=False,
-        batch_size=4,
-        steps=4,
-        print_freq=2,
-        save_freq=None,
-        lr=1e-3,
-        pnorm=0.9,
-        topk_recon_coeff=1,
-        lp_sparsity_coeff=1,
-        task_config=TMS_TASK_CONFIG,
-    )
-    tms_spd_happy_path(config, n_hidden_layers)
 
 
 def test_train_tms_happy_path():
@@ -298,14 +219,12 @@ def test_tms_equivalent_to_raw_model() -> None:
         n_hidden_layers=1,
         device=device,
     )
-    C = 2
 
     target_model = TMSModel(config=tms_config).to(device)
 
     # Create the SPD model
     tms_spd_config = TMSSPDModelConfig(
         **tms_config.model_dump(),
-        C=C,
         m=3,  # Small m for testing
         bias_val=0.0,
     )
