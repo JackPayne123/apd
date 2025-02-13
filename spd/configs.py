@@ -56,10 +56,12 @@ class Config(BaseModel):
     act_recon_coeff: NonNegativeFloat | None = None
     param_match_coeff: NonNegativeFloat | None = 1.0
     masked_recon_coeff: NonNegativeFloat | None = None
+    random_mask_recon_coeff: NonNegativeFloat | None = None
     lp_sparsity_coeff: NonNegativeFloat
     pnorm: PositiveFloat
     post_relu_act_recon: bool = False
     m: PositiveInt
+    n_random_masks: PositiveInt
     lr_schedule: Literal["linear", "constant", "cosine", "exponential"] = "constant"
     lr_exponential_halflife: PositiveFloat | None = None
     lr_warmup_pct: Probability = 0.0

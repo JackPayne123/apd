@@ -1,5 +1,5 @@
 # ########## 1 layer ##########
-wandb_project: spd-resid-mlp
+# wandb_project: spd-resid-mlp
 wandb_run_name: null
 wandb_run_name_prefix: ""
 unit_norm_matrices: true
@@ -9,12 +9,14 @@ param_match_coeff: 1.0
 masked_recon_coeff: 1.0
 act_recon_coeff: 1.0
 post_relu_act_recon: true
+random_mask_recon_coeff: 1.0
+n_random_masks: 2
 pnorm: 0.9
 lp_sparsity_coeff: 1.0
 batch_size: 256
 steps: 10_000
 image_freq: 5_000
-print_freq: 500
+print_freq: 100
 save_freq: 10_000
 lr: 1e-3
 lr_schedule: cosine
@@ -39,6 +41,8 @@ task_config:
 # masked_recon_coeff: 2.0
 # act_recon_coeff: 1.0
 # post_relu_act_recon: true
+# random_mask_recon_coeff: 1.0
+# n_random_masks: 2
 # pnorm: 0.9
 # lp_sparsity_coeff: 1.0
 # batch_size: 256

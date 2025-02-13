@@ -47,6 +47,8 @@ def test_resid_mlp_decomposition_happy_path() -> None:
     config = Config(
         seed=0,
         m=2,
+        random_mask_recon_coeff=1,
+        n_random_masks=2,
         param_match_coeff=1.0,
         masked_recon_coeff=1,
         act_recon_coeff=1,

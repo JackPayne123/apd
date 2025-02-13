@@ -166,6 +166,47 @@ def calc_masks(
     return masks
 
 
+def calc_random_masks(
+    masks: dict[str, Float[Tensor, "batch m"] | Float[Tensor, "batch n_instances m"]],
+    n_random_masks: int,
+) -> list[dict[str, Float[Tensor, "batch m"] | Float[Tensor, "batch n_instances m"]]]:
+    """Calculate n_random_masks random masks with the formula `mask + (1 - mask) * rand_unif(0,1)`.
+
+    Args:
+        masks: The masks to use for the random masks.
+        n_random_masks: The number of random masks to calculate.
+
+    Return:
+        A list of n_random_masks dictionaries, each containing the random masks for each layer.
+    """
+    random_masks = []
+    for _ in range(n_random_masks):
+        random_masks.append(
+            {
+                layer_name: mask + (1 - mask) * torch.rand_like(mask)
+                for layer_name, mask in masks.items()
+            }
+        )
+    return random_masks
+
+
+def calc_random_masks_mse_loss(
+    model: SPDModel,
+    batch: Float[Tensor, "batch n_instances d_in"],
+    random_masks: list[dict[str, Float[Tensor, "batch m"] | Float[Tensor, "batch n_instances m"]]],
+    out_masked: Float[Tensor, "batch n_instances d_out"],
+) -> Float[Tensor, ""] | Float[Tensor, " n_instances"]:
+    """Calculate the MSE over all random masks."""
+    loss = torch.zeros(1, device=out_masked.device)
+    for i in range(len(random_masks)):
+        out_masked_random_mask = model(batch, masks=random_masks[i])
+        loss = loss + ((out_masked - out_masked_random_mask) ** 2).sum(dim=-1)
+
+    n_layers = len(random_masks[0])
+    # Normalize by the total number of output dimensions and mean over the batch dim
+    return (loss / (len(random_masks) * n_layers * out_masked.shape[-1])).mean(dim=0)
+
+
 def calc_component_acts(
     pre_weight_acts: dict[
         str, Float[Tensor, "batch n_instances d_in"] | Float[Tensor, "batch d_in"]
@@ -255,24 +296,14 @@ def optimize(
         batch = batch.to(device=device)
         total_samples += batch.shape[0]
 
+        # Forward pass with target model
         target_cache_filter = lambda k: k.endswith((".hook_pre", ".hook_post"))
         target_out, target_cache = target_model.run_with_cache(
             batch, names_filter=target_cache_filter
         )
 
-        # Do a forward pass with all subnetworks
+        # Forward pass with all subnetworks
         out = model(batch)
-
-        # Calculate losses
-        out_recon_loss = calc_recon_mse(out, target_out, has_instance_dim)
-
-        param_match_loss = calc_param_match_loss(
-            param_names=param_names,
-            target_model=target_model,
-            spd_model=model,
-            n_params=n_params,
-            device=device,
-        )
 
         post_weight_acts = {k: v for k, v in target_cache.items() if k.endswith("hook_post")}
         pre_weight_acts = {k: v for k, v in target_cache.items() if k.endswith("hook_pre")}
@@ -293,15 +324,34 @@ def optimize(
             gates=gates, target_component_acts=target_component_acts, attributions=attributions
         )
 
-        lp_sparsity_loss = calc_lp_sparsity_loss(
-            target_component_acts=target_component_acts, pnorm=config.pnorm
-        )
-
         # Masked forward pass
         spd_cache_filter = lambda k: k.endswith((".hook_post", ".hook_component_acts"))
         out_masked, spd_cache_masked = model.run_with_cache(
             batch, names_filter=spd_cache_filter, masks=masks
         )
+
+        random_masks_loss = None
+        if config.random_mask_recon_coeff is not None:
+            random_masks = calc_random_masks(masks=masks, n_random_masks=config.n_random_masks)
+            random_masks_loss = calc_random_masks_mse_loss(
+                model=model, batch=batch, random_masks=random_masks, out_masked=out_masked
+            )
+
+        # Calculate losses
+        out_recon_loss = calc_recon_mse(out, target_out, has_instance_dim)
+
+        param_match_loss = calc_param_match_loss(
+            param_names=param_names,
+            target_model=target_model,
+            spd_model=model,
+            n_params=n_params,
+            device=device,
+        )
+
+        lp_sparsity_loss = calc_lp_sparsity_loss(
+            target_component_acts=target_component_acts, pnorm=config.pnorm
+        )
+
         masked_recon_loss = calc_recon_mse(out_masked, target_out, has_instance_dim)
 
         act_recon_loss = None
@@ -319,6 +369,7 @@ def optimize(
             "lp_sparsity_loss": (lp_sparsity_loss, config.lp_sparsity_coeff),
             "masked_recon_loss": (masked_recon_loss, config.masked_recon_coeff),
             "act_recon_loss": (act_recon_loss, config.act_recon_coeff),
+            "random_masks_loss": (random_masks_loss, config.random_mask_recon_coeff),
         }
         # Add up the loss terms
         loss = torch.tensor(0.0, device=device)

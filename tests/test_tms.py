@@ -85,6 +85,8 @@ def tms_spd_happy_path(config: Config, n_hidden_layers: int = 0):
 def test_tms_happy_path():
     config = Config(
         m=10,
+        random_mask_recon_coeff=1,
+        n_random_masks=2,
         batch_size=4,
         steps=4,
         print_freq=2,

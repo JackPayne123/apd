@@ -8,6 +8,8 @@
 # masked_recon_coeff: 1
 # pnorm: 0.9
 # lp_sparsity_coeff: 1.0
+# random_mask_recon_coeff: 1.0
+# n_random_masks: 2
 # batch_size: 2048
 # steps: 20_000
 # image_freq: 5_000
@@ -35,10 +37,12 @@ param_match_coeff: 1.0
 masked_recon_coeff: 10.0
 pnorm: 0.9
 lp_sparsity_coeff: 1.0
+random_mask_recon_coeff: 1.0
+n_random_masks: 2
 batch_size: 2048
 steps: 20_000
 image_freq: 5_000
-print_freq: 1_000
+print_freq: 200
 save_freq: 20_000
 lr: 1e-3
 lr_schedule: cosine
