@@ -21,8 +21,8 @@ class Gate(nn.Module):
         self.n_instances = n_instances
         shape = (n_instances, m) if n_instances is not None else (m,)
         self.weight = nn.Parameter(torch.empty(shape))
-        init_param_(self.weight, scale=1.0, init_type="kaiming_uniform")
-        self.bias = nn.Parameter(torch.zeros(shape))
+        torch.nn.init.normal_(self.weight, mean=0.0, std=0.2)
+        self.bias = nn.Parameter(torch.ones(shape))
 
     def forward(
         self, x: Float[Tensor, "batch m"] | Float[Tensor, "batch n_instances m"]
