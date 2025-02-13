@@ -228,6 +228,24 @@ def calc_component_acts(
     return component_acts
 
 
+def calc_masked_target_component_acts(
+    pre_weight_acts: dict[
+        str, Float[Tensor, "batch n_instances d_in"] | Float[Tensor, "batch d_in"]
+    ],
+    As: dict[str, Float[Tensor, "d_in m"] | Float[Tensor, "n_instances d_in m"]],
+    masks: dict[str, Float[Tensor, "batch m"] | Float[Tensor, "batch n_instances m"]],
+) -> dict[str, Float[Tensor, "batch m"] | Float[Tensor, "batch n_instances m"]]:
+    """Calculate the masked target component acts for each layer."""
+    masked_target_component_acts = {}
+    for param_name in pre_weight_acts:
+        raw_name = param_name.removesuffix(".hook_pre")
+        masked_As = einops.einsum(As[raw_name], masks[raw_name], "... d_in m, ... m -> ... d_in m")
+        masked_target_component_acts[raw_name] = einops.einsum(
+            pre_weight_acts[param_name], masked_As, "... d_in, ... d_in m -> ... m"
+        )
+    return masked_target_component_acts
+
+
 def optimize(
     model: SPDModel,
     config: Config,
@@ -307,17 +325,16 @@ def optimize(
 
         post_weight_acts = {k: v for k, v in target_cache.items() if k.endswith("hook_post")}
         pre_weight_acts = {k: v for k, v in target_cache.items() if k.endswith("hook_pre")}
+        As = collect_nested_module_attrs(model, attr_name="A", include_attr_name=False)
+        Bs = collect_nested_module_attrs(model, attr_name="B", include_attr_name=False)
 
-        target_component_acts = calc_component_acts(
-            pre_weight_acts=pre_weight_acts,
-            As=collect_nested_module_attrs(model, attr_name="A", include_attr_name=False),
-        )
+        target_component_acts = calc_component_acts(pre_weight_acts=pre_weight_acts, As=As)
         attributions = calc_grad_attributions(
             target_out=target_out,
             pre_weight_acts=pre_weight_acts,
             post_weight_acts=post_weight_acts,
             target_component_acts=target_component_acts,
-            Bs=collect_nested_module_attrs(model, attr_name="B", include_attr_name=False),
+            Bs=Bs,
         )
 
         masks, relud_masks = calc_masks(
@@ -359,7 +376,12 @@ def optimize(
                 for k, v in spd_cache_masked.items()
                 if k.endswith("hook_component_acts")
             }
-            act_recon_loss = calc_act_recon_mse(masked_spd_component_acts, target_component_acts)
+            masked_target_component_acts = calc_masked_target_component_acts(
+                pre_weight_acts=pre_weight_acts, As=As, masks=masks
+            )
+            act_recon_loss = calc_act_recon_mse(
+                masked_spd_component_acts, masked_target_component_acts
+            )
 
         loss_terms = {
             "param_match_loss": (param_match_loss, config.param_match_coeff),
