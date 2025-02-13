@@ -92,31 +92,27 @@ def calc_param_match_loss(
 
 
 def calc_lp_sparsity_loss(
-    target_component_acts: dict[
-        str, Float[Tensor, "batch m"] | Float[Tensor, "batch n_instances m"]
-    ],
+    relud_masks: dict[str, Float[Tensor, "batch m"] | Float[Tensor, "batch n_instances m"]],
     pnorm: float,
 ) -> Float[Tensor, "batch m"] | Float[Tensor, "batch n_instances m"]:
     """Calculate the Lp sparsity loss on the attributions.
 
     Args:
-        target_component_acts: Dictionary of pre_weight_acts @ A for each layer to use for the
-            sparsity loss.
+        relud_masks: Dictionary of relu masks for each layer.
         pnorm: The pnorm to use for the sparsity loss.
     Returns:
         The Lp sparsity loss. Will have an n_instances dimension if the model has an n_instances
             dimension.
     """
     # Initialize with zeros matching the shape of first mask
-    total_loss = torch.zeros_like(next(iter(target_component_acts.values())))
+    total_loss = torch.zeros_like(next(iter(relud_masks.values())))
 
-    for layer_target_component_acts in target_component_acts.values():
-        layer_loss = layer_target_component_acts.relu() ** pnorm
-        total_loss = total_loss + layer_loss
+    for layer_relud_mask in relud_masks.values():
+        total_loss = total_loss + layer_relud_mask**pnorm
 
-    m = next(iter(target_component_acts.values())).shape[-1]
+    m = next(iter(relud_masks.values())).shape[-1]
     # Sum over the batch and m dimensions and normalize by the n_layers * m
-    return total_loss.sum(dim=(0, -1)) / (len(target_component_acts) * m)
+    return total_loss.sum(dim=(0, -1)) / (len(relud_masks) * m)
 
 
 def calc_act_recon_mse(
@@ -147,7 +143,10 @@ def calc_masks(
         str, Float[Tensor, "batch m"] | Float[Tensor, "batch n_instances m"]
     ],
     attributions: dict[str, Float[Tensor, "batch m"] | Float[Tensor, "batch n_instances m"]],
-) -> dict[str, Float[Tensor, "batch m"] | Float[Tensor, "batch n_instances m"]]:
+) -> tuple[
+    dict[str, Float[Tensor, "batch m"] | Float[Tensor, "batch n_instances m"]],
+    dict[str, Float[Tensor, "batch m"] | Float[Tensor, "batch n_instances m"]],
+]:
     """Calculate the mask for the SPD model.
 
     TODO: Use attributions in our gate calculation too.
@@ -161,9 +160,11 @@ def calc_masks(
         Dictionary of masks for each layer.
     """
     masks = {}
+    relud_masks = {}
     for layer_name in gates:
-        masks[layer_name] = gates[layer_name](target_component_acts[layer_name])
-    return masks
+        masks[layer_name] = gates[layer_name].forward(target_component_acts[layer_name])
+        relud_masks[layer_name] = gates[layer_name].forward_relu(target_component_acts[layer_name])
+    return masks, relud_masks
 
 
 def calc_random_masks(
@@ -200,11 +201,10 @@ def calc_random_masks_mse_loss(
     loss = torch.zeros(1, device=out_masked.device)
     for i in range(len(random_masks)):
         out_masked_random_mask = model(batch, masks=random_masks[i])
-        loss = loss + ((out_masked - out_masked_random_mask) ** 2).sum(dim=-1)
+        loss = loss + ((out_masked - out_masked_random_mask) ** 2).mean(dim=-1)
 
-    n_layers = len(random_masks[0])
-    # Normalize by the total number of output dimensions and mean over the batch dim
-    return (loss / (len(random_masks) * n_layers * out_masked.shape[-1])).mean(dim=0)
+    # Normalize by the number of random masks and mean over the batch dim
+    return (loss / len(random_masks)).mean(dim=0)
 
 
 def calc_component_acts(
@@ -320,7 +320,7 @@ def optimize(
             Bs=collect_nested_module_attrs(model, attr_name="B", include_attr_name=False),
         )
 
-        masks = calc_masks(
+        masks, relud_masks = calc_masks(
             gates=gates, target_component_acts=target_component_acts, attributions=attributions
         )
 
@@ -348,9 +348,7 @@ def optimize(
             device=device,
         )
 
-        lp_sparsity_loss = calc_lp_sparsity_loss(
-            target_component_acts=target_component_acts, pnorm=config.pnorm
-        )
+        lp_sparsity_loss = calc_lp_sparsity_loss(relud_masks=relud_masks, pnorm=config.pnorm)
 
         masked_recon_loss = calc_recon_mse(out_masked, target_out, has_instance_dim)
 

@@ -29,6 +29,11 @@ class Gate(nn.Module):
     ) -> Float[Tensor, "batch m"] | Float[Tensor, "batch n_instances m"]:
         return hard_sigmoid(x * self.weight + self.bias)
 
+    def forward_relu(
+        self, x: Float[Tensor, "batch m"] | Float[Tensor, "batch n_instances m"]
+    ) -> Float[Tensor, "batch m"] | Float[Tensor, "batch n_instances m"]:
+        return (x * self.weight + self.bias).relu()
+
 
 class Linear(nn.Module):
     """A linear transformation with an optional n_instances dimension."""
