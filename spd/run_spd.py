@@ -3,6 +3,7 @@
 from collections.abc import Callable
 from pathlib import Path
 
+import einops
 import matplotlib.pyplot as plt
 import torch
 import wandb
@@ -114,38 +115,26 @@ def calc_lp_sparsity_loss(
     return total_loss
 
 
-def calc_act_recon(
-    target_post_weight_acts: dict[
-        str, Float[Tensor, "batch n_instances d_out"] | Float[Tensor, "batch d_out"]
-    ],
-    layer_acts: dict[str, Float[Tensor, "batch n_instances d_out"] | Float[Tensor, "batch d_out"]],
+def calc_act_recon_mse(
+    acts1: dict[str, Float[Tensor, "batch m"] | Float[Tensor, "batch n_instances m"]],
+    acts2: dict[str, Float[Tensor, "batch m"] | Float[Tensor, "batch n_instances m"]],
 ) -> Float[Tensor, ""] | Float[Tensor, " n_instances"]:
-    """MSE between all target model activations and the output of each subnetwork in the SPD model.
-
-    Args:
-        target_post_weight_acts: The activations after each layer in the target model.
-        layer_acts: The activations after each subnetwork in the SPD model.
-
+    """MSE between each entry in acts1 and acts2.
     Returns:
         The activation reconstruction loss. Will have an n_instances dimension if the model has an
             n_instances dimension, otherwise a scalar.
     """
-    assert (
-        target_post_weight_acts.keys() == layer_acts.keys()
-    ), f"Layer keys must match: {target_post_weight_acts.keys()} != {layer_acts.keys()}"
+    assert acts1.keys() == acts2.keys(), f"Key mismatch: {acts1.keys()} != {acts2.keys()}"
 
-    device = next(iter(layer_acts.values())).device
+    device = next(iter(acts1.values())).device
+    m = next(iter(acts1.values())).shape[-1]
 
-    total_act_dim = 0  # Accumulate the d_out over all layers for normalization
     loss = torch.zeros(1, device=device)
-    for layer_name in target_post_weight_acts:
-        total_act_dim += target_post_weight_acts[layer_name].shape[-1]
-
-        error = ((target_post_weight_acts[layer_name] - layer_acts[layer_name]) ** 2).sum(dim=-1)
-        loss = loss + error
+    for layer_name in acts1:
+        loss = loss + ((acts1[layer_name] - acts2[layer_name]) ** 2).sum(dim=-1)
 
     # Normalize by the total number of output dimensions and mean over the batch dim
-    return (loss / total_act_dim).mean(dim=0)
+    return (loss / (m * len(acts1))).mean(dim=0)
 
 
 def calc_masks(
@@ -167,8 +156,29 @@ def calc_masks(
     """
     masks = {}
     for layer_name in gates:
-        masks[layer_name] = gates[layer_name](component_acts[layer_name + ".hook_component_acts"])
+        masks[layer_name] = gates[layer_name](component_acts[layer_name])
     return masks
+
+
+def calc_component_acts(
+    pre_weight_acts: dict[
+        str, Float[Tensor, "batch n_instances d_in"] | Float[Tensor, "batch d_in"]
+    ],
+    As: dict[str, Float[Tensor, "d_in m"] | Float[Tensor, "n_instances d_in m"]],
+) -> dict[str, Float[Tensor, "batch m"] | Float[Tensor, "batch n_instances m"]]:
+    """Calculate the component acts for each layer. I.e. (pre_weight_acts @ A).
+
+    Args:
+        pre_weight_acts: The activations before each layer in the target model.
+        As: The A matrix at each layer.
+    """
+    component_acts = {}
+    for param_name in pre_weight_acts:
+        raw_name = param_name.removesuffix(".hook_pre")
+        component_acts[raw_name] = einops.einsum(
+            pre_weight_acts[param_name], As[raw_name], "... d_in, ... d_in m -> ... m"
+        )
+    return component_acts
 
 
 def optimize(
@@ -245,8 +255,7 @@ def optimize(
         )
 
         # Do a forward pass with all subnetworks
-        spd_cache_filter = lambda k: k.endswith((".hook_post", ".hook_component_acts"))
-        out, spd_cache = model.run_with_cache(batch, names_filter=spd_cache_filter)
+        out = model(batch)
 
         # Calculate losses
         out_recon_loss = calc_recon_mse(out, target_out, has_instance_dim)
@@ -261,18 +270,22 @@ def optimize(
 
         post_weight_acts = {k: v for k, v in target_cache.items() if k.endswith("hook_post")}
         pre_weight_acts = {k: v for k, v in target_cache.items() if k.endswith("hook_pre")}
-        component_acts = {k: v for k, v in spd_cache.items() if k.endswith("hook_component_acts")}
+
+        target_component_acts = calc_component_acts(
+            pre_weight_acts=pre_weight_acts,
+            As=collect_nested_module_attrs(model, attr_name="A", include_attr_name=False),
+        )
         attributions = calc_grad_attributions(
             target_out=target_out,
             pre_weight_acts=pre_weight_acts,
             post_weight_acts=post_weight_acts,
-            component_acts={
-                k: v for k, v in spd_cache.items() if k.endswith("hook_component_acts")
-            },
+            target_component_acts=target_component_acts,
             Bs=collect_nested_module_attrs(model, attr_name="B", include_attr_name=False),
         )
 
-        masks = calc_masks(gates=gates, component_acts=component_acts, attributions=attributions)
+        masks = calc_masks(
+            gates=gates, component_acts=target_component_acts, attributions=attributions
+        )
 
         normed_masks = {k: v / out.shape[-1] for k, v in masks.items()}
         lp_sparsity_loss_per_m = calc_lp_sparsity_loss(masks=normed_masks, step_pnorm=config.pnorm)
@@ -280,30 +293,20 @@ def optimize(
         lp_sparsity_loss = lp_sparsity_loss_per_m.sum(dim=-1).mean(dim=0)
 
         # Masked forward pass
+        spd_cache_filter = lambda k: k.endswith((".hook_post", ".hook_component_acts"))
         out_masked, spd_cache_masked = model.run_with_cache(
             batch, names_filter=spd_cache_filter, masks=masks
         )
         masked_recon_loss = calc_recon_mse(out_masked, target_out, has_instance_dim)
 
-        layer_acts_masked = {k: v for k, v in spd_cache_masked.items() if k.endswith("hook_post")}
-
         act_recon_loss = None
         if config.act_recon_coeff is not None:
-            act_recon_layer_acts = layer_acts_masked
-            target_post_weight_acts = post_weight_acts
-            if config.post_relu_act_recon:
-                relu = torch.nn.functional.relu
-                # Only do post-relu act recon for mlp_in layers and ignore the other layers
-                act_recon_layer_acts = {
-                    k: relu(v) for k, v in layer_acts_masked.items() if "mlp_in" in k
-                }
-                target_post_weight_acts = {
-                    k: relu(v) for k, v in target_post_weight_acts.items() if "mlp_in" in k
-                }
-            act_recon_loss = calc_act_recon(
-                target_post_weight_acts=target_post_weight_acts,
-                layer_acts=act_recon_layer_acts,
-            )
+            masked_spd_component_acts = {
+                k.removesuffix(".hook_component_acts"): v
+                for k, v in spd_cache_masked.items()
+                if k.endswith("hook_component_acts")
+            }
+            act_recon_loss = calc_act_recon_mse(masked_spd_component_acts, target_component_acts)
 
         loss_terms = {
             "param_match_loss": (param_match_loss, config.param_match_coeff),
