@@ -74,4 +74,8 @@ def calc_grad_attributions(
             )
             attributions[param_name] += (target_component_acts[param_name] * grad_B) ** 2
 
+    # Take the square root of each attribution and divide by the number of output dimensions
+    for param_name in attributions:
+        attributions[param_name] = attributions[param_name].sqrt() / target_out.shape[-1]
+
     return attributions

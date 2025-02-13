@@ -92,27 +92,31 @@ def calc_param_match_loss(
 
 
 def calc_lp_sparsity_loss(
-    masks: dict[str, Float[Tensor, "batch m"] | Float[Tensor, "batch n_instances m"]],
-    step_pnorm: float,
+    target_component_acts: dict[
+        str, Float[Tensor, "batch m"] | Float[Tensor, "batch n_instances m"]
+    ],
+    pnorm: float,
 ) -> Float[Tensor, "batch m"] | Float[Tensor, "batch n_instances m"]:
     """Calculate the Lp sparsity loss on the attributions.
 
     Args:
-        masks: Dictionary of masks for each layer to use for the sparsity loss.
-        step_pnorm: The pnorm to use for the sparsity loss.
+        target_component_acts: Dictionary of pre_weight_acts @ A for each layer to use for the
+            sparsity loss.
+        pnorm: The pnorm to use for the sparsity loss.
     Returns:
         The Lp sparsity loss. Will have an n_instances dimension if the model has an n_instances
             dimension.
     """
     # Initialize with zeros matching the shape of first mask
-    total_loss = torch.zeros_like(next(iter(masks.values())))
+    total_loss = torch.zeros_like(next(iter(target_component_acts.values())))
 
-    for layer_mask in masks.values():
-        # step_pnorm * 0.5 is because we have the squares of sparsity_inner terms above
-        layer_loss = (layer_mask.abs() + 1e-16) ** (step_pnorm * 0.5)
+    for layer_target_component_acts in target_component_acts.values():
+        layer_loss = layer_target_component_acts.relu() ** pnorm
         total_loss = total_loss + layer_loss
 
-    return total_loss
+    m = next(iter(target_component_acts.values())).shape[-1]
+    # Sum over the batch and m dimensions and normalize by the n_layers * m
+    return total_loss.sum(dim=(0, -1)) / (len(target_component_acts) * m)
 
 
 def calc_act_recon_mse(
@@ -139,7 +143,9 @@ def calc_act_recon_mse(
 
 def calc_masks(
     gates: dict[str, Gate],
-    component_acts: dict[str, Float[Tensor, "batch m"] | Float[Tensor, "batch n_instances m"]],
+    target_component_acts: dict[
+        str, Float[Tensor, "batch m"] | Float[Tensor, "batch n_instances m"]
+    ],
     attributions: dict[str, Float[Tensor, "batch m"] | Float[Tensor, "batch n_instances m"]],
 ) -> dict[str, Float[Tensor, "batch m"] | Float[Tensor, "batch n_instances m"]]:
     """Calculate the mask for the SPD model.
@@ -156,7 +162,7 @@ def calc_masks(
     """
     masks = {}
     for layer_name in gates:
-        masks[layer_name] = gates[layer_name](component_acts[layer_name])
+        masks[layer_name] = gates[layer_name](target_component_acts[layer_name])
     return masks
 
 
@@ -284,13 +290,12 @@ def optimize(
         )
 
         masks = calc_masks(
-            gates=gates, component_acts=target_component_acts, attributions=attributions
+            gates=gates, target_component_acts=target_component_acts, attributions=attributions
         )
 
-        normed_masks = {k: v / out.shape[-1] for k, v in masks.items()}
-        lp_sparsity_loss_per_m = calc_lp_sparsity_loss(masks=normed_masks, step_pnorm=config.pnorm)
-        # Sum over the m dimension (-1) and mean over the batch dimension (0)
-        lp_sparsity_loss = lp_sparsity_loss_per_m.sum(dim=-1).mean(dim=0)
+        lp_sparsity_loss = calc_lp_sparsity_loss(
+            target_component_acts=target_component_acts, pnorm=config.pnorm
+        )
 
         # Masked forward pass
         spd_cache_filter = lambda k: k.endswith((".hook_post", ".hook_component_acts"))
