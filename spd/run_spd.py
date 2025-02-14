@@ -109,9 +109,8 @@ def calc_lp_sparsity_loss(
     for layer_relud_mask in relud_masks.values():
         total_loss = total_loss + layer_relud_mask**pnorm
 
-    m = next(iter(relud_masks.values())).shape[-1]
-    # Sum over the batch and m dimensions and normalize by the n_layers * m
-    return total_loss.sum(dim=(0, -1)) / (len(relud_masks) * m)
+    # Mean over the batch and m dimension and divide by the number of parameter layers
+    return total_loss.mean(dim=(0, -1)) / len(relud_masks)
 
 
 def calc_act_recon_mse(
