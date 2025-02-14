@@ -17,7 +17,7 @@ from spd.configs import ResidualMLPTaskConfig
 from spd.hooks import HookedRootModule
 from spd.log import logger
 from spd.models.base import SPDModel
-from spd.models.components import Linear, LinearComponent
+from spd.models.components import Gate, Linear, LinearComponent
 from spd.module_utils import init_param_
 from spd.run_spd import Config
 from spd.types import WANDB_PATH_PREFIX, ModelPath
@@ -293,6 +293,7 @@ class ResidualMLPSPDModel(SPDModel):
         self.config = config
         self.n_features = config.n_features  # Required for backward compatibility
         self.n_instances = config.n_instances  # Required for backward compatibility
+        self.m = config.m
 
         assert config.act_fn_name in ["gelu", "relu"]
         self.act_fn = F.gelu if config.act_fn_name == "gelu" else F.relu
@@ -302,10 +303,10 @@ class ResidualMLPSPDModel(SPDModel):
         init_param_(self.W_E, init_type=config.init_type)
         init_param_(self.W_U, init_type=config.init_type)
 
-        self.m = config.m
-
-        self.layers = nn.ModuleList(
-            [
+        self.layers = nn.ModuleList()
+        self.gates = nn.ModuleDict()
+        for i in range(config.n_layers):
+            self.layers.append(
                 MLP(
                     n_instances=config.n_instances,
                     d_model=config.d_embed,
@@ -317,9 +318,12 @@ class ResidualMLPSPDModel(SPDModel):
                     act_fn=self.act_fn,
                     spd_kwargs={"m": self.m},
                 )
-                for _ in range(config.n_layers)
-            ]
-        )
+            )
+            # For now, we just define all the gates in this class rather than in the MLP class
+            # to make it easier to collect all the gates
+            self.gates[f"layers-{i}-mlp_in"] = Gate(m=self.m, n_instances=config.n_instances)
+            self.gates[f"layers-{i}-mlp_out"] = Gate(m=self.m, n_instances=config.n_instances)
+
         self.setup()
 
     def forward(

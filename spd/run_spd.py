@@ -24,7 +24,7 @@ def get_common_run_name_suffix(config: Config) -> str:
     """Generate a run suffix based on Config that is common to all experiments."""
     run_suffix = ""
     if config.masked_recon_coeff is not None:
-        run_suffix += f"maskedrecon{config.masked_recon_coeff:.2e}_"
+        run_suffix += f"maskrecon{config.masked_recon_coeff:.2e}_"
     if config.act_recon_coeff is not None:
         run_suffix += f"actrecon_{config.act_recon_coeff:.2e}_"
     run_suffix += f"p{config.pnorm:.2e}_"
@@ -260,18 +260,12 @@ def optimize(
     target_model.to(device=device)
 
     has_instance_dim = hasattr(model, "n_instances")
-    n_instances = model.n_instances if has_instance_dim else None
 
-    gates = {
-        param_name: Gate(n_instances=n_instances, m=config.m).to(device)
-        for param_name in param_names
-    }
-    all_params = list(model.parameters()) + [
-        p for gate in gates.values() for p in gate.parameters()
-    ]
+    # We used "-" instead of "." as module names can't have "." in them
+    gates = {k.removeprefix("gates.").replace("-", "."): v for k, v in model.gates.items()}
 
     # Note that we expect weight decay to be problematic for spd models
-    opt = torch.optim.AdamW(all_params, lr=config.lr, weight_decay=0.0)
+    opt = torch.optim.AdamW(model.parameters(), lr=config.lr, weight_decay=0.0)
 
     lr_schedule_fn = get_lr_schedule_fn(config.lr_schedule, config.lr_exponential_halflife)
 
@@ -434,6 +428,7 @@ def optimize(
                 device=device,
                 config=config,
                 masks=masks,
+                gates=gates,
                 batch=batch,
             )
             if config.wandb_project:

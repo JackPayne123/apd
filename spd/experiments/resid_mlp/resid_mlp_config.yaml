@@ -1,5 +1,5 @@
 # ########## 1 layer ##########
-# wandb_project: spd-resid-mlp
+wandb_project: spd-resid-mlp
 wandb_run_name: null
 wandb_run_name_prefix: ""
 unit_norm_matrices: true

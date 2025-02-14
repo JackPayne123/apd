@@ -14,6 +14,7 @@ from spd.configs import Config, TMSTaskConfig
 from spd.hooks import HookedRootModule
 from spd.models.base import SPDModel
 from spd.models.components import (
+    Gate,
     Linear,
     LinearComponent,
     TransposedLinear,
@@ -193,7 +194,6 @@ class TMSSPDModel(SPDModel):
             m=self.m,
         )
         self.linear2 = TransposedLinearComponent(self.linear1.A, self.linear1.B)
-
         bias_data = (
             torch.zeros((config.n_instances, config.n_features), device=config.device)
             + config.bias_val
@@ -215,6 +215,17 @@ class TMSSPDModel(SPDModel):
                     for _ in range(config.n_hidden_layers)
                 ]
             )
+
+        self.gates = nn.ModuleDict(
+            {
+                "linear1": Gate(m=self.m, n_instances=config.n_instances),
+                "linear2": Gate(m=self.m, n_instances=config.n_instances),
+                **{
+                    f"hidden_layers-{i}": Gate(m=self.m, n_instances=config.n_instances)
+                    for i in range(config.n_hidden_layers)
+                },
+            }
+        )
 
         self.setup()
 
