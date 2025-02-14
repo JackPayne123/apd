@@ -12,7 +12,6 @@ from torch import Tensor
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
-from spd.attributions import calc_grad_attributions
 from spd.configs import Config
 from spd.hooks import HookedRootModule
 from spd.models.base import SPDModel
@@ -142,7 +141,8 @@ def calc_masks(
     target_component_acts: dict[
         str, Float[Tensor, "batch m"] | Float[Tensor, "batch n_instances m"]
     ],
-    attributions: dict[str, Float[Tensor, "batch m"] | Float[Tensor, "batch n_instances m"]],
+    attributions: dict[str, Float[Tensor, "batch m"] | Float[Tensor, "batch n_instances m"]]
+    | None = None,
 ) -> tuple[
     dict[str, Float[Tensor, "batch m"] | Float[Tensor, "batch n_instances m"]],
     dict[str, Float[Tensor, "batch m"] | Float[Tensor, "batch n_instances m"]],
@@ -323,19 +323,18 @@ def optimize(
         # Forward pass with all subnetworks
         out = model(batch)
 
-        post_weight_acts = {k: v for k, v in target_cache.items() if k.endswith("hook_post")}
         pre_weight_acts = {k: v for k, v in target_cache.items() if k.endswith("hook_pre")}
         As = collect_nested_module_attrs(model, attr_name="A", include_attr_name=False)
-        Bs = collect_nested_module_attrs(model, attr_name="B", include_attr_name=False)
 
         target_component_acts = calc_component_acts(pre_weight_acts=pre_weight_acts, As=As)
-        attributions = calc_grad_attributions(
-            target_out=target_out,
-            pre_weight_acts=pre_weight_acts,
-            post_weight_acts=post_weight_acts,
-            target_component_acts=target_component_acts,
-            Bs=Bs,
-        )
+        # attributions = calc_grad_attributions(
+        #     target_out=target_out,
+        #     pre_weight_acts=pre_weight_acts,
+        #     post_weight_acts={k: v for k, v in target_cache.items() if k.endswith("hook_post")},
+        #     target_component_acts=target_component_acts,
+        #     Bs=collect_nested_module_attrs(model, attr_name="B", include_attr_name=False),
+        # )
+        attributions = None
 
         masks, relud_masks = calc_masks(
             gates=gates, target_component_acts=target_component_acts, attributions=attributions
