@@ -276,7 +276,7 @@ def test_tms_equivalent_to_raw_model() -> None:
         ), f"post-acts do not match at layer {key_name}"
 
 
-def test_init_spd_model_from_target() -> None:
+def test_init_tms_spd_model_from_target() -> None:
     """Test that initializing an SPD model from a target model results in identical outputs."""
     device = "cpu"
     set_seed(0)
@@ -300,6 +300,8 @@ def test_init_spd_model_from_target() -> None:
     spd_model = TMSSPDModel(config=tms_spd_config).to(device)
 
     init_spd_model_from_target_model(spd_model, target_model, m=tms_config.n_features)
+    # Also copy the bias
+    spd_model.b_final.data[:, :] = target_model.b_final.data
 
     # Create a random input
     batch_size = 4
@@ -308,9 +310,11 @@ def test_init_spd_model_from_target() -> None:
     )
 
     with torch.inference_mode():
-        # Forward pass on both models
         target_out = target_model(input_data)
         spd_out = spd_model(input_data)
 
-    # Assert outputs are the same
+    assert torch.allclose(
+        spd_model.linear1.weight, target_model.linear1.weight
+    ), "Weights do not match"
+
     assert torch.allclose(target_out, spd_out), "Outputs after initialization do not match"

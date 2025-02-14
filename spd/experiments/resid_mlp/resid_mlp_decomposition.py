@@ -6,6 +6,7 @@ from functools import partial
 from pathlib import Path
 from typing import Any
 
+import einops
 import fire
 import matplotlib.pyplot as plt
 import numpy as np
@@ -143,6 +144,53 @@ def save_target_model_info(
         wandb.save(str(out_dir / "label_coeffs.json"), base_path=out_dir, policy="now")
 
 
+def init_spd_model_from_target_model(
+    model: ResidualMLPSPDModel, target_model: ResidualMLPModel, m: int
+) -> None:
+    """Initialize SPD model from target model.
+
+    For mlp_in: A = target weights, B = identity
+    For mlp_out: A = identity, B = target weights
+
+    Args:
+        model: The SPD model to initialize
+        target_model: The target model to initialize from
+        m: The number of components (must equal d_mlp for initialization)
+    """
+    # For ResidualMLP, we need to initialize each layer's mlp_in and mlp_out components
+    for i in range(target_model.config.n_layers):
+        # For mlp_in, m must equal d_mlp
+        assert m == target_model.config.d_mlp, "m must be equal to d_mlp"
+
+        # For mlp_in: A = target weights, B = identity
+        model.layers[i].mlp_in.A.data[:] = target_model.layers[i].mlp_in.weight.data.clone()
+        model.layers[i].mlp_in.B.data[:] = einops.repeat(
+            torch.eye(m),
+            "m d_out -> n_instances m d_out",
+            n_instances=target_model.config.n_instances,
+        )
+
+        # For mlp_out: A = identity, B = target weights
+        model.layers[i].mlp_out.A.data[:] = einops.repeat(
+            torch.eye(m),
+            "d_in m -> n_instances d_in m",
+            n_instances=target_model.config.n_instances,
+        )
+        model.layers[i].mlp_out.B.data[:] = target_model.layers[i].mlp_out.weight.data.clone()
+
+        # Copy biases if they exist
+        if target_model.config.in_bias:
+            model.layers[i].bias1.data[:] = target_model.layers[i].bias1.data.clone()
+        if target_model.config.out_bias:
+            model.layers[i].bias2.data[:] = target_model.layers[i].bias2.data.clone()
+
+    # Copy embedding matrices
+    model.W_E.data[:] = target_model.W_E.data.clone()
+    model.W_U.data[:] = target_model.W_U.data.clone()
+
+    logger.info("Initialized SPD model from target model")
+
+
 def main(
     config_path_or_obj: Path | str | Config, sweep_config_path: Path | str | None = None
 ) -> None:
@@ -225,6 +273,9 @@ def main(
         if target_model.config.out_bias:
             model.layers[i].bias2.data[:, :] = target_model.layers[i].bias2.data.detach().clone()
             model.layers[i].bias2.requires_grad = False
+
+    if config.init_from_target_model:
+        init_spd_model_from_target_model(model=model, target_model=target_model, m=config.m)
 
     param_names = []
     for i in range(target_model.config.n_layers):
