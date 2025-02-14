@@ -319,8 +319,6 @@ class ResidualMLPSPDModel(SPDModel):
                     spd_kwargs={"m": self.m},
                 )
             )
-            # For now, we just define all the gates in this class rather than in the MLP class
-            # to make it easier to collect all the gates
             self.gates[f"layers-{i}-mlp_in"] = Gate(m=self.m, n_instances=config.n_instances)
             self.gates[f"layers-{i}-mlp_out"] = Gate(m=self.m, n_instances=config.n_instances)
 

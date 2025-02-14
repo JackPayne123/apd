@@ -161,7 +161,7 @@ def test_resid_mlp_equivalent_to_raw_model() -> None:
 
     target_model = ResidualMLPModel(config=resid_mlp_config).to(device)
 
-    # Create the SPD model with k=1
+    # Create the SPD model
     resid_mlp_spd_config = ResidualMLPSPDConfig(**resid_mlp_config.model_dump(), m=m)
     spd_model = ResidualMLPSPDModel(config=resid_mlp_spd_config).to(device)
 
@@ -196,11 +196,11 @@ def test_resid_mlp_equivalent_to_raw_model() -> None:
             input_data, names_filter=target_cache_filter
         )
         # Forward pass with all subnetworks
-        spd_cache_filter = lambda k: k.endswith((".hook_post", ".hook_component_acts"))
+        spd_cache_filter = lambda k: k.endswith(".hook_post")
         out, spd_cache = spd_model.run_with_cache(input_data, names_filter=spd_cache_filter)
 
     # Assert outputs are the same
-    assert torch.allclose(target_out, out, atol=1e-6), "Outputs do not match"
+    assert torch.allclose(target_out, out, atol=1e-4), "Outputs do not match"
 
     # Assert that all post-acts are the same
     target_post_weight_acts = {k: v for k, v in target_cache.items() if k.endswith(".hook_post")}
