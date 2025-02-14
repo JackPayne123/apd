@@ -18,7 +18,9 @@ from torch import Tensor
 
 from spd.configs import Config, TMSTaskConfig
 from spd.experiments.tms.models import TMSModel, TMSModelConfig, TMSSPDModel, TMSSPDModelConfig
+from spd.experiments.tms.plotting import plot_mask_vals
 from spd.log import logger
+from spd.models.components import Gate
 from spd.run_spd import get_common_run_name_suffix, optimize
 from spd.utils import DatasetGeneratedDataLoader, SparseFeatureDataset, load_config, set_seed
 from spd.wandb_utils import init_wandb
@@ -45,11 +47,15 @@ def make_plots(
     out_dir: Path,
     device: str,
     config: Config,
-    masks: dict[str, Float[Tensor, "batch n_instances m"]] | None,
+    gates: dict[str, Gate],
+    masks: dict[str, Float[Tensor, "batch n_instances m"]],
     batch: Float[Tensor, "batch n_instances n_features"],
     **_,
 ) -> dict[str, plt.Figure]:
     plots = {}
+    plots["masks"] = plot_mask_vals(
+        model=model, target_model=target_model, gates=gates, device=device, input_magnitude=0.75
+    )
     return plots
 
 
