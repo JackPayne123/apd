@@ -62,6 +62,7 @@ class Config(BaseModel):
     post_relu_act_recon: bool = False
     m: PositiveInt
     n_random_masks: PositiveInt
+    init_from_target_model: bool = False
     lr_schedule: Literal["linear", "constant", "cosine", "exponential"] = "constant"
     lr_exponential_halflife: PositiveFloat | None = None
     lr_warmup_pct: Probability = 0.0

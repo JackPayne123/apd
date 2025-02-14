@@ -8,6 +8,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+import einops
 import fire
 import matplotlib.pyplot as plt
 import torch
@@ -75,6 +76,21 @@ def save_target_model_info(
         wandb.save(str(out_dir / "tms_train_config.yaml"), base_path=out_dir, policy="now")
 
 
+def init_spd_model_from_target_model(model: TMSSPDModel, target_model: TMSModel, m: int) -> None:
+    assert target_model.config.n_hidden_layers == 0, "Hidden layers not supported for now"
+    assert m == target_model.config.n_features, "m must be equal to n_features"
+    # We set the A to the identity and B to the target weight matrix
+    model.linear1.A.data[:] = einops.repeat(
+        torch.eye(m),
+        "d_in m -> n_instances d_in m",
+        n_instances=target_model.config.n_instances,
+    )
+    # The B matrix is just the target model's linear layer
+    model.linear1.B.data[:] = target_model.linear1.weight.data.clone()
+    model.b_final.data[:] = target_model.b_final.data.clone()
+    logger.info("Initialized SPD model from target model")
+
+
 def main(
     config_path_or_obj: Path | str | Config, sweep_config_path: Path | str | None = None
 ) -> None:
@@ -123,6 +139,9 @@ def main(
         bias_val=task_config.bias_val,
     )
     model = TMSSPDModel(config=tms_spd_model_config)
+
+    if config.init_from_target_model:
+        init_spd_model_from_target_model(model=model, target_model=target_model, m=config.m)
 
     # Manually set the bias for the SPD model from the bias in the pretrained model
     model.b_final.data[:] = target_model.b_final.data.clone()

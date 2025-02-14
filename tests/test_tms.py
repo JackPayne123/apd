@@ -6,6 +6,7 @@ from torch import Tensor
 
 from spd.configs import Config, TMSTaskConfig
 from spd.experiments.tms.models import TMSModel, TMSModelConfig, TMSSPDModel, TMSSPDModelConfig
+from spd.experiments.tms.tms_decomposition import init_spd_model_from_target_model
 from spd.experiments.tms.train_tms import TMSTrainConfig, get_model_and_dataloader, train
 from spd.module_utils import get_nested_module_attr
 from spd.run_spd import optimize
@@ -273,3 +274,43 @@ def test_tms_equivalent_to_raw_model() -> None:
         assert torch.allclose(
             target_post_weight_acts[key_name], spd_post_weight_acts[key_name], atol=1e-6
         ), f"post-acts do not match at layer {key_name}"
+
+
+def test_init_spd_model_from_target() -> None:
+    """Test that initializing an SPD model from a target model results in identical outputs."""
+    device = "cpu"
+    set_seed(0)
+
+    # Create target model with no hidden layers (as per current limitation)
+    tms_config = TMSModelConfig(
+        n_instances=2,
+        n_features=3,
+        n_hidden=2,
+        n_hidden_layers=0,
+        device=device,
+    )
+    target_model = TMSModel(config=tms_config).to(device)
+
+    # Create the SPD model with m equal to n_features
+    tms_spd_config = TMSSPDModelConfig(
+        **tms_config.model_dump(),
+        m=tms_config.n_features,  # Must match n_features for initialization
+        bias_val=0.0,
+    )
+    spd_model = TMSSPDModel(config=tms_spd_config).to(device)
+
+    init_spd_model_from_target_model(spd_model, target_model, m=tms_config.n_features)
+
+    # Create a random input
+    batch_size = 4
+    input_data: Float[Tensor, "batch n_instances n_features"] = torch.rand(
+        batch_size, tms_config.n_instances, tms_config.n_features, device=device
+    )
+
+    with torch.inference_mode():
+        # Forward pass on both models
+        target_out = target_model(input_data)
+        spd_out = spd_model(input_data)
+
+    # Assert outputs are the same
+    assert torch.allclose(target_out, spd_out), "Outputs after initialization do not match"
