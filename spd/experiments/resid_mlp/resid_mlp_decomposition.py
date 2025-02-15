@@ -178,16 +178,6 @@ def init_spd_model_from_target_model(
         )
         model.layers[i].mlp_out.B.data[:] = target_model.layers[i].mlp_out.weight.data.clone()
 
-        # Copy biases if they exist
-        if target_model.config.in_bias:
-            model.layers[i].bias1.data[:] = target_model.layers[i].bias1.data.clone()
-        if target_model.config.out_bias:
-            model.layers[i].bias2.data[:] = target_model.layers[i].bias2.data.clone()
-
-    # Copy embedding matrices
-    model.W_E.data[:] = target_model.W_E.data.clone()
-    model.W_U.data[:] = target_model.W_U.data.clone()
-
     logger.info("Initialized SPD model from target model")
 
 

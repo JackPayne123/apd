@@ -87,7 +87,6 @@ def init_spd_model_from_target_model(model: TMSSPDModel, target_model: TMSModel,
     )
     # The B matrix is just the target model's linear layer
     model.linear1.B.data[:] = target_model.linear1.weight.data.clone()
-    model.b_final.data[:] = target_model.b_final.data.clone()
     logger.info("Initialized SPD model from target model")
 
 
