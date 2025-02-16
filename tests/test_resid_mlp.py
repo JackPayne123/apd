@@ -242,6 +242,10 @@ def test_init_resid_mlp_spd_model_from_target() -> None:
 
     init_spd_model_from_target_model(spd_model, target_model, m=resid_mlp_config.d_mlp)
 
+    # Copy the embeddings
+    spd_model.W_E.data[:, :, :] = target_model.W_E.data
+    spd_model.W_U.data[:, :, :] = target_model.W_U.data
+
     # Also copy the biases
     for i in range(resid_mlp_config.n_layers):
         spd_model.layers[i].bias1.data[:, :] = target_model.layers[i].bias1.data
