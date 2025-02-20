@@ -27,6 +27,8 @@ def get_common_run_name_suffix(config: Config) -> str:
         run_suffix += f"maskrecon{config.masked_recon_coeff:.2e}_"
     if config.act_recon_coeff is not None:
         run_suffix += f"actrecon_{config.act_recon_coeff:.2e}_"
+    if config.random_mask_recon_coeff is not None:
+        run_suffix += f"randrecon{config.random_mask_recon_coeff:.2e}_"
     run_suffix += f"p{config.pnorm:.2e}_"
     run_suffix += f"lpsp{config.lp_sparsity_coeff:.2e}_"
     run_suffix += f"m{config.m}_"
