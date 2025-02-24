@@ -2,7 +2,6 @@
 
 import json
 from datetime import datetime
-from functools import partial
 from pathlib import Path
 from typing import Any
 
@@ -24,7 +23,9 @@ from spd.experiments.resid_mlp.models import (
     ResidualMLPSPDModel,
 )
 from spd.experiments.resid_mlp.resid_mlp_dataset import ResidualMLPDataset
+from spd.experiments.tms.plotting import plot_mask_vals
 from spd.log import logger
+from spd.models.components import Gate
 from spd.run_spd import get_common_run_name_suffix, optimize
 from spd.utils import (
     DatasetGeneratedDataLoader,
@@ -108,11 +109,16 @@ def resid_mlp_plot_results_fn(
     out_dir: Path | None,
     device: str,
     config: Config,
+    gates: dict[str, Gate],
     masks: dict[str, Float[Tensor, "batch_size m"]] | None,
     **_,
 ) -> dict[str, plt.Figure]:
     assert isinstance(config.task_config, ResidualMLPTaskConfig)
     fig_dict = {}
+
+    fig_dict["masks"] = plot_mask_vals(
+        model=model, target_model=target_model, gates=gates, device=device, input_magnitude=0.75
+    )
 
     # Save plots to files
     if out_dir:
@@ -160,6 +166,7 @@ def init_spd_model_from_target_model(
     # For ResidualMLP, we need to initialize each layer's mlp_in and mlp_out components
     for i in range(target_model.config.n_layers):
         # For mlp_in, m must equal d_mlp
+        # TODO: This is broken, we shouldn't need m=d_mlp for this function.
         assert m == target_model.config.d_mlp, "m must be equal to d_mlp"
 
         # For mlp_in: A = target weights, B = identity
@@ -289,7 +296,6 @@ def main(
 
     dataloader = DatasetGeneratedDataLoader(dataset, batch_size=config.batch_size, shuffle=False)
 
-    plot_results_fn = partial(resid_mlp_plot_results_fn, dataloader=dataloader)
     optimize(
         model=model,
         config=config,
@@ -298,7 +304,7 @@ def main(
         target_model=target_model,
         param_names=param_names,
         out_dir=out_dir,
-        plot_results_fn=plot_results_fn,
+        plot_results_fn=resid_mlp_plot_results_fn,
     )
 
     if config.wandb_project:

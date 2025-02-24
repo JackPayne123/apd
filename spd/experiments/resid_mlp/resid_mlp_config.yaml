@@ -4,15 +4,15 @@ wandb_run_name: null
 wandb_run_name_prefix: ""
 unit_norm_matrices: true
 seed: 0
-m: 50
+m: 200
 param_match_coeff: 1.0
 masked_recon_coeff: 1.0
-act_recon_coeff: 1.0
+act_recon_coeff: 1
 post_relu_act_recon: true
 random_mask_recon_coeff: 1.0
-n_random_masks: 2
+n_random_masks: 1
 pnorm: 0.9
-lp_sparsity_coeff: 1.0
+lp_sparsity_coeff: 1e-2
 batch_size: 256
 steps: 10_000
 image_freq: 5_000
@@ -21,7 +21,8 @@ save_freq: 10_000
 lr: 1e-3
 lr_schedule: cosine
 lr_warmup_pct: 0.01
-image_on_first_step: false
+image_on_first_step: true
+init_from_target_model: false
 task_config:
   task_name: residual_mlp
   init_scale: 2.0
@@ -36,7 +37,7 @@ task_config:
 # wandb_run_name_prefix: ""
 # unit_norm_matrices: false
 # seed: 0
-# m: 25
+# m: 100
 # param_match_coeff: 1.0
 # masked_recon_coeff: 2.0
 # act_recon_coeff: 1.0

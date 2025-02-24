@@ -2,16 +2,44 @@ import einops
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
+from jaxtyping import Float
+from torch import Tensor
 
 from spd.experiments.tms.models import TMSModel, TMSSPDModel
+from spd.hooks import HookedRootModule
+from spd.models.base import SPDModel
 from spd.models.components import Gate
 from spd.module_utils import collect_nested_module_attrs
 from spd.run_spd import calc_component_acts, calc_masks
 
 
+def permute_to_identity(
+    mask: Float[Tensor, "batch n_instances m"],
+) -> Float[Tensor, "batch n_instances m"]:
+    batch, n_instances, m = mask.shape
+    new_mask = mask.clone()
+    effective_rows: int = min(batch, m)
+    for inst in range(n_instances):
+        mat: Tensor = mask[:, inst, :]
+        perm: list[int] = [0] * m
+        used: set[int] = set()
+        for i in range(effective_rows):
+            sorted_indices: list[int] = torch.argsort(mat[i, :], descending=True).tolist()
+            chosen: int = next(
+                (col for col in sorted_indices if col not in used), sorted_indices[0]
+            )
+            perm[i] = chosen
+            used.add(chosen)
+        remaining: list[int] = sorted(list(set(range(m)) - used))
+        for idx, col in enumerate(remaining):
+            perm[effective_rows + idx] = col
+        new_mask[:, inst, :] = mat[:, perm]
+    return new_mask
+
+
 def plot_mask_vals(
-    model: TMSSPDModel,
-    target_model: TMSModel,
+    model: SPDModel,
+    target_model: HookedRootModule,
     gates: dict[str, Gate],
     device: str,
     input_magnitude: float,
@@ -37,12 +65,16 @@ def plot_mask_vals(
         gates=gates, target_component_acts=target_component_acts, attributions=None
     )[1]
 
+    # Permute columns so that in each instance the maximum per row ends up on the diagonal.
+    relud_masks = {k: permute_to_identity(mask=v) for k, v in relud_masks.items()}
+
     # Create figure with better layout and sizing
     fig, axs = plt.subplots(
         len(relud_masks),
         n_instances,
         figsize=(5 * n_instances, 5 * len(relud_masks)),
         constrained_layout=True,
+        squeeze=False,
     )
     axs = np.array(axs)
 
@@ -75,15 +107,19 @@ def plot_mask_vals(
     return fig
 
 
-# pretrained_model_path = "wandb:spd-train-tms/runs/tmzweoqk"
+pretrained_model_path = "wandb:spd-train-tms/runs/tmzweoqk"
 # run_id = "wandb:spd-tms/runs/7qvf63x8"
+# run_id = "wandb:spd-tms/runs/fj68gebo"
 
+# run_id = "wandb:spd-tms/runs/eafxol4e"
+# run_id = "wandb:spd-tms/runs/hr4jv78k"
+run_id = "wandb:spd-tms/runs/fj68gebo"
+target_model, target_model_train_config_dict = TMSModel.from_pretrained(pretrained_model_path)
+spd_model, spd_model_train_config_dict = TMSSPDModel.from_pretrained(run_id)
 
-# target_model, target_model_train_config_dict = TMSModel.from_pretrained(pretrained_model_path)
-# spd_model, spd_model_train_config_dict = TMSSPDModel.from_pretrained(run_id)
-
-# # We used "-" instead of "." as module names can't have "." in them
-# gates = {k.removeprefix("gates.").replace("-", "."): v for k, v in spd_model.gates.items()}
-
-# fig = plot_mask_vals(spd_model, target_model, gates, device="cpu", input_magnitude=0.5)
-# fig.savefig("tms_mask_vals.png")
+# We used "-" instead of "." as module names can't have "." in them
+gates = {k.removeprefix("gates.").replace("-", "."): v for k, v in spd_model.gates.items()}
+input_magnitude = 0.75
+fig = plot_mask_vals(spd_model, target_model, gates, device="cpu", input_magnitude=input_magnitude)  # type: ignore
+fig.savefig(f"tms_mask_vals_{input_magnitude}.png")
+print(f"Saved figure to tms_mask_vals_{input_magnitude}.png")
