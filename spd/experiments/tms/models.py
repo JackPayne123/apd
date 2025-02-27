@@ -289,6 +289,8 @@ class TMSSPDModel(SPDModel):
         with open(paths.final_config) as f:
             final_config_dict = yaml.safe_load(f)
 
+        final_config_dict.pop("post_act_recon_coeff", None)
+
         spd_config = Config(**final_config_dict)
 
         with open(paths.tms_train_config) as f:

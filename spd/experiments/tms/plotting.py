@@ -107,19 +107,22 @@ def plot_mask_vals(
     return fig
 
 
-pretrained_model_path = "wandb:spd-train-tms/runs/tmzweoqk"
-# run_id = "wandb:spd-tms/runs/7qvf63x8"
-# run_id = "wandb:spd-tms/runs/fj68gebo"
+if __name__ == "__main__":
+    pretrained_model_path = "wandb:spd-train-tms/runs/tmzweoqk"
+    run_id = "wandb:spd-tms/runs/fj68gebo"
+    target_model, target_model_train_config_dict = TMSModel.from_pretrained(pretrained_model_path)
+    spd_model, spd_model_train_config_dict = TMSSPDModel.from_pretrained(run_id)
 
-# run_id = "wandb:spd-tms/runs/eafxol4e"
-# run_id = "wandb:spd-tms/runs/hr4jv78k"
-run_id = "wandb:spd-tms/runs/fj68gebo"
-target_model, target_model_train_config_dict = TMSModel.from_pretrained(pretrained_model_path)
-spd_model, spd_model_train_config_dict = TMSSPDModel.from_pretrained(run_id)
+    # We used "-" instead of "." as module names can't have "." in them
+    gates = {k.removeprefix("gates.").replace("-", "."): v for k, v in spd_model.gates.items()}
 
-# We used "-" instead of "." as module names can't have "." in them
-gates = {k.removeprefix("gates.").replace("-", "."): v for k, v in spd_model.gates.items()}
-input_magnitude = 0.75
-fig = plot_mask_vals(spd_model, target_model, gates, device="cpu", input_magnitude=input_magnitude)  # type: ignore
-fig.savefig(f"tms_mask_vals_{input_magnitude}.png")
-print(f"Saved figure to tms_mask_vals_{input_magnitude}.png")
+    input_magnitude = 0.75
+    fig = plot_mask_vals(
+        spd_model,
+        target_model,
+        gates,  # type: ignore
+        device="cpu",
+        input_magnitude=input_magnitude,
+    )
+    fig.savefig(f"tms_mask_vals_{input_magnitude}.png")
+    print(f"Saved figure to tms_mask_vals_{input_magnitude}.png")
