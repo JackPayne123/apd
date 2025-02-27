@@ -410,6 +410,7 @@ class ResidualMLPSPDModel(SPDModel):
         with open(paths.final_config) as f:
             final_config_dict = yaml.safe_load(f)
 
+        final_config_dict.pop("post_relu_act_recon", None)
         config = Config(**final_config_dict)
 
         with open(paths.resid_mlp_train_config) as f:
