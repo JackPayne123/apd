@@ -53,7 +53,6 @@ def test_resid_mlp_decomposition_happy_path() -> None:
         param_match_coeff=1.0,
         masked_recon_coeff=1,
         act_recon_coeff=1,
-        post_relu_act_recon=True,
         lp_sparsity_coeff=1.0,
         pnorm=0.9,
         attribution_type="gradient",

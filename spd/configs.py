@@ -59,7 +59,6 @@ class Config(BaseModel):
     random_mask_recon_coeff: NonNegativeFloat | None = None
     lp_sparsity_coeff: NonNegativeFloat
     pnorm: PositiveFloat
-    post_relu_act_recon: bool = False
     m: PositiveInt
     n_random_masks: PositiveInt
     init_from_target_model: bool = False
