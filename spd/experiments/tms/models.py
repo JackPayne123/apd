@@ -216,12 +216,10 @@ class TMSSPDModel(SPDModel):
                 ]
             )
 
-        # Same gate for linear1 and linear2 since the weights are tied
-        gate = Gate(m=self.m, n_instances=config.n_instances)
         self.gates = nn.ModuleDict(
             {
-                "linear1": gate,
-                "linear2": gate,
+                "linear1": Gate(m=self.m, n_instances=config.n_instances),
+                "linear2": Gate(m=self.m, n_instances=config.n_instances),
                 **{
                     f"hidden_layers-{i}": Gate(m=self.m, n_instances=config.n_instances)
                     for i in range(config.n_hidden_layers)
