@@ -34,12 +34,8 @@ COLOR_PALETTE = [
 
 
 def get_device() -> str:
-    if torch.cuda.is_available():
-        return "cuda"
-    elif torch.backends.mps.is_available():
-        return "mps"
-    else:
-        return "cpu"
+    # NOTE: MPS returns NaNs on TMS when run. Avoiding for now.
+    return "cuda" if torch.cuda.is_available() else "cpu"
 
 
 def set_seed(seed: int | None) -> None:
