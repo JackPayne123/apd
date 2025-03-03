@@ -33,6 +33,15 @@ COLOR_PALETTE = [
 ]
 
 
+def get_device() -> str:
+    if torch.cuda.is_available():
+        return "cuda"
+    elif torch.backends.mps.is_available():
+        return "mps"
+    else:
+        return "cpu"
+
+
 def set_seed(seed: int | None) -> None:
     """Set the random seed for random, PyTorch and NumPy"""
     if seed is not None:

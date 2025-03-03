@@ -23,7 +23,13 @@ from spd.experiments.tms.plotting import plot_mask_vals
 from spd.log import logger
 from spd.models.components import Gate
 from spd.run_spd import get_common_run_name_suffix, optimize
-from spd.utils import DatasetGeneratedDataLoader, SparseFeatureDataset, load_config, set_seed
+from spd.utils import (
+    DatasetGeneratedDataLoader,
+    SparseFeatureDataset,
+    get_device,
+    load_config,
+    set_seed,
+)
 from spd.wandb_utils import init_wandb
 
 wandb.require("core")
@@ -93,7 +99,7 @@ def init_spd_model_from_target_model(model: TMSSPDModel, target_model: TMSModel,
 def main(
     config_path_or_obj: Path | str | Config, sweep_config_path: Path | str | None = None
 ) -> None:
-    device = "cuda" if torch.cuda.is_available() else "cpu"
+    device = get_device()
 
     config = load_config(config_path_or_obj, config_model=Config)
 

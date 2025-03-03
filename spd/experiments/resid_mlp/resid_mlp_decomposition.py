@@ -29,6 +29,7 @@ from spd.models.components import Gate
 from spd.run_spd import get_common_run_name_suffix, optimize
 from spd.utils import (
     DatasetGeneratedDataLoader,
+    get_device,
     load_config,
     set_seed,
 )
@@ -199,7 +200,7 @@ def main(
     set_seed(config.seed)
     logger.info(config)
 
-    device = "cuda" if torch.cuda.is_available() else "cpu"
+    device = get_device()
     print(f"Using device: {device}")
     assert isinstance(config.task_config, ResidualMLPTaskConfig)
 
