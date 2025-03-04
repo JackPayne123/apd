@@ -25,6 +25,7 @@ def get_common_run_name_suffix(config: Config) -> str:
     run_suffix = ""
     if config.masked_recon_coeff is not None:
         run_suffix += f"maskrecon{config.masked_recon_coeff:.2e}_"
+        run_suffix += f"nrandmasks{config.n_random_masks}_"
     if config.act_recon_coeff is not None:
         run_suffix += f"actrecon_{config.act_recon_coeff:.2e}_"
     if config.random_mask_recon_coeff is not None:
@@ -144,6 +145,7 @@ def calc_masks(
     ],
     attributions: dict[str, Float[Tensor, "batch m"] | Float[Tensor, "batch n_instances m"]]
     | None = None,
+    detach_inputs: bool = False,
 ) -> tuple[
     dict[str, Float[Tensor, "batch m"] | Float[Tensor, "batch n_instances m"]],
     dict[str, Float[Tensor, "batch m"] | Float[Tensor, "batch n_instances m"]],
@@ -156,15 +158,18 @@ def calc_masks(
         gates: The gates to use for the mask.
         component_acts: The activations after each subnetwork in the SPD model.
         attributions: The attributions to use for the mask.
-
+        detach_inputs: Whether to detach the inputs to the gates.
     Returns:
         Dictionary of masks for each layer.
     """
     masks = {}
     relud_masks = {}
     for layer_name in gates:
-        masks[layer_name] = gates[layer_name].forward(target_component_acts[layer_name])
-        relud_masks[layer_name] = gates[layer_name].forward_relu(target_component_acts[layer_name])
+        gate_input = target_component_acts[layer_name]
+        if detach_inputs:
+            gate_input = gate_input.detach()
+        masks[layer_name] = gates[layer_name].forward(gate_input)
+        relud_masks[layer_name] = gates[layer_name].forward_relu(gate_input)
     return masks, relud_masks
 
 
@@ -332,7 +337,10 @@ def optimize(
         attributions = None
 
         masks, relud_masks = calc_masks(
-            gates=gates, target_component_acts=target_component_acts, attributions=attributions
+            gates=gates,
+            target_component_acts=target_component_acts,
+            attributions=attributions,
+            detach_inputs=False,
         )
 
         # Masked forward pass
@@ -345,7 +353,7 @@ def optimize(
         if config.random_mask_recon_coeff is not None:
             random_masks = calc_random_masks(masks=masks, n_random_masks=config.n_random_masks)
             random_masks_loss = calc_random_masks_mse_loss(
-                model=model, batch=batch, random_masks=random_masks, out_masked=out_masked
+                model=model, batch=batch, random_masks=random_masks, out_masked=target_out
             )
 
         # Calculate losses
