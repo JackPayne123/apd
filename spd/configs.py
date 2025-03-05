@@ -68,6 +68,7 @@ class Config(BaseModel):
     sparsity_loss_type: Literal["jacobian"] = "jacobian"
     unit_norm_matrices: bool = False
     attribution_type: Literal["gradient"] = "gradient"
+    n_gate_hidden_neurons: PositiveInt | None = None
     task_config: TMSTaskConfig | ResidualMLPTaskConfig = Field(..., discriminator="task_name")
 
     DEPRECATED_CONFIG_KEYS: ClassVar[list[str]] = []

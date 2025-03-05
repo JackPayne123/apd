@@ -15,6 +15,7 @@ from spd.hooks import HookedRootModule
 from spd.models.base import SPDModel
 from spd.models.components import (
     Gate,
+    GateMLP,
     Linear,
     LinearComponent,
     TransposedLinear,
@@ -174,6 +175,7 @@ class TMSSPDModelConfig(BaseModel):
     bias_val: float
     device: str
     m: PositiveInt
+    n_gate_hidden_neurons: PositiveInt | None = None
 
 
 class TMSSPDModel(SPDModel):
@@ -216,12 +218,18 @@ class TMSSPDModel(SPDModel):
                 ]
             )
 
+        # Use GateMLP if n_gate_hidden_neurons is provided, otherwise use Gate
+        gate_class = GateMLP if config.n_gate_hidden_neurons else Gate
+        gate_kwargs = {"m": self.m, "n_instances": config.n_instances}
+        if config.n_gate_hidden_neurons:
+            gate_kwargs["n_gate_hidden_neurons"] = config.n_gate_hidden_neurons
+
         self.gates = nn.ModuleDict(
             {
-                "linear1": Gate(m=self.m, n_instances=config.n_instances),
-                "linear2": Gate(m=self.m, n_instances=config.n_instances),
+                "linear1": gate_class(**gate_kwargs),
+                "linear2": gate_class(**gate_kwargs),
                 **{
-                    f"hidden_layers-{i}": Gate(m=self.m, n_instances=config.n_instances)
+                    f"hidden_layers-{i}": gate_class(**gate_kwargs)
                     for i in range(config.n_hidden_layers)
                 },
             }
@@ -299,6 +307,7 @@ class TMSSPDModel(SPDModel):
             **tms_train_config_dict["tms_model_config"],
             m=spd_config.m,
             bias_val=spd_config.task_config.bias_val,
+            n_gate_hidden_neurons=spd_config.n_gate_hidden_neurons,
         )
         model = cls(config=tms_spd_config)
         params = torch.load(paths.checkpoint, weights_only=True, map_location="cpu")

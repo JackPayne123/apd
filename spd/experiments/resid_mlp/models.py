@@ -17,7 +17,7 @@ from spd.configs import ResidualMLPTaskConfig
 from spd.hooks import HookedRootModule
 from spd.log import logger
 from spd.models.base import SPDModel
-from spd.models.components import Gate, Linear, LinearComponent
+from spd.models.components import Gate, GateMLP, Linear, LinearComponent
 from spd.module_utils import init_param_
 from spd.run_spd import Config
 from spd.types import WANDB_PATH_PREFIX, ModelPath
@@ -281,6 +281,7 @@ class ResidualMLPSPDConfig(BaseModel):
     out_bias: bool
     init_scale: float
     m: PositiveInt
+    n_gate_hidden_neurons: PositiveInt | None = None
     init_type: Literal["kaiming_uniform", "xavier_normal"] = "xavier_normal"
 
 
@@ -304,6 +305,13 @@ class ResidualMLPSPDModel(SPDModel):
         init_param_(self.W_U, init_type=config.init_type)
 
         self.layers = nn.ModuleList()
+
+        # Use GateMLP if n_gate_hidden_neurons is provided, otherwise use Gate
+        gate_class = GateMLP if config.n_gate_hidden_neurons is not None else Gate
+        gate_kwargs = {"m": self.m, "n_instances": config.n_instances}
+        if config.n_gate_hidden_neurons is not None:
+            gate_kwargs["n_gate_hidden_neurons"] = config.n_gate_hidden_neurons
+
         self.gates = nn.ModuleDict()
         for i in range(config.n_layers):
             self.layers.append(
@@ -319,8 +327,8 @@ class ResidualMLPSPDModel(SPDModel):
                     spd_kwargs={"m": self.m},
                 )
             )
-            self.gates[f"layers-{i}-mlp_in"] = Gate(m=self.m, n_instances=config.n_instances)
-            self.gates[f"layers-{i}-mlp_out"] = Gate(m=self.m, n_instances=config.n_instances)
+            self.gates[f"layers-{i}-mlp_in"] = gate_class(**gate_kwargs)
+            self.gates[f"layers-{i}-mlp_out"] = gate_class(**gate_kwargs)
 
         self.setup()
 
@@ -421,7 +429,9 @@ class ResidualMLPSPDModel(SPDModel):
 
         assert isinstance(config.task_config, ResidualMLPTaskConfig)
         resid_mlp_spd_config = ResidualMLPSPDConfig(
-            **resid_mlp_train_config_dict["resid_mlp_config"], m=config.m
+            **resid_mlp_train_config_dict["resid_mlp_config"],
+            m=config.m,
+            n_gate_hidden_neurons=config.n_gate_hidden_neurons,
         )
         model = cls(config=resid_mlp_spd_config)
         params = torch.load(paths.checkpoint, weights_only=True, map_location="cpu")

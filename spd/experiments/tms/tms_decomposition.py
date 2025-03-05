@@ -142,6 +142,7 @@ def main(
         **target_model.config.model_dump(mode="json"),
         m=config.m,
         bias_val=task_config.bias_val,
+        n_gate_hidden_neurons=config.n_gate_hidden_neurons,
     )
     model = TMSSPDModel(config=tms_spd_model_config)
 

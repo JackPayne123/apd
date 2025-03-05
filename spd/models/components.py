@@ -4,13 +4,14 @@ import einops
 import torch
 from jaxtyping import Float
 from torch import Tensor, nn
+from torch.nn import functional as F
 
 from spd.hooks import HookPoint
 from spd.module_utils import init_param_
 
 
 def hard_sigmoid(x: Tensor) -> Tensor:
-    return torch.nn.functional.relu(torch.clamp(x, max=1))
+    return F.relu(torch.clamp(x, max=1))
 
 
 class Gate(nn.Module):
@@ -33,6 +34,68 @@ class Gate(nn.Module):
         self, x: Float[Tensor, "batch m"] | Float[Tensor, "batch n_instances m"]
     ) -> Float[Tensor, "batch m"] | Float[Tensor, "batch n_instances m"]:
         return (x * self.weight + self.bias).relu()
+
+
+class GateMLP(nn.Module):
+    """A gate with a hidden layer that maps a single input to a single output."""
+
+    def __init__(self, m: int, n_gate_hidden_neurons: int, n_instances: int | None = None):
+        super().__init__()
+        self.n_instances = n_instances
+        self.n_gate_hidden_neurons = n_gate_hidden_neurons
+
+        # Define weight shapes based on instances
+        shape = (
+            (n_instances, m, n_gate_hidden_neurons)
+            if n_instances is not None
+            else (m, n_gate_hidden_neurons)
+        )
+        in_bias_shape = (
+            (n_instances, m, n_gate_hidden_neurons)
+            if n_instances is not None
+            else (m, n_gate_hidden_neurons)
+        )
+        out_bias_shape = (n_instances, m) if n_instances is not None else (m,)
+
+        self.mlp_in = nn.Parameter(torch.empty(shape))
+        self.in_bias = nn.Parameter(torch.zeros(in_bias_shape))
+        self.mlp_out = nn.Parameter(torch.empty(shape))
+        self.out_bias = nn.Parameter(torch.zeros(out_bias_shape))
+
+        torch.nn.init.normal_(self.mlp_in, mean=0.0, std=0.2)
+        torch.nn.init.normal_(self.mlp_out, mean=0.0, std=0.2)
+
+    def _compute_pre_activation(
+        self, x: Float[Tensor, "batch m"] | Float[Tensor, "batch n_instances m"]
+    ) -> Float[Tensor, "batch m"] | Float[Tensor, "batch n_instances m"]:
+        """Compute the output before applying the final activation function."""
+        # First layer with gelu activation
+        hidden = einops.einsum(
+            x,
+            self.mlp_in,
+            "batch ... m, ... m n_gate_hidden_neurons -> batch ... m n_gate_hidden_neurons",
+        )
+        hidden = hidden + self.in_bias
+        hidden = F.gelu(hidden)
+
+        # Second layer
+        out = einops.einsum(
+            hidden,
+            self.mlp_out,
+            "batch ... m n_gate_hidden_neurons, ... m n_gate_hidden_neurons -> batch ... m",
+        )
+        out = out + self.out_bias
+        return out
+
+    def forward(
+        self, x: Float[Tensor, "batch m"] | Float[Tensor, "batch n_instances m"]
+    ) -> Float[Tensor, "batch m"] | Float[Tensor, "batch n_instances m"]:
+        return hard_sigmoid(self._compute_pre_activation(x))
+
+    def forward_relu(
+        self, x: Float[Tensor, "batch m"] | Float[Tensor, "batch n_instances m"]
+    ) -> Float[Tensor, "batch m"] | Float[Tensor, "batch n_instances m"]:
+        return F.relu(self._compute_pre_activation(x))
 
 
 class Linear(nn.Module):

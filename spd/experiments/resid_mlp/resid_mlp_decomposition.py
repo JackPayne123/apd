@@ -168,7 +168,9 @@ def init_spd_model_from_target_model(
     for i in range(target_model.config.n_layers):
         # For mlp_in, m must equal d_mlp
         # TODO: This is broken, we shouldn't need m=d_mlp for this function.
-        assert m == target_model.config.d_mlp, "m must be equal to d_mlp"
+        assert (
+            m == target_model.config.d_mlp or m == target_model.config.d_embed
+        ), "m must be equal to d_mlp or d_embed"
 
         # For mlp_in: A = target weights, B = identity
         model.layers[i].mlp_in.A.data[:] = target_model.layers[i].mlp_in.weight.data.clone()
@@ -253,10 +255,10 @@ def main(
         out_bias=target_model.config.out_bias,
         init_scale=config.task_config.init_scale,
         m=config.m,
+        n_gate_hidden_neurons=config.n_gate_hidden_neurons,
     )
-    model = ResidualMLPSPDModel(config=model_config).to(device)
+    model = ResidualMLPSPDModel(config=model_config)
 
-    model = model.to(device)
     # Use the target_model's embedding matrix and don't train it further
     model.W_E.data[:, :] = target_model.W_E.data.detach().clone()
     model.W_E.requires_grad = False
@@ -275,6 +277,7 @@ def main(
     if config.init_from_target_model:
         init_spd_model_from_target_model(model=model, target_model=target_model, m=config.m)
 
+    model.to(device)
     param_names = []
     for i in range(target_model.config.n_layers):
         param_names.append(f"layers.{i}.mlp_in")
