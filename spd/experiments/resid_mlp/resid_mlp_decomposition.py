@@ -22,10 +22,9 @@ from spd.experiments.resid_mlp.models import (
     ResidualMLPSPDModel,
 )
 from spd.experiments.resid_mlp.resid_mlp_dataset import ResidualMLPDataset
-from spd.experiments.tms.plotting import plot_mask_vals
 from spd.log import logger
 from spd.models.components import Gate
-from spd.plotting import plot_As
+from spd.plotting import plot_As, plot_mask_vals
 from spd.run_spd import get_common_run_name_suffix, optimize
 from spd.utils import (
     DatasetGeneratedDataLoader,
