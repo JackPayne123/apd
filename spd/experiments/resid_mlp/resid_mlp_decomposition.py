@@ -14,7 +14,6 @@ import wandb
 import yaml
 from jaxtyping import Float
 from torch import Tensor
-from tqdm import tqdm
 
 from spd.configs import Config, ResidualMLPTaskConfig
 from spd.experiments.resid_mlp.models import (
@@ -26,6 +25,7 @@ from spd.experiments.resid_mlp.resid_mlp_dataset import ResidualMLPDataset
 from spd.experiments.tms.plotting import plot_mask_vals
 from spd.log import logger
 from spd.models.components import Gate
+from spd.plotting import plot_As
 from spd.run_spd import get_common_run_name_suffix, optimize
 from spd.utils import (
     DatasetGeneratedDataLoader,
@@ -120,13 +120,7 @@ def resid_mlp_plot_results_fn(
     fig_dict["masks"] = plot_mask_vals(
         model=model, target_model=target_model, gates=gates, device=device, input_magnitude=0.75
     )
-
-    # Save plots to files
-    if out_dir:
-        for k, v in fig_dict.items():
-            out_file = out_dir / f"{k}_s{step}.png"
-            v.savefig(out_file, dpi=100)
-            tqdm.write(f"Saved plot to {out_file}")
+    fig_dict["As"] = plot_As(model=model, device=device)
     return fig_dict
 
 

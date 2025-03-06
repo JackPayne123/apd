@@ -449,6 +449,10 @@ def optimize(
                     {k: wandb.Image(v) for k, v in fig_dict.items()},
                     step=step,
                 )
+                if out_dir is not None:
+                    for k, v in fig_dict.items():
+                        v.savefig(out_dir / f"{k}_{step}.png")
+                        tqdm.write(f"Saved plot to {out_dir / f'{k}_{step}.png'}")
 
         # Save model
         if (

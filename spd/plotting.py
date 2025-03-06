@@ -8,6 +8,9 @@ from matplotlib.colors import CenteredNorm
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 from torch import Tensor
 
+from spd.models.base import SPDModel
+from spd.module_utils import collect_nested_module_attrs
+
 
 def plot_subnetwork_attributions_statistics(
     mask: Float[Tensor, "batch_size n_instances m"],
@@ -88,3 +91,45 @@ def plot_matrix(
         n_functions = matrix.shape[0]
         ax.set_yticks(range(n_functions))
         ax.set_yticklabels([f"{L:.0f}" for L in range(1, n_functions + 1)])
+
+
+def plot_As(model: SPDModel, device: str) -> plt.Figure:
+    """Plot the A matrices for each instance."""
+    # Collect all A matrices
+    As = collect_nested_module_attrs(model, attr_name="A", include_attr_name=False)
+    n_instances = model.n_instances
+
+    # Create figure for plotting
+    fig, axs = plt.subplots(
+        len(As),
+        n_instances,
+        figsize=(5 * n_instances, 5 * len(As)),
+        constrained_layout=True,
+        squeeze=False,
+    )
+    axs = np.array(axs)
+
+    images = []
+
+    # Plot each A matrix for each instance
+    for i in range(n_instances):
+        axs[0, i].set_title(f"Instance {i}")
+        for j, (A_name, A) in enumerate(As.items()):
+            # A has shape (n_instances, d_in, m)
+            A_data = A[i].detach().cpu().numpy()
+            im = axs[j, i].matshow(A_data, aspect="auto", cmap="coolwarm")
+            if i == 0:
+                axs[j, i].set_ylabel("d_in index")
+            axs[j, i].set_xlabel("Component index")
+            axs[j, i].set_title(A_name)
+            images.append(im)
+
+    # Add unified colorbar
+    norm = plt.Normalize(
+        vmin=min(A.min().item() for A in As.values()),
+        vmax=max(A.max().item() for A in As.values()),
+    )
+    for im in images:
+        im.set_norm(norm)
+    fig.colorbar(images[0], ax=axs.ravel().tolist())
+    return fig

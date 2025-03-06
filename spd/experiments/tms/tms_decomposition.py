@@ -22,6 +22,7 @@ from spd.experiments.tms.models import TMSModel, TMSModelConfig, TMSSPDModel, TM
 from spd.experiments.tms.plotting import plot_mask_vals
 from spd.log import logger
 from spd.models.components import Gate
+from spd.plotting import plot_As
 from spd.run_spd import get_common_run_name_suffix, optimize
 from spd.utils import (
     DatasetGeneratedDataLoader,
@@ -63,6 +64,7 @@ def make_plots(
     plots["masks"] = plot_mask_vals(
         model=model, target_model=target_model, gates=gates, device=device, input_magnitude=0.75
     )
+    plots["As"] = plot_As(model=model, device=device)
     return plots
 
 
