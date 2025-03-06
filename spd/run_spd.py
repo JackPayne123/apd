@@ -113,7 +113,7 @@ def calc_lp_sparsity_loss(
         total_loss = total_loss + layer_relud_mask**pnorm
 
     # Mean over the batch dimension only
-    return total_loss.mean(dim=0)
+    return total_loss.mean(dim=0).sum(dim=-1)
 
 
 def calc_act_recon_mse(
