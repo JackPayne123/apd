@@ -172,7 +172,6 @@ class TMSSPDModelConfig(BaseModel):
     n_features: PositiveInt
     n_hidden: PositiveInt
     n_hidden_layers: NonNegativeInt
-    bias_val: float
     device: str
     m: PositiveInt
     n_gate_hidden_neurons: PositiveInt | None = None
@@ -184,7 +183,6 @@ class TMSSPDModel(SPDModel):
         self.config = config
         self.n_instances = config.n_instances  # Required for backwards compatibility
         self.n_features = config.n_features  # Required for backwards compatibility
-        self.bias_val = config.bias_val
         self.m = config.m
 
         self.linear1 = LinearComponent(
@@ -196,11 +194,9 @@ class TMSSPDModel(SPDModel):
             m=self.m,
         )
         self.linear2 = TransposedLinearComponent(self.linear1.A, self.linear1.B)
-        bias_data = (
+        self.b_final = nn.Parameter(
             torch.zeros((config.n_instances, config.n_features), device=config.device)
-            + config.bias_val
         )
-        self.b_final = nn.Parameter(bias_data)
 
         self.hidden_layers = None
         if config.n_hidden_layers > 0:
@@ -306,7 +302,6 @@ class TMSSPDModel(SPDModel):
         tms_spd_config = TMSSPDModelConfig(
             **tms_train_config_dict["tms_model_config"],
             m=spd_config.m,
-            bias_val=spd_config.task_config.bias_val,
             n_gate_hidden_neurons=spd_config.n_gate_hidden_neurons,
         )
         model = cls(config=tms_spd_config)

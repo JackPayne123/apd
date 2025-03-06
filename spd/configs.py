@@ -20,8 +20,6 @@ class TMSTaskConfig(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
     task_name: Literal["tms"] = "tms"
     feature_probability: Probability
-    train_bias: bool
-    bias_val: float
     data_generation_type: Literal["exactly_one_active", "at_least_zero_active"] = (
         "at_least_zero_active"
     )

@@ -16,8 +16,6 @@ from spd.utils import DatasetGeneratedDataLoader, SparseFeatureDataset, set_seed
 TMS_TASK_CONFIG = TMSTaskConfig(
     task_name="tms",
     feature_probability=0.5,
-    train_bias=False,
-    bias_val=0.0,
     pretrained_model_path=Path(""),  # We'll create this later
 )
 
@@ -37,17 +35,13 @@ def tms_spd_happy_path(config: Config, n_hidden_layers: int = 0):
     )
     target_model = TMSModel(config=tms_model_config)
 
-    tms_spd_model_config = TMSSPDModelConfig(
-        **tms_model_config.model_dump(mode="json"), m=config.m, bias_val=config.task_config.bias_val
-    )
+    tms_spd_model_config = TMSSPDModelConfig(**tms_model_config.model_dump(mode="json"), m=config.m)
     model = TMSSPDModel(config=tms_spd_model_config)
     # Randomly initialize the bias for the pretrained model
     target_model.b_final.data = torch.randn_like(target_model.b_final.data)
     # Manually set the bias for the SPD model from the bias in the pretrained model
     model.b_final.data[:] = target_model.b_final.data.clone()
-
-    if not config.task_config.train_bias:
-        model.b_final.requires_grad = False
+    model.b_final.requires_grad = False
 
     dataset = SparseFeatureDataset(
         n_instances=target_model.config.n_instances,
@@ -229,7 +223,6 @@ def test_tms_equivalent_to_raw_model() -> None:
     tms_spd_config = TMSSPDModelConfig(
         **tms_config.model_dump(),
         m=3,  # Small m for testing
-        bias_val=0.0,
     )
     spd_model = TMSSPDModel(config=tms_spd_config).to(device)
 
@@ -295,7 +288,6 @@ def test_init_tms_spd_model_from_target() -> None:
     tms_spd_config = TMSSPDModelConfig(
         **tms_config.model_dump(),
         m=tms_config.n_features,  # Must match n_features for initialization
-        bias_val=0.0,
     )
     spd_model = TMSSPDModel(config=tms_spd_config).to(device)
 

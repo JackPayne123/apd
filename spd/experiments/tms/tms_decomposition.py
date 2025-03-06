@@ -141,7 +141,6 @@ def main(
     tms_spd_model_config = TMSSPDModelConfig(
         **target_model.config.model_dump(mode="json"),
         m=config.m,
-        bias_val=task_config.bias_val,
         n_gate_hidden_neurons=config.n_gate_hidden_neurons,
     )
     model = TMSSPDModel(config=tms_spd_model_config)
@@ -151,9 +150,7 @@ def main(
 
     # Manually set the bias for the SPD model from the bias in the pretrained model
     model.b_final.data[:] = target_model.b_final.data.clone()
-
-    if not task_config.train_bias:
-        model.b_final.requires_grad = False
+    model.b_final.requires_grad = False
 
     param_names = ["linear1", "linear2"]
     if model.hidden_layers is not None:
