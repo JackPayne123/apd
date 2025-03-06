@@ -96,7 +96,7 @@ def calc_param_match_loss(
 def calc_lp_sparsity_loss(
     relud_masks: dict[str, Float[Tensor, "batch m"] | Float[Tensor, "batch n_instances m"]],
     pnorm: float,
-) -> Float[Tensor, "batch m"] | Float[Tensor, "batch n_instances m"]:
+) -> Float[Tensor, ""] | Float[Tensor, " n_instances"]:
     """Calculate the Lp sparsity loss on the attributions.
 
     Args:
