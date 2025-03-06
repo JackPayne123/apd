@@ -24,7 +24,7 @@ from spd.experiments.resid_mlp.models import (
 from spd.experiments.resid_mlp.resid_mlp_dataset import ResidualMLPDataset
 from spd.log import logger
 from spd.models.components import Gate
-from spd.plotting import plot_As, plot_mask_vals
+from spd.plotting import plot_AB_matrices, plot_mask_vals
 from spd.run_spd import get_common_run_name_suffix, optimize
 from spd.utils import (
     DatasetGeneratedDataLoader,
@@ -116,10 +116,12 @@ def resid_mlp_plot_results_fn(
     assert isinstance(config.task_config, ResidualMLPTaskConfig)
     fig_dict = {}
 
-    fig_dict["masks"] = plot_mask_vals(
+    fig_dict["masks"], all_perm_indices = plot_mask_vals(
         model=model, target_model=target_model, gates=gates, device=device, input_magnitude=0.75
     )
-    fig_dict["As"] = plot_As(model=model, device=device)
+    fig_dict["AB_matrices"] = plot_AB_matrices(
+        model=model, device=device, all_perm_indices=all_perm_indices
+    )
     return fig_dict
 
 

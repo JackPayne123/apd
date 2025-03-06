@@ -17,10 +17,14 @@ from spd.run_spd import calc_component_acts, calc_masks
 
 def permute_to_identity(
     mask: Float[Tensor, "batch n_instances m"],
-) -> Float[Tensor, "batch n_instances m"]:
+) -> tuple[Float[Tensor, "batch n_instances m"], Float[Tensor, "n_instances m"]]:
+    """Returns (permuted_mask, permutation_indices)"""
     batch, n_instances, m = mask.shape
     new_mask = mask.clone()
-    effective_rows: int = min(batch, m)
+    effective_rows = min(batch, m)
+    # Store permutation indices for each instance
+    perm_indices = torch.zeros((n_instances, m), dtype=torch.long, device=mask.device)
+
     for inst in range(n_instances):
         mat: Tensor = mask[:, inst, :]
         perm: list[int] = [0] * m
@@ -36,7 +40,9 @@ def permute_to_identity(
         for idx, col in enumerate(remaining):
             perm[effective_rows + idx] = col
         new_mask[:, inst, :] = mat[:, perm]
-    return new_mask
+        perm_indices[inst] = torch.tensor(perm, device=mask.device)
+
+    return new_mask, perm_indices
 
 
 def plot_mask_vals(
@@ -45,7 +51,7 @@ def plot_mask_vals(
     gates: dict[str, Gate],
     device: str,
     input_magnitude: float,
-) -> plt.Figure:
+) -> tuple[plt.Figure, dict[str, Float[Tensor, "n_instances m"]]]:
     """Plot the values of the mask for a batch of inputs with single active features."""
     # First, create a batch of inputs with single active features
     n_features = model.n_features
@@ -63,12 +69,14 @@ def plot_mask_vals(
 
     target_component_acts = calc_component_acts(pre_weight_acts=pre_weight_acts, As=As)
 
-    relud_masks = calc_masks(
+    relud_masks_raw = calc_masks(
         gates=gates, target_component_acts=target_component_acts, attributions=None
     )[1]
 
-    # Permute columns so that in each instance the maximum per row ends up on the diagonal.
-    relud_masks = {k: permute_to_identity(mask=v) for k, v in relud_masks.items()}
+    relud_masks = {}
+    all_perm_indices = {}
+    for k, v in relud_masks_raw.items():
+        relud_masks[k], all_perm_indices[k] = permute_to_identity(mask=v)
 
     # Create figure with better layout and sizing
     fig, axs = plt.subplots(
@@ -106,7 +114,7 @@ def plot_mask_vals(
     # Add a title which shows the input magnitude
     fig.suptitle(f"Input magnitude: {input_magnitude}")
 
-    return fig
+    return fig, all_perm_indices
 
 
 def plot_subnetwork_attributions_statistics(
@@ -190,17 +198,31 @@ def plot_matrix(
         ax.set_yticklabels([f"{L:.0f}" for L in range(1, n_functions + 1)])
 
 
-def plot_As(model: SPDModel, device: str) -> plt.Figure:
-    """Plot the A matrices for each instance."""
-    # Collect all A matrices
+def plot_AB_matrices(
+    model: SPDModel,
+    device: str,
+    all_perm_indices: dict[str, Float[Tensor, "n_instances m"]] | None = None,
+) -> plt.Figure:
+    """Plot A and B matrices for each instance, grouped by layer."""
+    # Collect all A and B matrices
     As = collect_nested_module_attrs(model, attr_name="A", include_attr_name=False)
+    Bs = collect_nested_module_attrs(model, attr_name="B", include_attr_name=False)
     n_instances = model.n_instances
 
-    # Create figure for plotting
+    # Verify that A and B matrices have matching names
+    A_names = set(As.keys())
+    B_names = set(Bs.keys())
+    assert (
+        A_names == B_names
+    ), f"A and B matrices must have matching names. Found A: {A_names}, B: {B_names}"
+
+    n_layers = len(As)
+
+    # Create figure for plotting - 2 rows per layer (A and B)
     fig, axs = plt.subplots(
-        len(As),
+        2 * n_layers,
         n_instances,
-        figsize=(5 * n_instances, 5 * len(As)),
+        figsize=(5 * n_instances, 5 * 2 * n_layers),
         constrained_layout=True,
         squeeze=False,
     )
@@ -208,23 +230,42 @@ def plot_As(model: SPDModel, device: str) -> plt.Figure:
 
     images = []
 
-    # Plot each A matrix for each instance
+    # Plot each layer's A and B matrices for each instance
     for i in range(n_instances):
-        axs[0, i].set_title(f"Instance {i}")
-        for j, (A_name, A) in enumerate(As.items()):
-            # A has shape (n_instances, d_in, m)
-            A_data = A[i].detach().cpu().numpy()
-            im = axs[j, i].matshow(A_data, aspect="auto", cmap="coolwarm")
+        if i == 0:
+            axs[0, i].set_title(f"Instance {i}")
+
+        # Plot A and B matrices for each layer
+        for j, name in enumerate(sorted(As.keys())):
+            # Plot A matrix
+            A_data = As[name][i]
+            if all_perm_indices is not None:
+                A_data = A_data[:, all_perm_indices[name][i]]
+            A_data = A_data.detach().cpu().numpy()
+            im = axs[2 * j, i].matshow(A_data, aspect="auto", cmap="coolwarm")
             if i == 0:
-                axs[j, i].set_ylabel("d_in index")
-            axs[j, i].set_xlabel("Component index")
-            axs[j, i].set_title(A_name)
+                axs[2 * j, i].set_ylabel("d_in index")
+            axs[2 * j, i].set_xlabel("Component index")
+            axs[2 * j, i].set_title(f"{name} (A matrix)")
+            images.append(im)
+
+            # Plot B matrix
+            B_data = Bs[name][i]
+            if all_perm_indices is not None:
+                B_data = B_data[all_perm_indices[name][i], :]
+            B_data = B_data.detach().cpu().numpy()
+            im = axs[2 * j + 1, i].matshow(B_data, aspect="auto", cmap="coolwarm")
+            if i == 0:
+                axs[2 * j + 1, i].set_ylabel("Component index")
+            axs[2 * j + 1, i].set_xlabel("d_out index")
+            axs[2 * j + 1, i].set_title(f"{name} (B matrix)")
             images.append(im)
 
     # Add unified colorbar
+    all_matrices = list(As.values()) + list(Bs.values())
     norm = plt.Normalize(
-        vmin=min(A.min().item() for A in As.values()),
-        vmax=max(A.max().item() for A in As.values()),
+        vmin=min(M.min().item() for M in all_matrices),
+        vmax=max(M.max().item() for M in all_matrices),
     )
     for im in images:
         im.set_norm(norm)
