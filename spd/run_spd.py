@@ -245,9 +245,13 @@ def calc_masked_target_component_acts(
     masked_target_component_acts = {}
     for param_name in pre_weight_acts:
         raw_name = param_name.removesuffix(".hook_pre")
-        masked_As = einops.einsum(As[raw_name], masks[raw_name], "... d_in m, ... m -> ... d_in m")
+        masked_As = einops.einsum(
+            As[raw_name], masks[raw_name], "... d_in m, batch ... m -> batch ... d_in m"
+        )
         masked_target_component_acts[raw_name] = einops.einsum(
-            pre_weight_acts[param_name], masked_As, "... d_in, ... d_in m -> ... m"
+            pre_weight_acts[param_name],
+            masked_As,
+            "batch ... d_in, batch ... d_in m -> batch ... m",
         )
     return masked_target_component_acts
 
