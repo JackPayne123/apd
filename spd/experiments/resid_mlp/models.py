@@ -73,11 +73,11 @@ class MLP(nn.Module):
         if in_bias:
             shape = (n_instances, d_mlp) if n_instances is not None else d_mlp
             self.bias1 = nn.Parameter(torch.empty(shape))
-            init_param_(self.bias1, fan_val=d_mlp, nonlinearity="relu")
+            init_param_(self.bias1, fan_val=d_model, nonlinearity="relu")
         if out_bias:
             shape = (n_instances, d_model) if n_instances is not None else d_model
             self.bias2 = nn.Parameter(torch.empty(shape))
-            init_param_(self.bias2, fan_val=d_model, nonlinearity="linear")
+            init_param_(self.bias2, fan_val=d_mlp, nonlinearity="linear")
 
     def forward(
         self,
