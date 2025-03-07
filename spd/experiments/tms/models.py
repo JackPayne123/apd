@@ -21,7 +21,6 @@ from spd.models.components import (
     TransposedLinear,
     TransposedLinearComponent,
 )
-from spd.module_utils import init_param_
 from spd.types import WANDB_PATH_PREFIX, ModelPath
 from spd.utils import replace_deprecated_param_names
 from spd.wandb_utils import download_wandb_file, fetch_latest_wandb_checkpoint, fetch_wandb_run_dir
@@ -80,8 +79,8 @@ class TMSModel(HookedRootModule):
         # Use tied weights for the second linear layer
         self.linear2 = TransposedLinear(self.linear1.weight)
 
-        self.b_final = nn.Parameter(torch.empty((config.n_instances, config.n_features)))
-        init_param_(self.b_final, fan_val=config.n_features, nonlinearity="relu")
+        # TMS seems to require zero bias initialization to work
+        self.b_final = nn.Parameter(torch.zeros((config.n_instances, config.n_features)))
 
         self.hidden_layers = None
         if config.n_hidden_layers > 0:
@@ -193,9 +192,8 @@ class TMSSPDModel(SPDModel):
         )
         self.linear2 = TransposedLinearComponent(self.linear1.A, self.linear1.B)
         self.b_final = nn.Parameter(
-            torch.empty((config.n_instances, config.n_features), device=config.device)
+            torch.zeros((config.n_instances, config.n_features), device=config.device)
         )
-        init_param_(self.b_final, fan_val=config.n_features, nonlinearity="relu")
 
         self.hidden_layers = None
         if config.n_hidden_layers > 0:
