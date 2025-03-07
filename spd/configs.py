@@ -30,7 +30,6 @@ class ResidualMLPTaskConfig(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
     task_name: Literal["residual_mlp"] = "residual_mlp"
     feature_probability: Probability
-    init_scale: float = 1.0
     data_generation_type: Literal[
         "exactly_one_active", "exactly_two_active", "at_least_zero_active"
     ] = "at_least_zero_active"

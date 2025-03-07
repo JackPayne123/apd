@@ -43,8 +43,6 @@ def get_run_name(
     n_layers: int,
     d_resid: int,
     d_mlp: int,
-    m: int | None,
-    init_scale: float,
 ) -> str:
     """Generate a run name based on the config."""
     run_suffix = ""
@@ -52,7 +50,7 @@ def get_run_name(
         run_suffix = config.wandb_run_name
     else:
         run_suffix = get_common_run_name_suffix(config)
-        run_suffix += f"scale{init_scale}_ft{n_features}_lay{n_layers}_resid{d_resid}_mlp{d_mlp}"
+        run_suffix += f"ft{n_features}_lay{n_layers}_resid{d_resid}_mlp{d_mlp}"
     return config.wandb_run_name_prefix + run_suffix
 
 
@@ -213,8 +211,6 @@ def main(
         n_layers=target_model.config.n_layers,
         d_resid=target_model.config.d_embed,
         d_mlp=target_model.config.d_mlp,
-        m=config.m,
-        init_scale=config.task_config.init_scale,
     )
     if config.wandb_project:
         assert wandb.run, "wandb.run must be initialized before training"
@@ -248,7 +244,6 @@ def main(
         apply_output_act_fn=target_model.config.apply_output_act_fn,
         in_bias=target_model.config.in_bias,
         out_bias=target_model.config.out_bias,
-        init_scale=config.task_config.init_scale,
         m=config.m,
         n_gate_hidden_neurons=config.n_gate_hidden_neurons,
     )

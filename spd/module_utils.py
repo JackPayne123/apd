@@ -93,7 +93,6 @@ def init_param_(
     fan_val: float,
     mean: float = 0.0,
     nonlinearity: str = "linear",
-    scale: float = 1.0,
     generator: torch.Generator | None = None,
 ) -> None:
     """Fill in param with values sampled from a Kaiming normal distribution.
@@ -103,10 +102,9 @@ def init_param_(
         fan_val: The squared denominator of the std used for the kaiming normal distribution
         mean: The mean of the normal distribution
         nonlinearity: The nonlinearity of the activation function
-        scale: Scale the standard deviation by this amount
         generator: The generator to sample from
     """
     gain = calculate_gain(nonlinearity)
     std = gain / math.sqrt(fan_val)
     with torch.no_grad():
-        param.normal_(mean, std * scale, generator=generator)
+        param.normal_(mean, std, generator=generator)

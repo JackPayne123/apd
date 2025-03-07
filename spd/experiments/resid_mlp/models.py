@@ -35,7 +35,6 @@ class MLP(nn.Module):
         act_fn: Callable[[Tensor], Tensor],
         in_bias: bool,
         out_bias: bool,
-        init_scale: float = 1.0,
         n_instances: int | None = None,
         spd_kwargs: dict[str, Any] | None = None,
     ):
@@ -50,23 +49,17 @@ class MLP(nn.Module):
                 d_in=d_model,
                 d_out=d_mlp,
                 n_instances=n_instances,
-                init_scale=init_scale,
                 m=spd_kwargs["m"],
             )
             self.mlp_out = LinearComponent(
                 d_in=d_mlp,
                 d_out=d_model,
                 n_instances=n_instances,
-                init_scale=init_scale,
                 m=spd_kwargs["m"],
             )
         else:
-            self.mlp_in = Linear(
-                d_in=d_model, d_out=d_mlp, n_instances=n_instances, init_scale=init_scale
-            )
-            self.mlp_out = Linear(
-                d_in=d_mlp, d_out=d_model, n_instances=n_instances, init_scale=init_scale
-            )
+            self.mlp_in = Linear(d_in=d_model, d_out=d_mlp, n_instances=n_instances)
+            self.mlp_out = Linear(d_in=d_mlp, d_out=d_model, n_instances=n_instances)
 
         self.bias1 = None
         self.bias2 = None
@@ -232,6 +225,8 @@ class ResidualMLPModel(HookedRootModule):
         with open(paths.resid_mlp_train_config) as f:
             resid_mlp_train_config_dict = yaml.safe_load(f)
 
+        resid_mlp_train_config_dict.pop("init_scale", None)  # Deprecated
+
         with open(paths.label_coeffs) as f:
             label_coeffs = torch.tensor(json.load(f))
 
@@ -268,7 +263,6 @@ class ResidualMLPSPDConfig(BaseModel):
     apply_output_act_fn: bool
     in_bias: bool
     out_bias: bool
-    init_scale: float
     m: PositiveInt
     n_gate_hidden_neurons: PositiveInt | None = None
     init_type: Literal["kaiming_uniform", "xavier_normal"] = "xavier_normal"
@@ -308,7 +302,6 @@ class ResidualMLPSPDModel(SPDModel):
                     n_instances=config.n_instances,
                     d_model=config.d_embed,
                     d_mlp=config.d_mlp,
-                    init_scale=config.init_scale,
                     in_bias=config.in_bias,
                     out_bias=config.out_bias,
                     act_fn=self.act_fn,

@@ -110,14 +110,13 @@ class Linear(nn.Module):
         d_in: int,
         d_out: int,
         n_instances: int | None = None,
-        init_scale: float = 1.0,
     ):
         super().__init__()
         shape = (n_instances, d_in, d_out) if n_instances is not None else (d_in, d_out)
         self.weight = nn.Parameter(torch.empty(shape))
         # Note: init assumes no relu/gelu after this layer (which won't be the case for mlp_in, but
         # sqrt(2) ~= 1 so we're ignoring this for now.)
-        init_param_(self.weight, fan_val=d_in, nonlinearity="linear", scale=init_scale)
+        init_param_(self.weight, fan_val=d_in, nonlinearity="linear")
 
         self.hook_pre = HookPoint()  # (batch ... d_in)
         self.hook_post = HookPoint()  # (batch ... d_out)
@@ -143,7 +142,6 @@ class LinearComponent(nn.Module):
         d_out: int,
         m: int,
         n_instances: int | None = None,
-        init_scale: float = 1.0,
     ):
         super().__init__()
         self.n_instances = n_instances
@@ -158,8 +156,8 @@ class LinearComponent(nn.Module):
         self.hook_component_acts = HookPoint()  # (batch m) or (batch n_instances m)
         self.hook_post = HookPoint()  # (batch d_out) or (batch n_instances d_out)
 
-        init_param_(self.A, fan_val=d_in, nonlinearity="linear", scale=init_scale)
-        init_param_(self.B, fan_val=m, nonlinearity="linear", scale=init_scale)
+        init_param_(self.A, fan_val=d_in, nonlinearity="linear")
+        init_param_(self.B, fan_val=m, nonlinearity="linear")
 
     @property
     def weight(self) -> Float[Tensor, "... d_in d_out"]:

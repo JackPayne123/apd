@@ -22,7 +22,6 @@ from spd.utils import DatasetGeneratedDataLoader, set_seed
 RESID_MLP_TASK_CONFIG = ResidualMLPTaskConfig(
     task_name="residual_mlp",
     feature_probability=0.333,
-    init_scale=1.0,
     data_generation_type="at_least_zero_active",
     pretrained_model_path=Path(),  # We'll create this later
 )
@@ -227,7 +226,6 @@ def test_init_resid_mlp_spd_model_from_target() -> None:
         apply_output_act_fn=False,
         in_bias=True,
         out_bias=True,
-        init_scale=1.0,
     )
     target_model = ResidualMLPModel(config=resid_mlp_config).to(device)
 
