@@ -35,8 +35,7 @@ class MLP(nn.Module):
         act_fn: Callable[[Tensor], Tensor],
         in_bias: bool,
         out_bias: bool,
-        init_scale: float,
-        init_type: Literal["kaiming_uniform", "xavier_normal"] = "kaiming_uniform",
+        init_scale: float = 1.0,
         n_instances: int | None = None,
         spd_kwargs: dict[str, Any] | None = None,
     ):
@@ -51,7 +50,6 @@ class MLP(nn.Module):
                 d_in=d_model,
                 d_out=d_mlp,
                 n_instances=n_instances,
-                init_type=init_type,
                 init_scale=init_scale,
                 m=spd_kwargs["m"],
             )
@@ -59,34 +57,27 @@ class MLP(nn.Module):
                 d_in=d_mlp,
                 d_out=d_model,
                 n_instances=n_instances,
-                init_type=init_type,
                 init_scale=init_scale,
                 m=spd_kwargs["m"],
             )
         else:
             self.mlp_in = Linear(
-                d_in=d_model,
-                d_out=d_mlp,
-                n_instances=n_instances,
-                init_type=init_type,
-                init_scale=init_scale,
+                d_in=d_model, d_out=d_mlp, n_instances=n_instances, init_scale=init_scale
             )
             self.mlp_out = Linear(
-                d_in=d_mlp,
-                d_out=d_model,
-                n_instances=n_instances,
-                init_type=init_type,
-                init_scale=init_scale,
+                d_in=d_mlp, d_out=d_model, n_instances=n_instances, init_scale=init_scale
             )
 
         self.bias1 = None
         self.bias2 = None
         if in_bias:
             shape = (n_instances, d_mlp) if n_instances is not None else d_mlp
-            self.bias1 = nn.Parameter(torch.zeros(shape))
+            self.bias1 = nn.Parameter(torch.empty(shape))
+            init_param_(self.bias1, fan_val=d_mlp, nonlinearity="relu")
         if out_bias:
             shape = (n_instances, d_model) if n_instances is not None else d_model
-            self.bias2 = nn.Parameter(torch.zeros(shape))
+            self.bias2 = nn.Parameter(torch.empty(shape))
+            init_param_(self.bias2, fan_val=d_model, nonlinearity="linear")
 
     def forward(
         self,
@@ -132,7 +123,6 @@ class ResidualMLPConfig(BaseModel):
     apply_output_act_fn: bool
     in_bias: bool
     out_bias: bool
-    init_scale: float = 1.0
 
 
 class ResidualMLPModel(HookedRootModule):
@@ -140,9 +130,9 @@ class ResidualMLPModel(HookedRootModule):
         super().__init__()
         self.config = config
         self.W_E = nn.Parameter(torch.empty(config.n_instances, config.n_features, config.d_embed))
-        init_param_(self.W_E, scale=config.init_scale)
+        init_param_(self.W_E, fan_val=config.n_features, nonlinearity="linear")
         self.W_U = nn.Parameter(torch.empty(config.n_instances, config.d_embed, config.n_features))
-        init_param_(self.W_U, scale=config.init_scale)
+        init_param_(self.W_U, fan_val=config.d_embed, nonlinearity="linear")
 
         assert config.act_fn_name in ["gelu", "relu"]
         self.act_fn = F.gelu if config.act_fn_name == "gelu" else F.relu
@@ -155,7 +145,6 @@ class ResidualMLPModel(HookedRootModule):
                     act_fn=self.act_fn,
                     in_bias=config.in_bias,
                     out_bias=config.out_bias,
-                    init_scale=config.init_scale,
                 )
                 for _ in range(config.n_layers)
             ]
@@ -301,8 +290,8 @@ class ResidualMLPSPDModel(SPDModel):
 
         self.W_E = nn.Parameter(torch.empty(config.n_instances, config.n_features, config.d_embed))
         self.W_U = nn.Parameter(torch.empty(config.n_instances, config.d_embed, config.n_features))
-        init_param_(self.W_E, init_type=config.init_type)
-        init_param_(self.W_U, init_type=config.init_type)
+        init_param_(self.W_E, fan_val=config.n_features, nonlinearity="linear")
+        init_param_(self.W_U, fan_val=config.d_embed, nonlinearity="linear")
 
         self.layers = nn.ModuleList()
 
@@ -319,7 +308,6 @@ class ResidualMLPSPDModel(SPDModel):
                     n_instances=config.n_instances,
                     d_model=config.d_embed,
                     d_mlp=config.d_mlp,
-                    init_type=config.init_type,
                     init_scale=config.init_scale,
                     in_bias=config.in_bias,
                     out_bias=config.out_bias,

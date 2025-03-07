@@ -1,4 +1,4 @@
-from typing import Any, Literal
+from typing import Any
 
 import einops
 import torch
@@ -22,8 +22,10 @@ class Gate(nn.Module):
         self.n_instances = n_instances
         shape = (n_instances, m) if n_instances is not None else (m,)
         self.weight = nn.Parameter(torch.empty(shape))
-        torch.nn.init.normal_(self.weight, mean=0.0, std=0.2)
-        self.bias = nn.Parameter(torch.ones(shape))
+        self.bias = nn.Parameter(torch.empty(shape))
+        fan_val = 1  # Since each weight gets applied independently
+        init_param_(self.weight, fan_val=fan_val, nonlinearity="linear")
+        init_param_(self.bias, fan_val=fan_val, nonlinearity="linear")
 
     def forward(
         self, x: Float[Tensor, "batch m"] | Float[Tensor, "batch n_instances m"]
@@ -33,7 +35,7 @@ class Gate(nn.Module):
     def forward_relu(
         self, x: Float[Tensor, "batch m"] | Float[Tensor, "batch n_instances m"]
     ) -> Float[Tensor, "batch m"] | Float[Tensor, "batch n_instances m"]:
-        return (x * self.weight + self.bias).relu()
+        return F.relu(x * self.weight + self.bias)
 
 
 class GateMLP(nn.Module):
@@ -58,12 +60,14 @@ class GateMLP(nn.Module):
         out_bias_shape = (n_instances, m) if n_instances is not None else (m,)
 
         self.mlp_in = nn.Parameter(torch.empty(shape))
-        self.in_bias = nn.Parameter(torch.zeros(in_bias_shape))
+        self.in_bias = nn.Parameter(torch.empty(in_bias_shape))
         self.mlp_out = nn.Parameter(torch.empty(shape))
-        self.out_bias = nn.Parameter(torch.ones(out_bias_shape))
+        self.out_bias = nn.Parameter(torch.empty(out_bias_shape))
 
-        torch.nn.init.normal_(self.mlp_in, mean=0.0, std=0.2)
-        torch.nn.init.normal_(self.mlp_out, mean=0.0, std=0.2)
+        init_param_(self.mlp_in, fan_val=1, nonlinearity="relu")
+        init_param_(self.in_bias, fan_val=1, nonlinearity="relu")
+        init_param_(self.mlp_out, fan_val=n_gate_hidden_neurons, nonlinearity="linear")
+        init_param_(self.out_bias, fan_val=n_gate_hidden_neurons, nonlinearity="linear")
 
     def _compute_pre_activation(
         self, x: Float[Tensor, "batch m"] | Float[Tensor, "batch n_instances m"]
@@ -106,13 +110,14 @@ class Linear(nn.Module):
         d_in: int,
         d_out: int,
         n_instances: int | None = None,
-        init_type: Literal["kaiming_uniform", "xavier_normal"] = "kaiming_uniform",
         init_scale: float = 1.0,
     ):
         super().__init__()
         shape = (n_instances, d_in, d_out) if n_instances is not None else (d_in, d_out)
         self.weight = nn.Parameter(torch.empty(shape))
-        init_param_(self.weight, scale=init_scale, init_type=init_type)
+        # Note: init assumes no relu/gelu after this layer (which won't be the case for mlp_in, but
+        # sqrt(2) ~= 1 so we're ignoring this for now.)
+        init_param_(self.weight, fan_val=d_in, nonlinearity="linear", scale=init_scale)
 
         self.hook_pre = HookPoint()  # (batch ... d_in)
         self.hook_post = HookPoint()  # (batch ... d_out)
@@ -138,7 +143,6 @@ class LinearComponent(nn.Module):
         d_out: int,
         m: int,
         n_instances: int | None = None,
-        init_type: Literal["kaiming_uniform", "xavier_normal"] = "kaiming_uniform",
         init_scale: float = 1.0,
     ):
         super().__init__()
@@ -146,16 +150,16 @@ class LinearComponent(nn.Module):
         self.m = m
 
         # Initialize A and B matrices
-        shape_A = (n_instances, d_in, self.m) if n_instances is not None else (d_in, self.m)
-        shape_B = (n_instances, self.m, d_out) if n_instances is not None else (self.m, d_out)
+        shape_A = (n_instances, d_in, m) if n_instances is not None else (d_in, m)
+        shape_B = (n_instances, m, d_out) if n_instances is not None else (m, d_out)
         self.A = nn.Parameter(torch.empty(shape_A))
         self.B = nn.Parameter(torch.empty(shape_B))
         self.hook_pre = HookPoint()  # (batch d_in) or (batch n_instances d_in)
         self.hook_component_acts = HookPoint()  # (batch m) or (batch n_instances m)
         self.hook_post = HookPoint()  # (batch d_out) or (batch n_instances d_out)
 
-        init_param_(self.A, scale=init_scale, init_type=init_type)
-        init_param_(self.B, scale=init_scale, init_type=init_type)
+        init_param_(self.A, fan_val=d_in, nonlinearity="linear", scale=init_scale)
+        init_param_(self.B, fan_val=m, nonlinearity="linear", scale=init_scale)
 
     @property
     def weight(self) -> Float[Tensor, "... d_in d_out"]:
