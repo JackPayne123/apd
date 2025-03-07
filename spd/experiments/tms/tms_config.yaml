@@ -34,7 +34,7 @@ m: 100
 param_match_coeff: 1.0
 masked_recon_coeff: 1.0
 pnorm: 0.9
-lp_sparsity_coeff: 1.5e-4
+lp_sparsity_coeff: 1e-4
 random_mask_recon_coeff: 1
 n_random_masks: 1
 # n_gate_hidden_neurons: 8

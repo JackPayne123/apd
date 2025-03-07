@@ -22,10 +22,11 @@ class Gate(nn.Module):
         self.n_instances = n_instances
         shape = (n_instances, m) if n_instances is not None else (m,)
         self.weight = nn.Parameter(torch.empty(shape))
-        self.bias = nn.Parameter(torch.empty(shape))
+        # self.bias = nn.Parameter(torch.empty(shape))
+        self.bias = nn.Parameter(torch.zeros(shape))
         fan_val = 1  # Since each weight gets applied independently
         init_param_(self.weight, fan_val=fan_val, nonlinearity="linear")
-        init_param_(self.bias, fan_val=fan_val, nonlinearity="linear")
+        # init_param_(self.bias, fan_val=fan_val, nonlinearity="linear")
 
     def forward(
         self, x: Float[Tensor, "batch m"] | Float[Tensor, "batch n_instances m"]
