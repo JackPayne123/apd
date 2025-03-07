@@ -256,6 +256,31 @@ def calc_masked_target_component_acts(
     return masked_target_component_acts
 
 
+def init_As_and_Bs_(model: SPDModel, target_model: HookedRootModule) -> None:
+    """Initialize the A and B matrices using a scale factor from the target weights."""
+    As = collect_nested_module_attrs(model, attr_name="A", include_attr_name=False)
+    Bs = collect_nested_module_attrs(model, attr_name="B", include_attr_name=False)
+    for param_name in As:
+        A = As[param_name]  # (..., d_in, m)
+        B = Bs[param_name]  # (..., m, d_out)
+        target_weight = get_nested_module_attr(
+            target_model, param_name + ".weight"
+        )  # (..., d_in, d_out)
+
+        # Make A and B have unit norm in the d_in and d_out dimensions
+        A.data[:] = torch.randn_like(A.data)
+        B.data[:] = torch.randn_like(B.data)
+        A.data[:] = A.data / A.data.norm(dim=-2, keepdim=True)
+        B.data[:] = B.data / B.data.norm(dim=-1, keepdim=True)
+
+        m_norms = einops.einsum(
+            A, B, target_weight, "... d_in m, ... m d_out, ... d_in d_out -> ... m"
+        )
+        # Scale B by m_norms. We leave A as is since this may get scaled with the unit_norm_matrices
+        # config options.
+        B.data[:] = B.data * m_norms.unsqueeze(-1)
+
+
 def optimize(
     model: SPDModel,
     config: Config,
@@ -268,6 +293,8 @@ def optimize(
 ) -> None:
     model.to(device=device)
     target_model.to(device=device)
+
+    init_As_and_Bs_(model=model, target_model=target_model)
 
     has_instance_dim = hasattr(model, "n_instances")
 
