@@ -225,7 +225,7 @@ class ResidualMLPModel(HookedRootModule):
         with open(paths.resid_mlp_train_config) as f:
             resid_mlp_train_config_dict = yaml.safe_load(f)
 
-        resid_mlp_train_config_dict.pop("init_scale", None)  # Deprecated
+        resid_mlp_train_config_dict["resid_mlp_config"].pop("init_scale", None)  # Deprecated
 
         with open(paths.label_coeffs) as f:
             label_coeffs = torch.tensor(json.load(f))
