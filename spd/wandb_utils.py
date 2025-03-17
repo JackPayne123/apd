@@ -101,12 +101,13 @@ def init_wandb(
     Returns:
         Config updated with sweep hyperparameters (if any).
     """
+    load_dotenv(override=True)
+
     if sweep_config_path is not None:
         with open(sweep_config_path) as f:
             sweep_data = yaml.safe_load(f)
-        wandb.init(config=sweep_data, save_code=True, name=name)
+        wandb.init(config=sweep_data, entity=os.getenv("WANDB_ENTITY"), save_code=True, name=name)
     else:
-        load_dotenv(override=True)
         wandb.init(project=project, entity=os.getenv("WANDB_ENTITY"), save_code=True, name=name)
 
     # Update the config with the hyperparameters for this sweep (if any)
