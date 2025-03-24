@@ -432,7 +432,6 @@ def optimize(
             batch, names_filter=spd_cache_filter, masks=masks
         )
 
-        random_masks = None
         random_masks_loss = None
         if config.random_mask_recon_coeff is not None:
             random_masks = calc_random_masks(masks=masks, n_random_masks=config.n_random_masks)
@@ -484,14 +483,16 @@ def optimize(
 
         layerwise_random_recon_loss = None
         if config.layerwise_random_recon_coeff is not None:
-            assert random_masks is not None
+            layerwise_random_masks = calc_random_masks(
+                masks=masks, n_random_masks=config.n_random_masks
+            )
             layerwise_random_recon_loss = calc_layerwise_recon_loss(
                 param_names=param_names,
                 target_model=target_model,
                 spd_model=model,
                 batch=batch,
                 device=device,
-                masks=random_masks,
+                masks=layerwise_random_masks,
                 target_out=target_out,
                 has_instance_dim=has_instance_dim,
             )
