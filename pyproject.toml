@@ -14,6 +14,7 @@ dependencies = [
     "pytest",
     "ipykernel",
     "transformers",
+    "jaxtyping",
     "matplotlib==3.9.1",  # Avoid frequent pyright errors with new matplotlib versions
     "numpy",
     "python-dotenv",
