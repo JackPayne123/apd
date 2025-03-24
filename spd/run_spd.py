@@ -204,15 +204,15 @@ def calc_random_masks_mse_loss(
     batch: Float[Tensor, "batch n_instances d_in"],
     random_masks: list[dict[str, Float[Tensor, "batch m"] | Float[Tensor, "batch n_instances m"]]],
     out_masked: Float[Tensor, "batch n_instances d_out"],
+    has_instance_dim: bool,
 ) -> Float[Tensor, ""] | Float[Tensor, " n_instances"]:
     """Calculate the MSE over all random masks."""
-    loss = torch.zeros(1, device=out_masked.device)
+    loss = torch.tensor(0.0, device=out_masked.device)
     for i in range(len(random_masks)):
         out_masked_random_mask = model(batch, masks=random_masks[i])
-        loss = loss + ((out_masked - out_masked_random_mask) ** 2).mean(dim=-1)
+        loss = loss + calc_recon_mse(out_masked, out_masked_random_mask, has_instance_dim)
 
-    # Normalize by the number of random masks and mean over the batch dim
-    return (loss / len(random_masks)).mean(dim=0)
+    return loss / len(random_masks)
 
 
 def calc_component_acts(
@@ -436,7 +436,11 @@ def optimize(
         if config.random_mask_recon_coeff is not None:
             random_masks = calc_random_masks(masks=masks, n_random_masks=config.n_random_masks)
             random_masks_loss = calc_random_masks_mse_loss(
-                model=model, batch=batch, random_masks=random_masks, out_masked=target_out
+                model=model,
+                batch=batch,
+                random_masks=random_masks,
+                out_masked=target_out,
+                has_instance_dim=has_instance_dim,
             )
 
         # Calculate losses
