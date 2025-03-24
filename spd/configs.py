@@ -54,6 +54,8 @@ class Config(BaseModel):
     param_match_coeff: NonNegativeFloat | None = 1.0
     masked_recon_coeff: NonNegativeFloat | None = None
     random_mask_recon_coeff: NonNegativeFloat | None = None
+    layerwise_recon_coeff: NonNegativeFloat | None = None
+    layerwise_random_recon_coeff: NonNegativeFloat | None = None
     lp_sparsity_coeff: NonNegativeFloat
     pnorm: PositiveFloat
     m: PositiveInt
@@ -113,8 +115,8 @@ class Config(BaseModel):
 
         # Check that lr_exponential_halflife is not None if lr_schedule is "exponential"
         if self.lr_schedule == "exponential":
-            assert (
-                self.lr_exponential_halflife is not None
-            ), "lr_exponential_halflife must be set if lr_schedule is exponential"
+            assert self.lr_exponential_halflife is not None, (
+                "lr_exponential_halflife must be set if lr_schedule is exponential"
+            )
 
         return self

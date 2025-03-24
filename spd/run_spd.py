@@ -1,11 +1,13 @@
 """Run SPD on a model."""
 
 from collections.abc import Callable
+from functools import partial
 from pathlib import Path
 
 import einops
 import matplotlib.pyplot as plt
 import torch
+import torch.nn as nn
 import wandb
 from jaxtyping import Float
 from torch import Tensor
@@ -15,7 +17,7 @@ from tqdm import tqdm
 from spd.configs import Config
 from spd.hooks import HookedRootModule
 from spd.models.base import SPDModel
-from spd.models.components import Gate
+from spd.models.components import Gate, Linear, LinearComponent
 from spd.module_utils import collect_nested_module_attrs, get_nested_module_attr
 from spd.utils import calc_recon_mse, get_lr_schedule_fn, get_lr_with_warmup
 
@@ -256,6 +258,56 @@ def calc_masked_target_component_acts(
     return masked_target_component_acts
 
 
+def calc_layerwise_recon_loss(
+    param_names: list[str],
+    target_model: HookedRootModule,
+    spd_model: SPDModel,
+    batch: Float[Tensor, "batch n_instances d_in"] | Float[Tensor, "batch d_in"],
+    device: str,
+    masks: list[dict[str, Float[Tensor, "batch n_instances m"] | Float[Tensor, "batch m"]]],
+    target_out: Float[Tensor, "batch n_instances d_out"] | Float[Tensor, "batch d_out"],
+    has_instance_dim: bool,
+) -> Float[Tensor, ""]:
+    """Calculate the layerwise activation reconstruction loss using regular PyTorch hooks.
+
+    Note that we support multiple masks for the case of calculating this loss over a list of random
+    masks.
+    """
+    total_loss = torch.tensor(0.0, device=device)
+
+    for mask in masks:
+        for param_name in param_names:
+            target_module = get_nested_module_attr(target_model, param_name)
+            assert isinstance(target_module, Linear)
+
+            component_module = get_nested_module_attr(spd_model, param_name)
+            assert isinstance(component_module, LinearComponent)
+
+            def hook(
+                module: nn.Module,
+                input: tuple[
+                    Float[Tensor, "batch n_instances d_in"] | Float[Tensor, "batch d_in"], ...
+                ],
+                output: Float[Tensor, "batch n_instances d_out"] | Float[Tensor, "batch d_out"],
+                param_name: str,
+                mask: dict[str, Float[Tensor, "batch n_instances m"] | Float[Tensor, "batch m"]],
+                component_module: LinearComponent,
+            ) -> Float[Tensor, "batch n_instances d_out"] | Float[Tensor, "batch d_out"]:
+                linear_output = component_module(input[0], mask=mask[param_name])
+                return linear_output
+
+            handle = target_module.register_forward_hook(
+                partial(hook, param_name=param_name, mask=mask, component_module=component_module)
+            )
+            modified_output = target_model(batch)
+            handle.remove()
+
+            mse_loss = calc_recon_mse(modified_output, target_out, has_instance_dim)
+            total_loss = total_loss + mse_loss
+
+    return total_loss / (len(param_names) * len(masks))
+
+
 def init_As_and_Bs_(model: SPDModel, target_model: HookedRootModule) -> None:
     """Initialize the A and B matrices using a scale factor from the target weights."""
     As = collect_nested_module_attrs(model, attr_name="A", include_attr_name=False)
@@ -380,6 +432,7 @@ def optimize(
             batch, names_filter=spd_cache_filter, masks=masks
         )
 
+        random_masks = None
         random_masks_loss = None
         if config.random_mask_recon_coeff is not None:
             random_masks = calc_random_masks(masks=masks, n_random_masks=config.n_random_masks)
@@ -416,6 +469,33 @@ def optimize(
                 masked_spd_component_acts, masked_target_component_acts
             )
 
+        layerwise_recon_loss = None
+        if config.layerwise_recon_coeff is not None:
+            layerwise_recon_loss = calc_layerwise_recon_loss(
+                param_names=param_names,
+                target_model=target_model,
+                spd_model=model,
+                batch=batch,
+                device=device,
+                masks=[masks],
+                target_out=target_out,
+                has_instance_dim=has_instance_dim,
+            )
+
+        layerwise_random_recon_loss = None
+        if config.layerwise_random_recon_coeff is not None:
+            assert random_masks is not None
+            layerwise_random_recon_loss = calc_layerwise_recon_loss(
+                param_names=param_names,
+                target_model=target_model,
+                spd_model=model,
+                batch=batch,
+                device=device,
+                masks=random_masks,
+                target_out=target_out,
+                has_instance_dim=has_instance_dim,
+            )
+
         loss_terms = {
             "param_match_loss": (param_match_loss, config.param_match_coeff),
             "out_recon_loss": (out_recon_loss, config.out_recon_coeff),
@@ -423,6 +503,11 @@ def optimize(
             "masked_recon_loss": (masked_recon_loss, config.masked_recon_coeff),
             "act_recon_loss": (act_recon_loss, config.act_recon_coeff),
             "random_masks_loss": (random_masks_loss, config.random_mask_recon_coeff),
+            "layerwise_recon_loss": (layerwise_recon_loss, config.layerwise_recon_coeff),
+            "layerwise_random_recon_loss": (
+                layerwise_random_recon_loss,
+                config.layerwise_random_recon_coeff,
+            ),
         }
         # Add up the loss terms
         loss = torch.tensor(0.0, device=device)
