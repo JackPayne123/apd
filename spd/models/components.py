@@ -22,11 +22,9 @@ class Gate(nn.Module):
         self.n_instances = n_instances
         shape = (n_instances, m) if n_instances is not None else (m,)
         self.weight = nn.Parameter(torch.empty(shape))
-        # self.bias = nn.Parameter(torch.empty(shape))
         self.bias = nn.Parameter(torch.zeros(shape))
         fan_val = 1  # Since each weight gets applied independently
         init_param_(self.weight, fan_val=fan_val, nonlinearity="linear")
-        # init_param_(self.bias, fan_val=fan_val, nonlinearity="linear")
 
     def forward(
         self, x: Float[Tensor, "batch m"] | Float[Tensor, "batch n_instances m"]
@@ -63,12 +61,11 @@ class GateMLP(nn.Module):
         self.mlp_in = nn.Parameter(torch.empty(shape))
         self.in_bias = nn.Parameter(torch.empty(in_bias_shape))
         self.mlp_out = nn.Parameter(torch.empty(shape))
-        self.out_bias = nn.Parameter(torch.empty(out_bias_shape))
+        self.out_bias = nn.Parameter(torch.zeros(out_bias_shape))
 
         init_param_(self.mlp_in, fan_val=1, nonlinearity="relu")
         init_param_(self.in_bias, fan_val=1, nonlinearity="relu")
         init_param_(self.mlp_out, fan_val=n_gate_hidden_neurons, nonlinearity="linear")
-        init_param_(self.out_bias, fan_val=n_gate_hidden_neurons, nonlinearity="linear")
 
     def _compute_pre_activation(
         self, x: Float[Tensor, "batch m"] | Float[Tensor, "batch n_instances m"]
