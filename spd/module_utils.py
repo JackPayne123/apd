@@ -28,6 +28,21 @@ def get_nested_module_attr(module: nn.Module, access_string: str) -> Any:
     return mod
 
 
+def set_nested_module_attr(module: nn.Module, access_string: str, value: Any) -> None:
+    """Set a specific attribute by its full, path-like name.
+
+    Args:
+        module: The module to set the attribute on.
+        access_string: The full name of the nested attribute to set, with each object separated by periods (e.g. "linear1.A").
+    """
+    names = access_string.split(".")
+    try:
+        mod = reduce(getattr, names[:-1], module)
+    except AttributeError as err:
+        raise AttributeError(f"{module} does not have nested attribute {access_string}") from err
+    setattr(mod, names[-1], value)
+
+
 def collect_nested_module_attrs(
     module: nn.Module,
     attr_name: str,
