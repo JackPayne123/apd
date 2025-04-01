@@ -4,15 +4,12 @@
 # wandb_run_name_prefix: ""
 # unit_norm_matrices: false
 # seed: 0
-# C: 5
-# topk: 0.211
-# batch_topk: true
 # param_match_coeff: 1.0
-# topk_recon_coeff: 1
-# attribution_type: gradient
-# pnorm: null
-# schatten_pnorm: 1.0
-# schatten_coeff: 7e-1
+# masked_recon_coeff: 1
+# pnorm: 0.9
+# lp_sparsity_coeff: 1.0
+# random_mask_recon_coeff: 1.0
+# n_random_masks: 2
 # batch_size: 2048
 # steps: 20_000
 # image_freq: 5_000
@@ -23,8 +20,6 @@
 # lr_warmup_pct: 0.05
 # task_config:
 #   task_name: tms
-#   bias_val: 0.0
-#   train_bias: false
 #   feature_probability: 0.05
 #   data_generation_type: "at_least_zero_active"
 #   pretrained_model_path: "wandb:spd-train-tms/runs/cv3g3z9d" # Local or wandb path
@@ -35,30 +30,29 @@ wandb_run_name: null
 wandb_run_name_prefix: ""
 unit_norm_matrices: false
 seed: 0
-topk: 2.0
-# topk: 0.8 # synced inputs
-C: 40
-batch_topk: true
+m: 100
 param_match_coeff: 1.0
-topk_recon_coeff: 10.0
-attribution_type: gradient
-pnorm: null
-schatten_pnorm: 0.9
-schatten_coeff: 15.0
+masked_recon_coeff: 1.0
+pnorm: 0.9
+lp_sparsity_coeff: 1e-4
+random_mask_recon_coeff: 1
+n_random_masks: 1
+# n_gate_hidden_neurons: 8
+n_gate_hidden_neurons: null
+layerwise_recon_coeff: 1.0
+layerwise_random_recon_coeff: 1.0
 batch_size: 2048
-steps: 20_000
+steps: 30_000
 image_freq: 5_000
-print_freq: 1_000
+print_freq: 1000
 save_freq: 20_000
 lr: 1e-3
-lr_schedule: cosine
+lr_schedule: constant
 lr_warmup_pct: 0.05
+init_from_target_model: false
 task_config:
   task_name: tms
-  bias_val: 0.0
-  train_bias: false
   feature_probability: 0.05
-  # feature_probability: 0.02 # synced inputs
   data_generation_type: "at_least_zero_active"
-  pretrained_model_path: "wandb:spd-train-tms/runs/tmzweoqk"
-  # pretrained_model_path: "wandb:spd-train-tms/runs/rkflpubi" # synced inputs
+  # pretrained_model_path: "wandb:spd-train-tms/runs/tmzweoqk"
+  pretrained_model_path: "wandb:spd-train-tms/runs/me2x5oeo" # 1 hidden layer fixed to identity

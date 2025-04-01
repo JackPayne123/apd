@@ -8,22 +8,28 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+import einops
 import fire
 import matplotlib.pyplot as plt
-import numpy as np
 import torch
 import wandb
 import yaml
 from jaxtyping import Float
 from torch import Tensor
-from tqdm import tqdm
 
-from spd.attributions import collect_subnetwork_attributions
 from spd.configs import Config, TMSTaskConfig
 from spd.experiments.tms.models import TMSModel, TMSModelConfig, TMSSPDModel, TMSSPDModelConfig
 from spd.log import logger
+from spd.models.components import Gate
+from spd.plotting import plot_AB_matrices, plot_mask_vals
 from spd.run_spd import get_common_run_name_suffix, optimize
-from spd.utils import DatasetGeneratedDataLoader, SparseFeatureDataset, load_config, set_seed
+from spd.utils import (
+    DatasetGeneratedDataLoader,
+    SparseFeatureDataset,
+    get_device,
+    load_config,
+    set_seed,
+)
 from spd.wandb_utils import init_wandb
 
 wandb.require("core")
@@ -41,283 +47,6 @@ def get_run_name(config: Config, tms_model_config: TMSModelConfig) -> str:
     return config.wandb_run_name_prefix + run_suffix
 
 
-def plot_A_matrix(x: torch.Tensor, pos_only: bool = False) -> plt.Figure:
-    n_instances = x.shape[0]
-
-    fig, axs = plt.subplots(
-        1, n_instances, figsize=(2.5 * n_instances, 2), squeeze=False, sharey=True
-    )
-
-    cmap = "Blues" if pos_only else "RdBu"
-    ims = []
-    for i in range(n_instances):
-        ax = axs[0, i]
-        instance_data = x[i, :, :].detach().cpu().float().numpy()
-        max_abs_val = np.abs(instance_data).max()
-        vmin = 0 if pos_only else -max_abs_val
-        vmax = max_abs_val
-        im = ax.matshow(instance_data, vmin=vmin, vmax=vmax, cmap=cmap)
-        ims.append(im)
-        ax.xaxis.set_ticks_position("bottom")
-        if i == 0:
-            ax.set_ylabel("k", rotation=0, labelpad=10, va="center")
-        else:
-            ax.set_yticks([])  # Remove y-axis ticks for all but the first plot
-        ax.xaxis.set_label_position("top")
-        ax.set_xlabel("n_features")
-
-    plt.subplots_adjust(wspace=0.1, bottom=0.15, top=0.9)
-    fig.subplots_adjust(bottom=0.2)
-
-    return fig
-
-
-def plot_subnetwork_attributions_multiple_instances(
-    attribution_scores: Float[Tensor, "batch n_instances C"],
-    out_dir: Path,
-    step: int | None,
-) -> plt.Figure:
-    """Plot subnetwork attributions for multiple instances in a row."""
-    n_instances = attribution_scores.shape[1]
-
-    # Create a wide figure with subplots in a row
-    fig, axes = plt.subplots(1, n_instances, figsize=(5 * n_instances, 5), constrained_layout=True)
-
-    axes = np.array([axes]) if isinstance(axes, plt.Axes) else axes
-
-    images = []
-    for idx, ax in enumerate(axes):
-        instance_scores = attribution_scores[:, idx, :]
-        im = ax.matshow(instance_scores.detach().cpu().numpy(), aspect="auto", cmap="Reds")
-        images.append(im)
-
-        # Annotate each cell with the numeric value
-        for i in range(instance_scores.shape[0]):
-            for j in range(instance_scores.shape[1]):
-                ax.text(
-                    j,
-                    i,
-                    f"{instance_scores[i, j]:.2f}",
-                    ha="center",
-                    va="center",
-                    color="black",
-                    fontsize=3,
-                )
-
-        ax.set_xlabel("Subnetwork Index")
-        if idx == 0:  # Only set ylabel for leftmost plot
-            ax.set_ylabel("Batch Index")
-        ax.set_title(f"Instance {idx}")
-
-    # Add a single colorbar that references all plots
-    norm = plt.Normalize(vmin=attribution_scores.min().item(), vmax=attribution_scores.max().item())
-    for im in images:
-        im.set_norm(norm)
-    fig.colorbar(images[0], ax=axes)
-
-    fig.suptitle(f"Subnetwork Attributions (Step {step})")
-    filename = (
-        f"subnetwork_attributions_s{step}.png"
-        if step is not None
-        else "subnetwork_attributions.png"
-    )
-    fig.savefig(out_dir / filename, dpi=300, bbox_inches="tight")
-    plt.close(fig)
-    tqdm.write(f"Saved subnetwork attributions to {out_dir / filename}")
-    return fig
-
-
-def plot_subnetwork_attributions_statistics_multiple_instances(
-    topk_mask: Float[Tensor, "batch_size n_instances C"], out_dir: Path, step: int | None
-) -> plt.Figure:
-    """Plot a row of vertical bar charts showing active subnetworks for each instance."""
-    n_instances = topk_mask.shape[1]
-    fig, axes = plt.subplots(1, n_instances, figsize=(5 * n_instances, 5), constrained_layout=True)
-
-    axes = np.array([axes]) if isinstance(axes, plt.Axes) else axes
-
-    for instance_idx in range(n_instances):
-        ax = axes[instance_idx]
-        instance_mask = topk_mask[:, instance_idx]
-
-        values = instance_mask.sum(dim=1).cpu().detach().numpy()
-        bins = list(range(int(values.min().item()), int(values.max().item()) + 2))
-        counts, _ = np.histogram(values, bins=bins)
-
-        bars = ax.bar(bins[:-1], counts, align="center", width=0.8)
-        ax.set_xticks(bins[:-1])
-        ax.set_xticklabels([str(b) for b in bins[:-1]])
-        ax.set_title(f"Instance {instance_idx}")
-
-        if instance_idx == 0:  # Only set y-label for leftmost plot
-            ax.set_ylabel("Count")
-        ax.set_xlabel("Number of active subnetworks")
-
-        # Add value annotations on top of each bar
-        for bar in bars:
-            height = bar.get_height()
-            ax.annotate(
-                f"{height}",
-                xy=(bar.get_x() + bar.get_width() / 2, height),
-                xytext=(0, 3),
-                textcoords="offset points",
-                ha="center",
-                va="bottom",
-            )
-
-    fig.suptitle(f"Active subnetworks per instance (batch_size={topk_mask.shape[0]})")
-    filename = (
-        f"subnetwork_attributions_statistics_s{step}.png"
-        if step is not None
-        else "subnetwork_attributions_statistics.png"
-    )
-    fig.savefig(out_dir / filename, dpi=300, bbox_inches="tight")
-    plt.close(fig)
-    tqdm.write(f"Saved subnetwork attributions statistics to {out_dir / filename}")
-    return fig
-
-
-def plot_component_weights(model: TMSSPDModel, step: int, out_dir: Path, **_) -> plt.Figure:
-    """Plot the component weight matrices."""
-    component_weights = model.linear1.component_weights
-
-    # component_weights: [n_instances, k, n_features, n_hidden]
-    n_instances, C, dim1, dim2 = component_weights.shape
-
-    fig, axs = plt.subplots(
-        C,
-        n_instances,
-        figsize=(2 * n_instances, 2 * C),
-        constrained_layout=True,
-    )
-
-    for i in range(n_instances):
-        instance_max = np.abs(component_weights[i].detach().cpu().numpy()).max()
-        for j in range(C):
-            ax = axs[j, i]  # type: ignore
-            param = component_weights[i, j].detach().cpu().numpy()
-            ax.matshow(param, cmap="RdBu", vmin=-instance_max, vmax=instance_max)
-            ax.set_xticks([])
-
-            if i == 0:
-                ax.set_ylabel(f"k={j}", rotation=0, ha="right", va="center")
-            if j == C - 1:
-                ax.set_xlabel(f"Inst {i}", rotation=45, ha="right")
-
-    fig.suptitle(f"Component Weights (Step {step})")
-    fig.savefig(out_dir / f"component_weights_{step}.png", dpi=300, bbox_inches="tight")
-    plt.close(fig)
-    tqdm.write(f"Saved component weights to {out_dir / f'component_weights_{step}.png'}")
-    return fig
-
-
-def plot_batch_frequencies(
-    frequencies: Float[Tensor, "n_instances C"],
-    xlabel: str,
-    ax: plt.Axes,
-    batch_size: int,
-    title: str | None = None,
-) -> None:
-    """Plot frequency of C activations for each instance on a given axis.
-
-    Args:
-        frequencies: Tensor counting frequencies for each instance
-        xlabel: Label for x-axis
-        ax: Matplotlib axis to plot on
-        batch_size: Size of the batch
-        title: Optional title for the subplot
-    """
-    n_instances = frequencies.shape[0]
-    C = frequencies.shape[1]
-
-    for instance_idx in range(n_instances):
-        bars = ax.bar(
-            np.arange(C) + instance_idx * (C + 1),  # Add spacing between instances
-            frequencies[instance_idx].detach().cpu().numpy(),
-            align="center",
-            width=0.8,
-            label=f"Instance {instance_idx}",
-        )
-
-        # Add value annotations on top of each bar
-        for bar in bars:
-            height = bar.get_height()
-            ax.annotate(
-                f"{int(height)}",
-                xy=(bar.get_x() + bar.get_width() / 2, height),
-                xytext=(0, 3),
-                textcoords="offset points",
-                ha="center",
-                va="bottom",
-            )
-
-    ax.set_xlabel(xlabel)
-    ax.set_ylabel(f"Activation Count (batch_size={batch_size})")
-    if title:
-        ax.set_title(title)
-
-    # Set x-ticks for each instance group
-    all_ticks = []
-    all_labels = []
-    for i in range(n_instances):
-        ticks = np.arange(C) + i * (C + 1)
-        all_ticks.extend(ticks)
-        all_labels.extend([str(j) for j in range(C)])
-    ax.set_xticks(all_ticks)
-    ax.set_xticklabels(all_labels)
-
-
-def plot_batch_statistics(
-    batch: Float[Tensor, "batch n_instances n_features"],
-    topk_mask: Float[Tensor, "batch n_instances C"],
-    out_dir: Path,
-    step: int | None,
-) -> dict[str, plt.Figure]:
-    # Count the number of active features over the batch
-    active_input_feats = (batch != 0).sum(dim=0)
-    topk_activations = topk_mask.sum(dim=0)
-
-    # Create figure with two vertically stacked subplots
-    fig = plt.figure(figsize=(15, 10))
-    gs = fig.add_gridspec(2, 1, height_ratios=[1, 1], hspace=0.3)
-
-    # Plot input features
-    ax1 = fig.add_subplot(gs[0])
-    plot_batch_frequencies(
-        frequencies=active_input_feats,
-        xlabel="Input feature index",
-        ax=ax1,
-        batch_size=batch.shape[0],
-        title="Input feature frequencies across batch",
-    )
-
-    # Plot subnetwork frequencies
-    ax2 = fig.add_subplot(gs[1])
-    plot_batch_frequencies(
-        frequencies=topk_activations,
-        xlabel="Component index",
-        ax=ax2,
-        batch_size=batch.shape[0],
-        title="Component frequencies across batch",
-    )
-
-    # Ensure that each ax has the same y-axis maximum
-    y_lims = [ax.get_ylim() for ax in [ax1, ax2]]
-    y_max = max(y_lims[0][1], y_lims[1][1])
-    for ax in [ax1, ax2]:
-        ax.set_ylim(0, y_max)
-
-    # fig.suptitle(f"Batch Statistics (Step {step})")
-
-    # Save the combined figure
-    filename = f"batch_statistics_s{step}.png" if step is not None else "batch_statistics.png"
-    fig.savefig(out_dir / filename, dpi=300, bbox_inches="tight")
-    plt.close(fig)
-    tqdm.write(f"Saved batch statistics to {out_dir / filename}")
-
-    return {"batch_statistics": fig}
-
-
 def make_plots(
     model: TMSSPDModel,
     target_model: TMSModel,
@@ -325,38 +54,18 @@ def make_plots(
     out_dir: Path,
     device: str,
     config: Config,
-    topk_mask: Float[Tensor, "batch n_instances C"] | None,
+    gates: dict[str, Gate],
+    masks: dict[str, Float[Tensor, "batch n_instances m"]],
     batch: Float[Tensor, "batch n_instances n_features"],
     **_,
 ) -> dict[str, plt.Figure]:
     plots = {}
-    if model.hidden_layers is not None:
-        logger.warning("Only plotting the W matrix params and not the hidden layers.")
-    plots["component_weights"] = plot_component_weights(model, step, out_dir)
-
-    if config.topk is not None:
-        assert topk_mask is not None
-        assert isinstance(config.task_config, TMSTaskConfig)
-        n_instances = model.config.n_instances if hasattr(model, "config") else model.n_instances
-        attribution_scores = collect_subnetwork_attributions(
-            spd_model=model,
-            config=config,
-            target_model=target_model,
-            device=device,
-            n_instances=n_instances,
-        )
-        plots["subnetwork_attributions"] = plot_subnetwork_attributions_multiple_instances(
-            attribution_scores=attribution_scores, out_dir=out_dir, step=step
-        )
-        plots["subnetwork_attributions_statistics"] = (
-            plot_subnetwork_attributions_statistics_multiple_instances(
-                topk_mask=topk_mask, out_dir=out_dir, step=step
-            )
-        )
-
-        batch_stat_plots = plot_batch_statistics(batch, topk_mask, out_dir, step)
-        plots.update(batch_stat_plots)
-
+    plots["masks"], all_perm_indices = plot_mask_vals(
+        model=model, target_model=target_model, gates=gates, device=device, input_magnitude=0.75
+    )
+    plots["AB_matrices"] = plot_AB_matrices(
+        model=model, device=device, all_perm_indices=all_perm_indices
+    )
     return plots
 
 
@@ -376,10 +85,24 @@ def save_target_model_info(
         wandb.save(str(out_dir / "tms_train_config.yaml"), base_path=out_dir, policy="now")
 
 
+def init_spd_model_from_target_model(model: TMSSPDModel, target_model: TMSModel, m: int) -> None:
+    assert target_model.config.n_hidden_layers == 0, "Hidden layers not supported for now"
+    assert m == target_model.config.n_features, "m must be equal to n_features"
+    # We set the A to the identity and B to the target weight matrix
+    model.linear1.A.data[:] = einops.repeat(
+        torch.eye(m),
+        "d_in m -> n_instances d_in m",
+        n_instances=target_model.config.n_instances,
+    )
+    # The B matrix is just the target model's linear layer
+    model.linear1.B.data[:] = target_model.linear1.weight.data.clone()
+    logger.info("Initialized SPD model from target model")
+
+
 def main(
     config_path_or_obj: Path | str | Config, sweep_config_path: Path | str | None = None
 ) -> None:
-    device = "cuda" if torch.cuda.is_available() else "cpu"
+    device = get_device()
 
     config = load_config(config_path_or_obj, config_model=Config)
 
@@ -420,17 +143,17 @@ def main(
 
     tms_spd_model_config = TMSSPDModelConfig(
         **target_model.config.model_dump(mode="json"),
-        C=config.C,
         m=config.m,
-        bias_val=task_config.bias_val,
+        n_gate_hidden_neurons=config.n_gate_hidden_neurons,
     )
     model = TMSSPDModel(config=tms_spd_model_config)
 
+    if config.init_from_target_model:
+        init_spd_model_from_target_model(model=model, target_model=target_model, m=config.m)
+
     # Manually set the bias for the SPD model from the bias in the pretrained model
     model.b_final.data[:] = target_model.b_final.data.clone()
-
-    if not task_config.train_bias:
-        model.b_final.requires_grad = False
+    model.b_final.requires_grad = False
 
     param_names = ["linear1", "linear2"]
     if model.hidden_layers is not None:

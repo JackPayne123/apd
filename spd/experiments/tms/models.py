@@ -14,6 +14,8 @@ from spd.configs import Config, TMSTaskConfig
 from spd.hooks import HookedRootModule
 from spd.models.base import SPDModel
 from spd.models.components import (
+    Gate,
+    GateMLP,
     Linear,
     LinearComponent,
     TransposedLinear,
@@ -45,18 +47,21 @@ def _tms_forward(
     linear1: Linear | LinearComponent,
     linear2: TransposedLinear | TransposedLinearComponent,
     b_final: Float[Tensor, "n_instances n_features"],
-    topk_mask: Float[Tensor, "batch n_instances C"] | None = None,
+    masks: dict[str, Float[Tensor, "batch n_instances m"]] | None = None,
     hidden_layers: nn.ModuleList | None = None,
 ) -> Float[Tensor, "batch n_instances n_features"]:
     """Forward pass used for TMSModel and TMSSPDModel.
 
-    Note that topk_mask is only used for TMSSPDModel.
+    Note that masks have no effect for TMSModel.
     """
-    hidden = linear1(x, topk_mask=topk_mask)
+    linear1_mask = masks["linear1"] if masks is not None else None
+    hidden = linear1(x, mask=linear1_mask)
     if hidden_layers is not None:
-        for layer in hidden_layers:
-            hidden = layer(hidden, topk_mask=topk_mask)
-    out_pre_relu = linear2(hidden, topk_mask=topk_mask) + b_final
+        for i, layer in enumerate(hidden_layers):
+            hidden_mask = masks[f"hidden_layers.{i}"] if masks is not None else None
+            hidden = layer(hidden, mask=hidden_mask)
+    linear2_mask = masks["linear2"] if masks is not None else None
+    out_pre_relu = linear2(hidden, mask=linear2_mask) + b_final
     out = F.relu(out_pre_relu)
     return out
 
@@ -70,11 +75,11 @@ class TMSModel(HookedRootModule):
             d_in=config.n_features,
             d_out=config.n_hidden,
             n_instances=config.n_instances,
-            init_type="xavier_normal",
         )
         # Use tied weights for the second linear layer
         self.linear2 = TransposedLinear(self.linear1.weight)
 
+        # TMS seems to require zero bias initialization to work
         self.b_final = nn.Parameter(torch.zeros((config.n_instances, config.n_features)))
 
         self.hidden_layers = None
@@ -85,7 +90,6 @@ class TMSModel(HookedRootModule):
                     d_in=config.n_hidden,
                     d_out=config.n_hidden,
                     n_instances=config.n_instances,
-                    init_type="xavier_normal",
                 )
                 self.hidden_layers.append(layer)
         self.setup()
@@ -167,10 +171,9 @@ class TMSSPDModelConfig(BaseModel):
     n_features: PositiveInt
     n_hidden: PositiveInt
     n_hidden_layers: NonNegativeInt
-    C: PositiveInt | None = None
-    bias_val: float
     device: str
-    m: PositiveInt | None = None
+    m: PositiveInt
+    n_gate_hidden_neurons: PositiveInt | None = None
 
 
 class TMSSPDModel(SPDModel):
@@ -179,27 +182,18 @@ class TMSSPDModel(SPDModel):
         self.config = config
         self.n_instances = config.n_instances  # Required for backwards compatibility
         self.n_features = config.n_features  # Required for backwards compatibility
-        self.C = config.C if config.C is not None else config.n_features
-        self.bias_val = config.bias_val
-
-        self.m = min(config.n_features, config.n_hidden) + 1 if config.m is None else config.m
+        self.m = config.m
 
         self.linear1 = LinearComponent(
             d_in=config.n_features,
             d_out=config.n_hidden,
             n_instances=config.n_instances,
-            init_type="xavier_normal",
-            init_scale=1.0,
-            C=self.C,
             m=self.m,
         )
         self.linear2 = TransposedLinearComponent(self.linear1.A, self.linear1.B)
-
-        bias_data = (
+        self.b_final = nn.Parameter(
             torch.zeros((config.n_instances, config.n_features), device=config.device)
-            + config.bias_val
         )
-        self.b_final = nn.Parameter(bias_data)
 
         self.hidden_layers = None
         if config.n_hidden_layers > 0:
@@ -209,21 +203,35 @@ class TMSSPDModel(SPDModel):
                         d_in=config.n_hidden,
                         d_out=config.n_hidden,
                         n_instances=config.n_instances,
-                        init_type="xavier_normal",
-                        init_scale=1.0,
-                        C=self.C,
                         m=self.m,
                     )
                     for _ in range(config.n_hidden_layers)
                 ]
             )
 
+        # Use GateMLP if n_gate_hidden_neurons is provided, otherwise use Gate
+        gate_class = GateMLP if config.n_gate_hidden_neurons else Gate
+        gate_kwargs = {"m": self.m, "n_instances": config.n_instances}
+        if config.n_gate_hidden_neurons:
+            gate_kwargs["n_gate_hidden_neurons"] = config.n_gate_hidden_neurons
+
+        self.gates = nn.ModuleDict(
+            {
+                "linear1": gate_class(**gate_kwargs),
+                "linear2": gate_class(**gate_kwargs),
+                **{
+                    f"hidden_layers-{i}": gate_class(**gate_kwargs)
+                    for i in range(config.n_hidden_layers)
+                },
+            }
+        )
+
         self.setup()
 
     def forward(
         self,
         x: Float[Tensor, "batch n_instances n_features"],
-        topk_mask: Float[Tensor, "batch n_instances C"] | None = None,
+        masks: dict[str, Float[Tensor, "batch n_instances m"]] | None = None,
     ) -> Float[Tensor, "batch n_instances n_features"]:
         return _tms_forward(
             x=x,
@@ -231,7 +239,7 @@ class TMSSPDModel(SPDModel):
             linear2=self.linear2,
             b_final=self.b_final,
             hidden_layers=self.hidden_layers,
-            topk_mask=topk_mask,
+            masks=masks,
         )
 
     @staticmethod
@@ -278,6 +286,8 @@ class TMSSPDModel(SPDModel):
         with open(paths.final_config) as f:
             final_config_dict = yaml.safe_load(f)
 
+        final_config_dict.pop("post_act_recon_coeff", None)
+
         spd_config = Config(**final_config_dict)
 
         with open(paths.tms_train_config) as f:
@@ -286,12 +296,10 @@ class TMSSPDModel(SPDModel):
         assert isinstance(spd_config.task_config, TMSTaskConfig)
         tms_spd_config = TMSSPDModelConfig(
             **tms_train_config_dict["tms_model_config"],
-            C=spd_config.C,
             m=spd_config.m,
-            bias_val=spd_config.task_config.bias_val,
+            n_gate_hidden_neurons=spd_config.n_gate_hidden_neurons,
         )
         model = cls(config=tms_spd_config)
         params = torch.load(paths.checkpoint, weights_only=True, map_location="cpu")
-        params = replace_deprecated_param_names(params, {"A": "linear1.A", "B": "linear1.B"})
         model.load_state_dict(params)
         return model, spd_config

@@ -1,5 +1,3 @@
-from typing import Any
-
 import einops
 import matplotlib.pyplot as plt
 import matplotlib.ticker as tkr
@@ -9,33 +7,126 @@ from jaxtyping import Float
 from matplotlib.colors import CenteredNorm
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 from torch import Tensor
-from torch.utils.data import DataLoader
 
-from spd.attributions import calculate_attributions
-from spd.configs import Config
-from spd.experiments.resid_mlp.models import ResidualMLPModel, ResidualMLPSPDModel
-from spd.experiments.tms.models import TMSModel, TMSSPDModel
 from spd.hooks import HookedRootModule
 from spd.models.base import SPDModel
-from spd.utils import (
-    DataGenerationType,
-    SparseFeatureDataset,
-    calc_recon_mse,
-    calc_topk_mask,
-    run_spd_forward_pass,
-)
+from spd.models.components import Gate
+from spd.module_utils import collect_nested_module_attrs
+from spd.run_spd import calc_component_acts, calc_masks
+
+
+def permute_to_identity(
+    mask: Float[Tensor, "batch n_instances m"],
+) -> tuple[Float[Tensor, "batch n_instances m"], Float[Tensor, "n_instances m"]]:
+    """Returns (permuted_mask, permutation_indices)"""
+    batch, n_instances, m = mask.shape
+    new_mask = mask.clone()
+    effective_rows = min(batch, m)
+    # Store permutation indices for each instance
+    perm_indices = torch.zeros((n_instances, m), dtype=torch.long, device=mask.device)
+
+    for inst in range(n_instances):
+        mat: Tensor = mask[:, inst, :]
+        perm: list[int] = [0] * m
+        used: set[int] = set()
+        for i in range(effective_rows):
+            sorted_indices: list[int] = torch.argsort(mat[i, :], descending=True).tolist()
+            chosen: int = next(
+                (col for col in sorted_indices if col not in used), sorted_indices[0]
+            )
+            perm[i] = chosen
+            used.add(chosen)
+        remaining: list[int] = sorted(list(set(range(m)) - used))
+        for idx, col in enumerate(remaining):
+            perm[effective_rows + idx] = col
+        new_mask[:, inst, :] = mat[:, perm]
+        perm_indices[inst] = torch.tensor(perm, device=mask.device)
+
+    return new_mask, perm_indices
+
+
+def plot_mask_vals(
+    model: SPDModel,
+    target_model: HookedRootModule,
+    gates: dict[str, Gate],
+    device: str,
+    input_magnitude: float,
+) -> tuple[plt.Figure, dict[str, Float[Tensor, "n_instances m"]]]:
+    """Plot the values of the mask for a batch of inputs with single active features."""
+    # First, create a batch of inputs with single active features
+    n_features = model.n_features
+    n_instances = model.n_instances
+    batch = torch.eye(n_features, device=device) * input_magnitude
+    batch = einops.repeat(
+        batch, "batch n_features -> batch n_instances n_features", n_instances=n_instances
+    )
+
+    # Forward pass with target model
+    target_cache_filter = lambda k: k.endswith((".hook_pre", ".hook_post"))
+    target_cache = target_model.run_with_cache(batch, names_filter=target_cache_filter)[1]
+    pre_weight_acts = {k: v for k, v in target_cache.items() if k.endswith("hook_pre")}
+    As = collect_nested_module_attrs(model, attr_name="A", include_attr_name=False)
+
+    target_component_acts = calc_component_acts(pre_weight_acts=pre_weight_acts, As=As)
+
+    relud_masks_raw = calc_masks(
+        gates=gates, target_component_acts=target_component_acts, attributions=None
+    )[1]
+
+    relud_masks = {}
+    all_perm_indices = {}
+    for k, v in relud_masks_raw.items():
+        relud_masks[k], all_perm_indices[k] = permute_to_identity(mask=v)
+
+    # Create figure with better layout and sizing
+    fig, axs = plt.subplots(
+        len(relud_masks),
+        n_instances,
+        figsize=(5 * n_instances, 5 * len(relud_masks)),
+        constrained_layout=True,
+        squeeze=False,
+    )
+    axs = np.array(axs)
+
+    images = []
+    for i in range(n_instances):
+        axs[0, i].set_title(f"Instance {i}")
+        for j, (mask_name, mask) in enumerate(relud_masks.items()):
+            # mask has shape (batch, n_instances, m)
+            mask_data = mask[:, i, :].detach().cpu().numpy()
+            im = axs[j, i].matshow(mask_data, aspect="auto", cmap="Reds")
+            images.append(im)
+
+            axs[j, i].set_xlabel("Mask index")
+            if i == 0:  # Only set ylabel for leftmost plots
+                axs[j, i].set_ylabel("Input feature index")
+            axs[j, i].set_title(mask_name)
+
+    # Add unified colorbar
+    norm = plt.Normalize(
+        vmin=min(mask.min().item() for mask in relud_masks.values()),
+        vmax=max(mask.max().item() for mask in relud_masks.values()),
+    )
+    for im in images:
+        im.set_norm(norm)
+    fig.colorbar(images[0], ax=axs.ravel().tolist())
+
+    # Add a title which shows the input magnitude
+    fig.suptitle(f"Input magnitude: {input_magnitude}")
+
+    return fig, all_perm_indices
 
 
 def plot_subnetwork_attributions_statistics(
-    topk_mask: Float[Tensor, "batch_size n_instances C"],
+    mask: Float[Tensor, "batch_size n_instances m"],
 ) -> dict[str, plt.Figure]:
     """Plot vertical bar charts of the number of active subnetworks over the batch for each instance."""
-    batch_size = topk_mask.shape[0]
-    if topk_mask.ndim == 2:
+    batch_size = mask.shape[0]
+    if mask.ndim == 2:
         n_instances = 1
-        topk_mask = einops.repeat(topk_mask, "batch C -> batch n_instances C", n_instances=1)
+        mask = einops.repeat(mask, "batch m -> batch n_instances m", n_instances=1)
     else:
-        n_instances = topk_mask.shape[1]
+        n_instances = mask.shape[1]
 
     fig, axs = plt.subplots(
         ncols=n_instances, nrows=1, figsize=(5 * n_instances, 5), constrained_layout=True
@@ -43,7 +134,7 @@ def plot_subnetwork_attributions_statistics(
 
     axs = np.array([axs]) if n_instances == 1 else np.array(axs)
     for i, ax in enumerate(axs):
-        values = topk_mask[:, i].sum(dim=1).cpu().detach().numpy()
+        values = mask[:, i].sum(dim=1).cpu().detach().numpy()
         bins = list(range(int(values.min().item()), int(values.max().item()) + 2))
         counts, _ = np.histogram(values, bins=bins)
         bars = ax.bar(bins[:-1], counts, align="center", width=0.8)
@@ -71,245 +162,6 @@ def plot_subnetwork_attributions_statistics(
 
     fig.suptitle(f"Active subnetworks on current batch (batch_size={batch_size})")
     return {"subnetwork_attributions_statistics": fig}
-
-
-def plot_subnetwork_correlations(
-    dataloader: DataLoader[
-        tuple[Float[Tensor, "batch n_inputs"] | Float[Tensor, "batch n_instances? n_inputs"], Any]
-    ],
-    target_model: HookedRootModule,
-    spd_model: SPDModel,
-    config: Config,
-    device: str,
-    n_forward_passes: int = 100,
-) -> dict[str, plt.Figure]:
-    topk_masks = []
-    for batch, _ in dataloader:
-        batch = batch.to(device=device)
-        assert config.topk is not None
-
-        # Forward pass on target model
-        target_cache_filter = lambda k: k.endswith((".hook_pre", ".hook_post"))
-        target_out, target_cache = target_model.run_with_cache(
-            batch, names_filter=target_cache_filter
-        )
-
-        # Do a forward pass with all subnetworks
-        spd_cache_filter = lambda k: k.endswith((".hook_post", ".hook_component_acts"))
-        out, spd_cache = spd_model.run_with_cache(batch, names_filter=spd_cache_filter)
-        attribution_scores = calculate_attributions(
-            model=spd_model,
-            config=config,
-            batch=batch,
-            out=out,
-            target_out=target_out,
-            pre_weight_acts={k: v for k, v in target_cache.items() if k.endswith("hook_pre")},
-            post_weight_acts={k: v for k, v in target_cache.items() if k.endswith("hook_post")},
-            component_acts={
-                k: v for k, v in spd_cache.items() if k.endswith("hook_component_acts")
-            },
-        )
-
-        # We always assume the final subnetwork is the one we want to distil
-        topk_attrs = (
-            attribution_scores[..., :-1] if config.distil_from_target else attribution_scores
-        )
-        if config.exact_topk:
-            assert spd_model.n_instances == 1, "exact_topk only works if n_instances = 1"
-            topk = (batch != 0).sum() / batch.shape[0]
-            topk_mask = calc_topk_mask(topk_attrs, topk, batch_topk=config.batch_topk)
-        else:
-            topk_mask = calc_topk_mask(topk_attrs, config.topk, batch_topk=config.batch_topk)
-
-        topk_masks.append(topk_mask)
-        if len(topk_masks) > n_forward_passes:
-            break
-    topk_masks = torch.cat(topk_masks).float()
-
-    if hasattr(spd_model, "n_instances"):
-        n_instances = spd_model.n_instances
-    else:
-        n_instances = 1
-        topk_masks = einops.repeat(topk_masks, "batch C -> batch n_instances C", n_instances=1)
-
-    fig, axs = plt.subplots(
-        ncols=n_instances, nrows=1, figsize=(5 * n_instances, 5), constrained_layout=True
-    )
-
-    axs = np.array([axs]) if n_instances == 1 else np.array(axs)
-    im, ax = None, None
-    for i, ax in enumerate(axs):
-        # Calculate correlation matrix
-        corr_matrix = torch.corrcoef(topk_masks[:, i].T).cpu()
-
-        im = ax.matshow(corr_matrix)
-        ax.xaxis.set_ticks_position("bottom")
-        if corr_matrix.shape[0] * corr_matrix.shape[1] < 200:
-            for l in range(corr_matrix.shape[0]):
-                for j in range(corr_matrix.shape[1]):
-                    ax.text(
-                        j,
-                        l,
-                        f"{corr_matrix[l, j]:.2f}",
-                        ha="center",
-                        va="center",
-                        color="#EE7777",
-                        fontsize=8,
-                    )
-    if (im is not None) and (ax is not None):
-        divider = make_axes_locatable(plt.gca())
-        cax = divider.append_axes("right", size="5%", pad=0.1)
-        plt.colorbar(im, cax=cax)
-        ax.set_title("Subnetwork Correlation Matrix")
-        ax.set_xlabel("Subnetwork")
-        ax.set_ylabel("Subnetwork")
-    return {"subnetwork_correlation_matrix": fig}
-
-
-def collect_sparse_dataset_mse_losses(
-    dataset: SparseFeatureDataset,
-    target_model: ResidualMLPModel | TMSModel,
-    spd_model: TMSSPDModel | ResidualMLPSPDModel,
-    config: Config,
-    batch_size: int,
-    device: str,
-    topk: float,
-    batch_topk: bool,
-    distil_from_target: bool,
-    gen_types: list[DataGenerationType],
-) -> dict[str, dict[str, Float[Tensor, ""] | Float[Tensor, " n_instances"]]]:
-    """Collect the MSE losses for specific number of active features, as well as for
-    'at_least_zero_active'.
-
-    We calculate two baselines:
-    - baseline_monosemantic: a baseline loss where the first d_mlp feature indices get mapped to the
-        true labels and the final (n_features - d_mlp) features are either 0 (TMS) or the raw inputs
-        (ResidualMLP).
-
-    Returns:
-        A dictionary keyed by generation type and then by model type (target, spd,
-        baseline_monosemantic), with values being MSE losses.
-    """
-    target_model.to(device)
-    spd_model.to(device)
-    # Get the entries for the main loss table in the paper
-    results = {gen_type: {} for gen_type in gen_types}
-    word_to_num = {"one": 1, "two": 2, "three": 3, "four": 4, "five": 5}
-
-    for gen_type in gen_types:
-        dataset.data_generation_type = gen_type
-        batch, labels = dataset.generate_batch(batch_size)
-
-        batch = batch.to(device)
-        labels = labels.to(device)
-
-        target_model_output = target_model(batch)
-
-        if gen_type == "at_least_zero_active":
-            run_batch_topk = batch_topk
-            run_topk = topk
-        else:
-            run_batch_topk = False
-            assert gen_type.startswith("exactly_")
-            n_active = word_to_num[gen_type.split("_")[1]]
-            run_topk = n_active
-
-        spd_outputs = run_spd_forward_pass(
-            spd_model=spd_model,
-            config=config,
-            target_model=target_model,
-            input_array=batch,
-            batch_topk=run_batch_topk,
-            topk=run_topk,
-            distil_from_target=distil_from_target,
-        )
-        # Combine the batch and n_instances dimension for batch, labels, target_model_output,
-        # spd_outputs.spd_topk_model_output
-        ein_str = "batch n_instances n_features -> (batch n_instances) n_features"
-        batch = einops.rearrange(batch, ein_str)
-        labels = einops.rearrange(labels, ein_str)
-        target_model_output = einops.rearrange(target_model_output, ein_str)
-        spd_topk_model_output = einops.rearrange(spd_outputs.spd_topk_model_output, ein_str)
-
-        if gen_type == "at_least_zero_active":
-            # Remove all entries where there are no active features
-            mask = (batch != 0).any(dim=-1)
-            batch = batch[mask]
-            labels = labels[mask]
-            target_model_output = target_model_output[mask]
-            spd_topk_model_output = spd_topk_model_output[mask]
-
-        topk_recon_loss_labels = calc_recon_mse(
-            spd_topk_model_output, labels, has_instance_dim=False
-        )
-        recon_loss = calc_recon_mse(target_model_output, labels, has_instance_dim=False)
-        baseline_batch = calc_recon_mse(batch, labels, has_instance_dim=False)
-
-        # Monosemantic baseline
-        monosemantic_out = batch.clone()
-        # Assumes TMS or ResidualMLP
-        if isinstance(target_model, ResidualMLPModel):
-            d_mlp = target_model.config.d_mlp * target_model.config.n_layers  # type: ignore
-            monosemantic_out[..., :d_mlp] = labels[..., :d_mlp]
-        elif isinstance(target_model, TMSModel):
-            d_mlp = target_model.config.n_hidden  # type: ignore
-            # The first d_mlp features are the true labels (i.e. the batch) and the rest are 0
-            monosemantic_out[..., d_mlp:] = 0
-        baseline_monosemantic = calc_recon_mse(monosemantic_out, labels, has_instance_dim=False)
-
-        results[gen_type]["target"] = recon_loss
-        results[gen_type]["spd"] = topk_recon_loss_labels
-        results[gen_type]["baseline_batch"] = baseline_batch
-        results[gen_type]["baseline_monosemantic"] = baseline_monosemantic
-    return results
-
-
-def plot_sparse_feature_mse_line_plot(
-    results: dict[str, dict[str, float]],
-    label_map: list[tuple[str, str, str]],
-    log_scale: bool = False,
-) -> plt.Figure:
-    xtick_label_map = {
-        "at_least_zero_active": "Training distribution",
-        "exactly_one_active": "Exactly 1 active",
-        "exactly_two_active": "Exactly 2 active",
-        "exactly_three_active": "Exactly 3 active",
-        "exactly_four_active": "Exactly 4 active",
-        "exactly_five_active": "Exactly 5 active",
-    }
-    # Create grouped bar plots for each generation type
-    fig, ax = plt.subplots(figsize=(12, 6))
-
-    n_groups = len(results)  # number of generation types
-    n_models = len(label_map)  # number of models to compare
-    width = 0.8 / n_models  # width of bars
-
-    # Create bars for each model type
-    for i, (model_type, label, color) in enumerate(label_map):
-        x_positions = np.arange(n_groups) + i * width - (n_models - 1) * width / 2
-        heights = [results[gen_type][model_type] for gen_type in results]
-        ax.bar(x_positions, heights, width, label=label, color=color)
-
-    # Customize the plot
-    ax.set_ylabel("MSE w.r.t true labels")
-    ax.set_xticks(np.arange(n_groups))
-    xtick_labels = [xtick_label_map[gen_type] for gen_type in results]
-    ax.set_xticklabels(xtick_labels)
-    ax.legend()
-    ax.grid(True, alpha=0.3, axis="y")
-
-    if log_scale:
-        ax.set_yscale("log")
-
-    # Remove top and right spines
-    ax.spines["top"].set_visible(False)
-    ax.spines["right"].set_visible(False)
-
-    # Ensure that 0 is the bottom of the y-axis
-    ax.set_ylim(bottom=0)
-
-    plt.tight_layout()
-    return fig
 
 
 def plot_matrix(
@@ -344,3 +196,78 @@ def plot_matrix(
         n_functions = matrix.shape[0]
         ax.set_yticks(range(n_functions))
         ax.set_yticklabels([f"{L:.0f}" for L in range(1, n_functions + 1)])
+
+
+def plot_AB_matrices(
+    model: SPDModel,
+    device: str,
+    all_perm_indices: dict[str, Float[Tensor, "n_instances m"]] | None = None,
+) -> plt.Figure:
+    """Plot A and B matrices for each instance, grouped by layer."""
+    # Collect all A and B matrices
+    As = collect_nested_module_attrs(model, attr_name="A", include_attr_name=False)
+    Bs = collect_nested_module_attrs(model, attr_name="B", include_attr_name=False)
+    n_instances = model.n_instances
+
+    # Verify that A and B matrices have matching names
+    A_names = set(As.keys())
+    B_names = set(Bs.keys())
+    assert (
+        A_names == B_names
+    ), f"A and B matrices must have matching names. Found A: {A_names}, B: {B_names}"
+
+    n_layers = len(As)
+
+    # Create figure for plotting - 2 rows per layer (A and B)
+    fig, axs = plt.subplots(
+        2 * n_layers,
+        n_instances,
+        figsize=(5 * n_instances, 5 * 2 * n_layers),
+        constrained_layout=True,
+        squeeze=False,
+    )
+    axs = np.array(axs)
+
+    images = []
+
+    # Plot each layer's A and B matrices for each instance
+    for i in range(n_instances):
+        if i == 0:
+            axs[0, i].set_title(f"Instance {i}")
+
+        # Plot A and B matrices for each layer
+        for j, name in enumerate(sorted(As.keys())):
+            # Plot A matrix
+            A_data = As[name][i]
+            if all_perm_indices is not None:
+                A_data = A_data[:, all_perm_indices[name][i]]
+            A_data = A_data.detach().cpu().numpy()
+            im = axs[2 * j, i].matshow(A_data, aspect="auto", cmap="coolwarm")
+            if i == 0:
+                axs[2 * j, i].set_ylabel("d_in index")
+            axs[2 * j, i].set_xlabel("Component index")
+            axs[2 * j, i].set_title(f"{name} (A matrix)")
+            images.append(im)
+
+            # Plot B matrix
+            B_data = Bs[name][i]
+            if all_perm_indices is not None:
+                B_data = B_data[all_perm_indices[name][i], :]
+            B_data = B_data.detach().cpu().numpy()
+            im = axs[2 * j + 1, i].matshow(B_data, aspect="auto", cmap="coolwarm")
+            if i == 0:
+                axs[2 * j + 1, i].set_ylabel("Component index")
+            axs[2 * j + 1, i].set_xlabel("d_out index")
+            axs[2 * j + 1, i].set_title(f"{name} (B matrix)")
+            images.append(im)
+
+    # Add unified colorbar
+    all_matrices = list(As.values()) + list(Bs.values())
+    norm = plt.Normalize(
+        vmin=min(M.min().item() for M in all_matrices),
+        vmax=max(M.max().item() for M in all_matrices),
+    )
+    for im in images:
+        im.set_norm(norm)
+    fig.colorbar(images[0], ax=axs.ravel().tolist())
+    return fig

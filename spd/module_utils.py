@@ -1,11 +1,13 @@
+import math
 from functools import reduce
-from typing import Any, Literal
+from typing import Any
 
 import einops
 import torch
 import torch.nn as nn
 from jaxtyping import Float
 from torch import Tensor
+from torch.nn.init import calculate_gain
 
 
 def get_nested_module_attr(module: nn.Module, access_string: str) -> Any:
@@ -88,12 +90,21 @@ def remove_grad_parallel_to_subnetwork_vecs(
 
 def init_param_(
     param: torch.Tensor,
-    scale: float = 1.0,
-    init_type: Literal["kaiming_uniform", "xavier_normal"] = "kaiming_uniform",
+    fan_val: float,
+    mean: float = 0.0,
+    nonlinearity: str = "linear",
+    generator: torch.Generator | None = None,
 ) -> None:
-    if init_type == "kaiming_uniform":
-        torch.nn.init.kaiming_uniform_(param)
-        with torch.no_grad():
-            param.mul_(scale)
-    elif init_type == "xavier_normal":
-        torch.nn.init.xavier_normal_(param, gain=scale)
+    """Fill in param with values sampled from a Kaiming normal distribution.
+
+    Args:
+        param: The parameter to initialize
+        fan_val: The squared denominator of the std used for the kaiming normal distribution
+        mean: The mean of the normal distribution
+        nonlinearity: The nonlinearity of the activation function
+        generator: The generator to sample from
+    """
+    gain = calculate_gain(nonlinearity)
+    std = gain / math.sqrt(fan_val)
+    with torch.no_grad():
+        param.normal_(mean, std, generator=generator)

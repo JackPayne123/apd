@@ -14,7 +14,8 @@ dependencies = [
     "pytest",
     "ipykernel",
     "transformers",
-    "transformer-lens",
+    "jaxtyping",
+    "einops",
     "matplotlib==3.9.1",  # Avoid frequent pyright errors with new matplotlib versions
     "numpy",
     "python-dotenv",
@@ -69,6 +70,7 @@ known-third-party = ["wandb"]
 
 [tool.pyright]
 include = ["spd", "tests"]
+exclude = ["**/wandb/**"]
 
 strictListInference = true
 strictDictionaryInference = true

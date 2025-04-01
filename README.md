@@ -38,9 +38,9 @@ APD can be run by executing any of the `*_decomposition.py` scripts defined in t
 subdirectories. A config file is required for each experiment, which can be found in the same
 directory. For example:
 ```bash
-python spd/experiments/tms/tms_decomposition.py spd/experiments/tms/tms_topk_config.yaml
+python spd/experiments/tms/tms_decomposition.py spd/experiments/tms/tms_config.yaml
 ```
-will run SPD on TMS with the config file `tms_topk_config.yaml` (which is the main config file used
+will run SPD on TMS with the config file `tms_config.yaml` (which is the main config file used
 for the TMS experiments in the paper).
 
 Wandb sweep files are also provided in the experiment subdirectories, and can be run with e.g.:

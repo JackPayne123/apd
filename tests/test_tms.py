@@ -1,12 +1,12 @@
 from pathlib import Path
 
-import pytest
 import torch
 from jaxtyping import Float
 from torch import Tensor
 
 from spd.configs import Config, TMSTaskConfig
 from spd.experiments.tms.models import TMSModel, TMSModelConfig, TMSSPDModel, TMSSPDModelConfig
+from spd.experiments.tms.tms_decomposition import init_spd_model_from_target_model
 from spd.experiments.tms.train_tms import TMSTrainConfig, get_model_and_dataloader, train
 from spd.module_utils import get_nested_module_attr
 from spd.run_spd import optimize
@@ -16,8 +16,6 @@ from spd.utils import DatasetGeneratedDataLoader, SparseFeatureDataset, set_seed
 TMS_TASK_CONFIG = TMSTaskConfig(
     task_name="tms",
     feature_probability=0.5,
-    train_bias=False,
-    bias_val=0.0,
     pretrained_model_path=Path(""),  # We'll create this later
 )
 
@@ -37,19 +35,13 @@ def tms_spd_happy_path(config: Config, n_hidden_layers: int = 0):
     )
     target_model = TMSModel(config=tms_model_config)
 
-    tms_spd_model_config = TMSSPDModelConfig(
-        **tms_model_config.model_dump(mode="json"),
-        C=config.C,
-        bias_val=config.task_config.bias_val,
-    )
+    tms_spd_model_config = TMSSPDModelConfig(**tms_model_config.model_dump(mode="json"), m=config.m)
     model = TMSSPDModel(config=tms_spd_model_config)
     # Randomly initialize the bias for the pretrained model
     target_model.b_final.data = torch.randn_like(target_model.b_final.data)
     # Manually set the bias for the SPD model from the bias in the pretrained model
     model.b_final.data[:] = target_model.b_final.data.clone()
-
-    if not config.task_config.train_bias:
-        model.b_final.requires_grad = False
+    model.b_final.requires_grad = False
 
     dataset = SparseFeatureDataset(
         n_instances=target_model.config.n_instances,
@@ -85,66 +77,11 @@ def tms_spd_happy_path(config: Config, n_hidden_layers: int = 0):
     ), "Model A matrix should have changed after optimization"
 
 
-def test_tms_batch_topk_no_schatten():
+def test_tms_happy_path():
     config = Config(
-        C=5,
-        topk=2,
-        batch_topk=True,
-        batch_size=4,
-        steps=4,
-        print_freq=2,
-        save_freq=None,
-        lr=1e-3,
-        topk_recon_coeff=1,
-        schatten_pnorm=None,
-        schatten_coeff=None,
-        task_config=TMS_TASK_CONFIG,
-    )
-    tms_spd_happy_path(config)
-
-
-@pytest.mark.parametrize("n_hidden_layers", [0, 2])
-def test_tms_batch_topk_and_schatten(n_hidden_layers: int):
-    config = Config(
-        C=5,
-        topk=2,
-        batch_topk=True,
-        batch_size=4,
-        steps=4,
-        print_freq=2,
-        save_freq=None,
-        lr=1e-3,
-        topk_recon_coeff=1,
-        schatten_pnorm=0.9,
-        schatten_coeff=1e-1,
-        task_config=TMS_TASK_CONFIG,
-    )
-    tms_spd_happy_path(config, n_hidden_layers)
-
-
-def test_tms_topk_and_l2():
-    config = Config(
-        C=5,
-        topk=2,
-        batch_topk=False,
-        batch_size=4,
-        steps=4,
-        print_freq=2,
-        save_freq=None,
-        lr=1e-3,
-        topk_recon_coeff=1,
-        schatten_pnorm=0.9,
-        schatten_coeff=1e-1,
-        task_config=TMS_TASK_CONFIG,
-    )
-    tms_spd_happy_path(config)
-
-
-def test_tms_lp():
-    config = Config(
-        C=5,
-        topk=None,
-        batch_topk=False,
+        m=10,
+        random_mask_recon_coeff=1,
+        n_random_masks=2,
         batch_size=4,
         steps=4,
         print_freq=2,
@@ -155,25 +92,6 @@ def test_tms_lp():
         task_config=TMS_TASK_CONFIG,
     )
     tms_spd_happy_path(config)
-
-
-@pytest.mark.parametrize("n_hidden_layers", [0, 2])
-def test_tms_topk_and_lp(n_hidden_layers: int):
-    config = Config(
-        C=5,
-        topk=2,
-        batch_topk=False,
-        batch_size=4,
-        steps=4,
-        print_freq=2,
-        save_freq=None,
-        lr=1e-3,
-        pnorm=0.9,
-        topk_recon_coeff=1,
-        lp_sparsity_coeff=1,
-        task_config=TMS_TASK_CONFIG,
-    )
-    tms_spd_happy_path(config, n_hidden_layers)
 
 
 def test_train_tms_happy_path():
@@ -298,16 +216,13 @@ def test_tms_equivalent_to_raw_model() -> None:
         n_hidden_layers=1,
         device=device,
     )
-    C = 2
 
     target_model = TMSModel(config=tms_config).to(device)
 
     # Create the SPD model
     tms_spd_config = TMSSPDModelConfig(
         **tms_config.model_dump(),
-        C=C,
         m=3,  # Small m for testing
-        bias_val=0.0,
     )
     spd_model = TMSSPDModel(config=tms_spd_config).to(device)
 
@@ -352,3 +267,46 @@ def test_tms_equivalent_to_raw_model() -> None:
         assert torch.allclose(
             target_post_weight_acts[key_name], spd_post_weight_acts[key_name], atol=1e-6
         ), f"post-acts do not match at layer {key_name}"
+
+
+def test_init_tms_spd_model_from_target() -> None:
+    """Test that initializing an SPD model from a target model results in identical outputs."""
+    device = "cpu"
+    set_seed(0)
+
+    # Create target model with no hidden layers (as per current limitation)
+    tms_config = TMSModelConfig(
+        n_instances=2,
+        n_features=3,
+        n_hidden=2,
+        n_hidden_layers=0,
+        device=device,
+    )
+    target_model = TMSModel(config=tms_config).to(device)
+
+    # Create the SPD model with m equal to n_features
+    tms_spd_config = TMSSPDModelConfig(
+        **tms_config.model_dump(),
+        m=tms_config.n_features,  # Must match n_features for initialization
+    )
+    spd_model = TMSSPDModel(config=tms_spd_config).to(device)
+
+    init_spd_model_from_target_model(spd_model, target_model, m=tms_config.n_features)
+    # Also copy the bias
+    spd_model.b_final.data[:, :] = target_model.b_final.data
+
+    # Create a random input
+    batch_size = 4
+    input_data: Float[Tensor, "batch n_instances n_features"] = torch.rand(
+        batch_size, tms_config.n_instances, tms_config.n_features, device=device
+    )
+
+    with torch.inference_mode():
+        target_out = target_model(input_data)
+        spd_out = spd_model(input_data)
+
+    assert torch.allclose(
+        spd_model.linear1.weight, target_model.linear1.weight
+    ), "Weights do not match"
+
+    assert torch.allclose(target_out, spd_out), "Outputs after initialization do not match"

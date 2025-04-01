@@ -2,10 +2,10 @@
 
 import json
 from datetime import datetime
-from functools import partial
 from pathlib import Path
 from typing import Any
 
+import einops
 import fire
 import matplotlib.pyplot as plt
 import numpy as np
@@ -13,36 +13,23 @@ import torch
 import wandb
 import yaml
 from jaxtyping import Float
-from matplotlib.colors import CenteredNorm
-from pydantic import PositiveFloat
 from torch import Tensor
-from tqdm import tqdm
 
-from spd.attributions import collect_subnetwork_attributions
 from spd.configs import Config, ResidualMLPTaskConfig
 from spd.experiments.resid_mlp.models import (
     ResidualMLPModel,
     ResidualMLPSPDConfig,
     ResidualMLPSPDModel,
 )
-from spd.experiments.resid_mlp.plotting import (
-    analyze_per_feature_performance,
-    plot_individual_feature_response,
-    plot_per_feature_performance,
-    plot_spd_relu_contribution,
-    plot_virtual_weights_target_spd,
-    spd_calculate_diag_relu_conns,
-)
 from spd.experiments.resid_mlp.resid_mlp_dataset import ResidualMLPDataset
 from spd.log import logger
-from spd.module_utils import collect_nested_module_attrs
-from spd.plotting import plot_subnetwork_attributions_statistics, plot_subnetwork_correlations
+from spd.models.components import Gate
+from spd.plotting import plot_AB_matrices, plot_mask_vals
 from spd.run_spd import get_common_run_name_suffix, optimize
 from spd.utils import (
-    COLOR_PALETTE,
     DatasetGeneratedDataLoader,
+    get_device,
     load_config,
-    run_spd_forward_pass,
     set_seed,
 )
 from spd.wandb_utils import init_wandb
@@ -56,8 +43,6 @@ def get_run_name(
     n_layers: int,
     d_resid: int,
     d_mlp: int,
-    m: int | None,
-    init_scale: float,
 ) -> str:
     """Generate a run name based on the config."""
     run_suffix = ""
@@ -65,36 +50,12 @@ def get_run_name(
         run_suffix = config.wandb_run_name
     else:
         run_suffix = get_common_run_name_suffix(config)
-        run_suffix += f"scale{init_scale}_ft{n_features}_lay{n_layers}_resid{d_resid}_mlp{d_mlp}"
-        if m is not None:
-            run_suffix += f"_m{m}"
+        run_suffix += f"ft{n_features}_lay{n_layers}_resid{d_resid}_mlp{d_mlp}"
     return config.wandb_run_name_prefix + run_suffix
 
 
-def calc_n_active_features_per_subnet(
-    model: ResidualMLPSPDModel, cutoff: float, device: str
-) -> tuple[Float[Tensor, "n_instances C"], Float[Tensor, "n_instances n_features"]]:
-    """Calculate the number of active features per subnet (and per instance if n_instances > 1)."""
-    n_active_features_per_subnet: Float[Tensor, "n_instances C"] = torch.zeros(
-        (model.config.n_instances, model.C), device=device
-    )
-    active_feature_counts_per_subnet: Float[Tensor, "n_instances n_features"] = torch.zeros(
-        (model.config.n_instances, model.config.n_features), device=device
-    )
-    for c in range(model.C):
-        relu_conns: Float[Tensor, "n_instances n_features d_mlp"] = spd_calculate_diag_relu_conns(
-            model, device, k_select=c
-        )
-        # Count the number of features for which each subnet fires beyond the cutoff
-        above_cutoff = relu_conns.max(dim=-1).values > cutoff
-        n_active_features_per_subnet[:, c] = above_cutoff.sum(dim=-1)
-        active_feature_counts_per_subnet[:] += above_cutoff
-
-    return n_active_features_per_subnet, active_feature_counts_per_subnet
-
-
 def plot_subnetwork_attributions(
-    attribution_scores: Float[Tensor, "batch n_instances C"],
+    attribution_scores: Float[Tensor, "batch n_instances m"],
     out_dir: Path | None,
     step: int | None,
 ) -> plt.Figure:
@@ -139,130 +100,6 @@ def plot_subnetwork_attributions(
     return fig
 
 
-def plot_multiple_component_weights(
-    model: ResidualMLPSPDModel,
-    out_dir: Path | None,
-    step: int | None = None,
-) -> plt.Figure:
-    """Plot each component weight matrix."""
-    all_params = collect_nested_module_attrs(model, "component_weights")
-    # Each param (of which there are n_layers): [k, n_features, n_features]
-    n_params = len(all_params)
-    param_names = list(all_params.keys())
-    n_instances = model.config.n_instances
-    C = model.C
-
-    # Find global min and max for normalization
-    all_values = []
-    for param_name in param_names:
-        param_values = all_params[param_name].detach().cpu().numpy()
-        all_values.append(param_values)
-    all_values_concat = np.concatenate([v.flatten() for v in all_values])
-    vmax = np.abs(all_values_concat).max()
-    norm = CenteredNorm(vcenter=0, halfrange=vmax)
-
-    fig, axs = plt.subplots(
-        n_instances * n_params,
-        C,
-        figsize=(2 * C, n_instances * n_params),
-        constrained_layout=False,
-    )
-    axs = np.array(axs)
-
-    for instance_idx in range(n_instances):
-        for param_idx in range(n_params):
-            param_name = param_names[param_idx]
-            for subnet_idx in range(C):
-                col_idx = subnet_idx
-                row_idx = instance_idx * n_params + param_idx
-
-                ax = axs[row_idx, col_idx]  # type: ignore
-                param = all_params[param_name][instance_idx, subnet_idx].detach().cpu().numpy()
-                # If it's a bias with a single dimension, unsqueeze it
-                if param.ndim == 1:
-                    param = param[:, None]
-
-                # Set aspect ratio based on parameter dimensions
-                height, width = param.shape
-                aspect = width / height
-
-                im = ax.matshow(param, cmap="RdBu", norm=norm, aspect=aspect)
-                ax.set_xticks([])
-                ax.set_yticks([])
-
-                if col_idx == 0:
-                    ax.set_ylabel(
-                        f"Inst.{instance_idx}.{param_name}",
-                        rotation=0,
-                        ha="right",
-                        va="center",
-                    )
-
-                if row_idx == ((n_instances * n_params) - 1):
-                    ax.set_xlabel(f"Subnet {subnet_idx}", rotation=0, ha="center", va="top")
-
-    # Add colorbar
-    fig.colorbar(im, ax=axs.ravel().tolist(), location="right")  # type: ignore
-
-    title_text = "Subnet Parameters"
-    if step is not None:
-        title_text += f" (Step {step})"
-    fig.suptitle(title_text)
-    if out_dir:
-        fig.savefig(out_dir / f"component_weights_s{step}.png", dpi=200)
-    return fig
-
-
-def plot_subnet_categories(
-    model: ResidualMLPSPDModel, device: str, cutoff: float = 4e-2
-) -> plt.Figure:
-    n_active_features_per_subnet, active_feature_counts_per_subnet = (
-        calc_n_active_features_per_subnet(model, cutoff=cutoff, device=device)
-    )
-    n_dead_subnets = (n_active_features_per_subnet == 0).sum(dim=-1).detach().tolist()
-    n_monosemantic_subnets = (n_active_features_per_subnet == 1).sum(dim=-1).detach().tolist()
-    n_duosemantic_subnets = (n_active_features_per_subnet == 2).sum(dim=-1).detach().tolist()
-    n_polysemantic_subnets = (n_active_features_per_subnet > 2).sum(dim=-1).detach().tolist()
-    n_unique_features_represented = (
-        (active_feature_counts_per_subnet > 0).sum(dim=-1).detach().tolist()
-    )
-
-    n_instances = len(n_dead_subnets)
-    fig, ax = plt.subplots(
-        nrows=1, ncols=n_instances, figsize=(5 * n_instances, 5), constrained_layout=True
-    )
-    axs = np.array([ax]) if n_instances == 1 else np.array(ax)
-    categories = ["Dead", "Mono", "Duo", "Poly", "Represented"]
-
-    for i in range(n_instances):
-        counts = [
-            n_dead_subnets[i],
-            n_monosemantic_subnets[i],
-            n_duosemantic_subnets[i],
-            n_polysemantic_subnets[i],
-            n_unique_features_represented[i],
-        ]
-        bars = axs[i].bar(categories, counts)
-        axs[i].set_xlabel("Category")
-        axs[i].set_ylabel("Count")
-        axs[i].set_title(f"Subnet Categories (Instance {i})")
-
-        # Add numbers in the middle of the bars
-        for bar, count in zip(bars, counts, strict=False):
-            height = bar.get_height()
-            axs[i].text(
-                bar.get_x() + bar.get_width() / 2.0,
-                height / 2.0,
-                f"{count}",
-                ha="center",
-                va="center",
-                color="white",
-                fontsize=10,
-            )
-
-    return fig
-
-
 def resid_mlp_plot_results_fn(
     model: ResidualMLPSPDModel,
     target_model: ResidualMLPModel,
@@ -270,223 +107,19 @@ def resid_mlp_plot_results_fn(
     out_dir: Path | None,
     device: str,
     config: Config,
-    topk_mask: Float[Tensor, "batch_size C"] | None,
-    dataloader: DatasetGeneratedDataLoader[
-        tuple[Float[Tensor, "batch n_features"], Float[Tensor, "batch d_embed"]]
-    ]
-    | None = None,
+    gates: dict[str, Gate],
+    masks: dict[str, Float[Tensor, "batch_size m"]] | None,
     **_,
 ) -> dict[str, plt.Figure]:
     assert isinstance(config.task_config, ResidualMLPTaskConfig)
     fig_dict = {}
 
-    fig_dict["subnet_categories"] = plot_subnet_categories(model, device)
-
-    ############################################################################################
-    # Feature contributions
-    ############################################################################################
-    fig1, fig2 = plot_spd_relu_contribution(model, target_model, device)
-    fig1.suptitle("How much does each ReLU contribute to each feature?")
-    fig2.suptitle("How much does each feature route through each ReLU?")
-    fig_dict["feature_contributions"] = fig1
-    fig_dict["relu_contributions"] = fig2
-
-    fig1, fig2 = plot_spd_relu_contribution(model, target_model, device, k_plot_limit=3)
-    fig1.suptitle("How much does each ReLU contribute to each feature?")
-    fig2.suptitle("How much does each feature route through each ReLU?")
-    fig_dict["cropped_feature_contributions"] = fig1
-    fig_dict["cropped_relu_contributions"] = fig2
-
-    ############################################################################################
-    # Individual feature responses + per-feature performance
-    ############################################################################################
-    def spd_model_fn(
-        batch: Float[Tensor, "batch n_instances n_features"],
-        topk: PositiveFloat | None = config.topk,
-        batch_topk: bool = config.batch_topk,
-    ) -> Float[Tensor, "batch n_instances n_features"]:
-        assert topk is not None
-        if config.exact_topk:
-            assert model.n_instances == 1, "exact_topk only works if n_instances = 1"
-            topk = ((batch != 0).sum() / batch.shape[0]).item()
-        return run_spd_forward_pass(
-            spd_model=model,
-            config=config,
-            target_model=target_model,
-            input_array=batch,
-            batch_topk=batch_topk,
-            topk=topk,
-            distil_from_target=config.distil_from_target,
-        ).spd_topk_model_output
-
-    def target_model_fn(batch: Float[Tensor, "batch n_instances"]):
-        return target_model(batch)
-
-    fig, axes = plt.subplots(nrows=2, ncols=2, figsize=(15, 15), constrained_layout=True)
-    axes = np.atleast_2d(axes)  # type: ignore
-    plot_individual_feature_response(
-        model_fn=target_model_fn,
-        device=device,
-        model_config=model.config,
-        ax=axes[0, 0],
+    fig_dict["masks"], all_perm_indices = plot_mask_vals(
+        model=model, target_model=target_model, gates=gates, device=device, input_magnitude=0.75
     )
-    plot_individual_feature_response(
-        model_fn=target_model_fn,
-        device=device,
-        model_config=model.config,
-        sweep=True,
-        ax=axes[1, 0],
+    fig_dict["AB_matrices"] = plot_AB_matrices(
+        model=model, device=device, all_perm_indices=all_perm_indices
     )
-    plot_individual_feature_response(
-        model_fn=spd_model_fn,
-        device=device,
-        model_config=model.config,
-        ax=axes[0, 1],
-    )
-    plot_individual_feature_response(
-        model_fn=spd_model_fn,
-        device=device,
-        model_config=model.config,
-        sweep=True,
-        ax=axes[1, 1],
-    )
-    axes[0, 0].set_ylabel(axes[0, 0].get_title())
-    axes[1, 0].set_ylabel(axes[1, 0].get_title())
-    axes[0, 1].set_ylabel("")
-    axes[1, 1].set_ylabel("")
-    axes[0, 0].set_title("Target model")
-    axes[0, 1].set_title("SPD model")
-    axes[1, 0].set_title("")
-    axes[1, 1].set_title("")
-    axes[0, 0].set_xlabel("")
-    axes[0, 1].set_xlabel("")
-    fig_dict["individual_feature_responses"] = fig
-
-    # Plot per-feature performance when setting topk=1 and batch_topk=False
-    fig, ax1 = plt.subplots(figsize=(15, 5))
-
-    losses_target = analyze_per_feature_performance(
-        model_fn=target_model_fn,
-        model_config=target_model.config,
-        device=device,
-        batch_size=config.batch_size,
-    )
-    indices = losses_target.argsort()
-    fn_without_batch_topk = lambda batch: spd_model_fn(batch, topk=1, batch_topk=False)  # type: ignore
-    losses_spd = analyze_per_feature_performance(
-        model_fn=fn_without_batch_topk,
-        model_config=model.config,
-        device=device,
-        batch_size=config.batch_size,
-    )
-
-    plot_per_feature_performance(
-        losses=losses_spd,
-        sorted_indices=indices,
-        ax=ax1,
-        label="SPD",
-        color=COLOR_PALETTE[1],
-    )
-    plot_per_feature_performance(
-        losses=losses_target,
-        sorted_indices=indices,
-        ax=ax1,
-        label="Target",
-        color=COLOR_PALETTE[0],
-    )
-    ax1.legend()
-
-    fig_dict["loss_by_feature_topk_1"] = fig
-
-    # Plot per-feature performance when using batch_topk
-    fig, ax2 = plt.subplots(figsize=(15, 5))
-
-    target_losses_batch_topk = analyze_per_feature_performance(
-        model_fn=target_model_fn,
-        model_config=target_model.config,
-        device=device,
-        batch_size=config.batch_size,
-    )
-
-    spd_losses_batch_topk = analyze_per_feature_performance(
-        model_fn=spd_model_fn,
-        model_config=model.config,
-        device=device,
-        batch_size=config.batch_size,
-    )
-
-    plot_per_feature_performance(
-        losses=spd_losses_batch_topk,
-        sorted_indices=indices,
-        ax=ax2,
-        label="SPD",
-        color=COLOR_PALETTE[1],
-    )
-    plot_per_feature_performance(
-        losses=target_losses_batch_topk,
-        sorted_indices=indices,
-        ax=ax2,
-        label="Target",
-        color=COLOR_PALETTE[0],
-    )
-    ax2.legend()
-    # Use the same y-axis limits as the topk=1 plot
-    ax2.set_ylim(ax1.get_ylim())
-    fig_dict["loss_by_feature_batch_topk"] = fig
-
-    ############################################################################################
-    # Virtual weights
-    ############################################################################################
-
-    fig = plot_virtual_weights_target_spd(target_model, model, device)
-    fig_dict["virtual_weights"] = fig
-
-    ############################################################################################
-    # Subnetwork attributions
-    ############################################################################################
-    attribution_scores = collect_subnetwork_attributions(
-        spd_model=model,
-        config=config,
-        target_model=target_model,
-        device=device,
-        n_instances=model.n_instances,
-    )
-    fig_dict["subnetwork_attributions"] = plot_subnetwork_attributions(
-        attribution_scores, out_dir, step
-    )
-
-    if config.topk is not None:
-        if dataloader is not None and config.C > 1:
-            fig_dict_correlations = plot_subnetwork_correlations(
-                dataloader=dataloader,
-                target_model=target_model,
-                spd_model=model,
-                config=config,
-                device=device,
-            )
-            fig_dict.update(fig_dict_correlations)
-
-        assert topk_mask is not None
-        fig_dict_attributions = plot_subnetwork_attributions_statistics(topk_mask=topk_mask)
-        fig_dict.update(fig_dict_attributions)
-
-    ############################################################################################
-    # Subnetwork parameters
-    ############################################################################################
-
-    # This can be too big to plot
-    n_matrix_params = target_model.config.d_mlp * target_model.config.d_embed
-    if n_matrix_params < 1000:
-        fig_dict["component_weights"] = plot_multiple_component_weights(
-            model=model, out_dir=out_dir, step=step
-        )
-
-    # Save plots to files
-    if out_dir:
-        for k, v in fig_dict.items():
-            out_file = out_dir / f"{k}_s{step}.png"
-            v.savefig(out_file, dpi=100)
-            tqdm.write(f"Saved plot to {out_file}")
     return fig_dict
 
 
@@ -511,6 +144,46 @@ def save_target_model_info(
         wandb.save(str(out_dir / "label_coeffs.json"), base_path=out_dir, policy="now")
 
 
+def init_spd_model_from_target_model(
+    model: ResidualMLPSPDModel, target_model: ResidualMLPModel, m: int
+) -> None:
+    """Initialize SPD model from target model.
+
+    For mlp_in: A = target weights, B = identity
+    For mlp_out: A = identity, B = target weights
+
+    Args:
+        model: The SPD model to initialize
+        target_model: The target model to initialize from
+        m: The number of components (must equal d_mlp for initialization)
+    """
+    # For ResidualMLP, we need to initialize each layer's mlp_in and mlp_out components
+    for i in range(target_model.config.n_layers):
+        # For mlp_in, m must equal d_mlp
+        # TODO: This is broken, we shouldn't need m=d_mlp for this function.
+        assert (
+            m == target_model.config.d_mlp or m == target_model.config.d_embed
+        ), "m must be equal to d_mlp or d_embed"
+
+        # For mlp_in: A = target weights, B = identity
+        model.layers[i].mlp_in.A.data[:] = target_model.layers[i].mlp_in.weight.data.clone()
+        model.layers[i].mlp_in.B.data[:] = einops.repeat(
+            torch.eye(m),
+            "m d_out -> n_instances m d_out",
+            n_instances=target_model.config.n_instances,
+        )
+
+        # For mlp_out: A = identity, B = target weights
+        model.layers[i].mlp_out.A.data[:] = einops.repeat(
+            torch.eye(m),
+            "d_in m -> n_instances d_in m",
+            n_instances=target_model.config.n_instances,
+        )
+        model.layers[i].mlp_out.B.data[:] = target_model.layers[i].mlp_out.weight.data.clone()
+
+    logger.info("Initialized SPD model from target model")
+
+
 def main(
     config_path_or_obj: Path | str | Config, sweep_config_path: Path | str | None = None
 ) -> None:
@@ -522,7 +195,7 @@ def main(
     set_seed(config.seed)
     logger.info(config)
 
-    device = "cuda" if torch.cuda.is_available() else "cpu"
+    device = get_device()
     print(f"Using device: {device}")
     assert isinstance(config.task_config, ResidualMLPTaskConfig)
 
@@ -538,8 +211,6 @@ def main(
         n_layers=target_model.config.n_layers,
         d_resid=target_model.config.d_embed,
         d_mlp=target_model.config.d_mlp,
-        m=config.m,
-        init_scale=config.task_config.init_scale,
     )
     if config.wandb_project:
         assert wandb.run, "wandb.run must be initialized before training"
@@ -573,13 +244,11 @@ def main(
         apply_output_act_fn=target_model.config.apply_output_act_fn,
         in_bias=target_model.config.in_bias,
         out_bias=target_model.config.out_bias,
-        init_scale=config.task_config.init_scale,
-        C=config.C,
         m=config.m,
+        n_gate_hidden_neurons=config.n_gate_hidden_neurons,
     )
-    model = ResidualMLPSPDModel(config=model_config).to(device)
+    model = ResidualMLPSPDModel(config=model_config)
 
-    model = model.to(device)
     # Use the target_model's embedding matrix and don't train it further
     model.W_E.data[:, :] = target_model.W_E.data.detach().clone()
     model.W_E.requires_grad = False
@@ -595,6 +264,10 @@ def main(
             model.layers[i].bias2.data[:, :] = target_model.layers[i].bias2.data.detach().clone()
             model.layers[i].bias2.requires_grad = False
 
+    if config.init_from_target_model:
+        init_spd_model_from_target_model(model=model, target_model=target_model, m=config.m)
+
+    model.to(device)
     param_names = []
     for i in range(target_model.config.n_layers):
         param_names.append(f"layers.{i}.mlp_in")
@@ -617,7 +290,6 @@ def main(
 
     dataloader = DatasetGeneratedDataLoader(dataset, batch_size=config.batch_size, shuffle=False)
 
-    plot_results_fn = partial(resid_mlp_plot_results_fn, dataloader=dataloader)
     optimize(
         model=model,
         config=config,
@@ -626,7 +298,7 @@ def main(
         target_model=target_model,
         param_names=param_names,
         out_dir=out_dir,
-        plot_results_fn=plot_results_fn,
+        plot_results_fn=resid_mlp_plot_results_fn,
     )
 
     if config.wandb_project:

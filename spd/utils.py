@@ -1,7 +1,7 @@
 import random
 from collections.abc import Callable, Iterator
 from pathlib import Path
-from typing import Any, Generic, Literal, NamedTuple, TypeVar
+from typing import Any, Generic, Literal, TypeVar
 
 import einops
 import numpy as np
@@ -13,11 +13,7 @@ from pydantic.v1.utils import deep_update
 from torch import Tensor
 from torch.utils.data import DataLoader, Dataset
 
-from spd.attributions import calculate_attributions
-from spd.configs import Config
-from spd.hooks import HookedRootModule
 from spd.log import logger
-from spd.models.base import SPDModel
 
 T = TypeVar("T", bound=BaseModel)
 Q = TypeVar("Q")
@@ -35,6 +31,11 @@ COLOR_PALETTE = [
     "#ECE133",
     "#56B4E9",
 ]
+
+
+def get_device() -> str:
+    # NOTE: MPS returns NaNs on TMS when run. Avoiding for now.
+    return "cuda" if torch.cuda.is_available() else "cpu"
 
 
 def set_seed(seed: int | None) -> None:
@@ -139,113 +140,6 @@ class BatchedDataLoader(DataLoader[Q], Generic[Q]):
     def __iter__(self) -> Iterator[tuple[torch.Tensor, torch.Tensor]]:  # type: ignore
         for batch, label in super().__iter__():
             yield batch[0], label[0]
-
-
-class SPDOutputs(NamedTuple):
-    target_model_output: (
-        Float[Tensor, "batch d_model_out"] | Float[Tensor, "batch n_instances d_model_out"]
-    )
-    spd_model_output: (
-        Float[Tensor, "batch d_model_out"] | Float[Tensor, "batch n_instances d_model_out"]
-    )
-    spd_topk_model_output: (
-        Float[Tensor, "batch d_model_out"] | Float[Tensor, "batch n_instances d_model_out"]
-    )
-    layer_acts: dict[str, Float[Tensor, "batch d_out"] | Float[Tensor, "batch n_instances d_out"]]
-    component_acts: dict[
-        str, Float[Tensor, "batch C d_out"] | Float[Tensor, "batch n_instances C d_out"]
-    ]
-    attribution_scores: Float[Tensor, "batch C"] | Float[Tensor, "batch n_instances C"]
-    topk_mask: Float[Tensor, "batch C"] | Float[Tensor, "batch n_instances C"]
-
-
-def calc_topk_mask(
-    attribution_scores: Float[Tensor, "batch ... C"],
-    topk: float,
-    batch_topk: bool,
-) -> Float[Tensor, "batch ... C"]:
-    """Calculate the top-k mask.
-
-    Args:
-        attribution_scores: The attribution scores to calculate the top-k mask for.
-        topk: The number of top-k elements to select. If `batch_topk` is True, this is multiplied
-            by the batch size to get the number of top-k elements over the whole batch.
-        batch_topk: If True, the top-k mask is calculated over the concatenated batch and k
-            dimensions.
-
-    Returns:
-        The top-k mask.
-    """
-    batch_size = attribution_scores.shape[0]
-    topk = int(topk * batch_size) if batch_topk else int(topk)
-
-    if batch_topk:
-        attribution_scores = einops.rearrange(attribution_scores, "b ... C -> ... (b C)")
-
-    topk_indices = attribution_scores.topk(topk, dim=-1).indices
-    topk_mask = torch.zeros_like(attribution_scores, dtype=torch.bool)
-    topk_mask.scatter_(dim=-1, index=topk_indices, value=True)
-
-    if batch_topk:
-        topk_mask = einops.rearrange(topk_mask, "... (b C) -> b ... C", b=batch_size)
-
-    return topk_mask
-
-
-def run_spd_forward_pass(
-    spd_model: SPDModel,
-    config: Config,
-    target_model: HookedRootModule,
-    input_array: Float[Tensor, "batch n_inputs"],
-    batch_topk: bool,
-    topk: float,
-    distil_from_target: bool,
-    topk_mask: Float[Tensor, "batch C"] | Float[Tensor, "batch n_instances C"] | None = None,
-) -> SPDOutputs:
-    # Forward pass on target model
-    target_cache_filter = lambda k: k.endswith((".hook_pre", ".hook_post"))
-    target_out, target_cache = target_model.run_with_cache(
-        input_array, names_filter=target_cache_filter
-    )
-
-    # Do a forward pass with all subnetworks
-    spd_cache_filter = lambda k: k.endswith((".hook_post", ".hook_component_acts"))
-    out, spd_cache = spd_model.run_with_cache(input_array, names_filter=spd_cache_filter)
-
-    attribution_scores = calculate_attributions(
-        model=spd_model,
-        config=config,
-        batch=input_array,
-        out=out,
-        target_out=target_out,
-        pre_weight_acts={k: v for k, v in target_cache.items() if k.endswith("hook_pre")},
-        post_weight_acts={k: v for k, v in target_cache.items() if k.endswith("hook_post")},
-        component_acts={k: v for k, v in spd_cache.items() if k.endswith("hook_component_acts")},
-    )
-
-    if topk_mask is None:
-        # We always assume the final subnetwork is the one we want to distil
-        topk_attrs = attribution_scores[..., :-1] if distil_from_target else attribution_scores
-
-        topk_mask = calc_topk_mask(topk_attrs, topk, batch_topk=batch_topk)
-        if distil_from_target:
-            # Add back the final subnetwork index to the topk mask and set it to True
-            last_subnet_mask = torch.ones(
-                (*topk_mask.shape[:-1], 1), dtype=torch.bool, device=attribution_scores.device
-            )
-            topk_mask = torch.cat((topk_mask, last_subnet_mask), dim=-1)
-
-    topk_spd_out = spd_model(input_array, topk_mask=topk_mask)
-    attribution_scores = attribution_scores.cpu().detach()
-    return SPDOutputs(
-        target_model_output=target_out,
-        spd_model_output=out,
-        spd_topk_model_output=topk_spd_out,
-        layer_acts={k: v for k, v in spd_cache.items() if k.endswith("hook_post")},
-        component_acts={k: v for k, v in spd_cache.items() if k.endswith("hook_component_acts")},
-        attribution_scores=attribution_scores,
-        topk_mask=topk_mask,
-    )
 
 
 DataGenerationType = Literal[

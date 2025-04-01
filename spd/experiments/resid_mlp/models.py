@@ -17,7 +17,7 @@ from spd.configs import ResidualMLPTaskConfig
 from spd.hooks import HookedRootModule
 from spd.log import logger
 from spd.models.base import SPDModel
-from spd.models.components import Linear, LinearComponent
+from spd.models.components import Gate, GateMLP, Linear, LinearComponent
 from spd.module_utils import init_param_
 from spd.run_spd import Config
 from spd.types import WANDB_PATH_PREFIX, ModelPath
@@ -35,8 +35,6 @@ class MLP(nn.Module):
         act_fn: Callable[[Tensor], Tensor],
         in_bias: bool,
         out_bias: bool,
-        init_scale: float,
-        init_type: Literal["kaiming_uniform", "xavier_normal"] = "kaiming_uniform",
         n_instances: int | None = None,
         spd_kwargs: dict[str, Any] | None = None,
     ):
@@ -51,60 +49,46 @@ class MLP(nn.Module):
                 d_in=d_model,
                 d_out=d_mlp,
                 n_instances=n_instances,
-                init_type=init_type,
-                init_scale=init_scale,
-                C=spd_kwargs["C"],
                 m=spd_kwargs["m"],
             )
             self.mlp_out = LinearComponent(
                 d_in=d_mlp,
                 d_out=d_model,
                 n_instances=n_instances,
-                init_type=init_type,
-                init_scale=init_scale,
-                C=spd_kwargs["C"],
                 m=spd_kwargs["m"],
             )
         else:
-            self.mlp_in = Linear(
-                d_in=d_model,
-                d_out=d_mlp,
-                n_instances=n_instances,
-                init_type=init_type,
-                init_scale=init_scale,
-            )
-            self.mlp_out = Linear(
-                d_in=d_mlp,
-                d_out=d_model,
-                n_instances=n_instances,
-                init_type=init_type,
-                init_scale=init_scale,
-            )
+            self.mlp_in = Linear(d_in=d_model, d_out=d_mlp, n_instances=n_instances)
+            self.mlp_out = Linear(d_in=d_mlp, d_out=d_model, n_instances=n_instances)
 
         self.bias1 = None
         self.bias2 = None
         if in_bias:
             shape = (n_instances, d_mlp) if n_instances is not None else d_mlp
-            self.bias1 = nn.Parameter(torch.zeros(shape))
+            self.bias1 = nn.Parameter(torch.empty(shape))
+            init_param_(self.bias1, fan_val=d_model, nonlinearity="relu")
         if out_bias:
             shape = (n_instances, d_model) if n_instances is not None else d_model
-            self.bias2 = nn.Parameter(torch.zeros(shape))
+            self.bias2 = nn.Parameter(torch.empty(shape))
+            init_param_(self.bias2, fan_val=d_mlp, nonlinearity="linear")
 
     def forward(
         self,
         x: Float[Tensor, "batch ... d_model"],
-        topk_mask: Float[Tensor, "batch ... C"] | None = None,
+        mlp_in_mask: Float[Tensor, "batch ... d_mlp"] | None = None,
+        mlp_out_mask: Float[Tensor, "batch ... d_model"] | None = None,
     ) -> tuple[Float[Tensor, "batch ... d_model"],]:
         """Run a forward pass and cache pre and post activations for each parameter.
 
         Note that we don't need to cache pre activations for the biases. We also don't care about
         the output bias which is always zero.
         """
-        mid_pre_act_fn = self.mlp_in(x, topk_mask=topk_mask)
+        mid_pre_act_fn = self.mlp_in(x, mask=mlp_in_mask)
         if self.bias1 is not None:
             mid_pre_act_fn = mid_pre_act_fn + self.bias1
         mid = self.act_fn(mid_pre_act_fn)
-        out = self.mlp_out(mid, topk_mask=topk_mask)
+
+        out = self.mlp_out(mid, mask=mlp_out_mask)
         if self.bias2 is not None:
             out = out + self.bias2
         return out
@@ -132,7 +116,6 @@ class ResidualMLPConfig(BaseModel):
     apply_output_act_fn: bool
     in_bias: bool
     out_bias: bool
-    init_scale: float = 1.0
 
 
 class ResidualMLPModel(HookedRootModule):
@@ -140,9 +123,9 @@ class ResidualMLPModel(HookedRootModule):
         super().__init__()
         self.config = config
         self.W_E = nn.Parameter(torch.empty(config.n_instances, config.n_features, config.d_embed))
-        init_param_(self.W_E, scale=config.init_scale)
+        init_param_(self.W_E, fan_val=config.n_features, nonlinearity="linear")
         self.W_U = nn.Parameter(torch.empty(config.n_instances, config.d_embed, config.n_features))
-        init_param_(self.W_U, scale=config.init_scale)
+        init_param_(self.W_U, fan_val=config.d_embed, nonlinearity="linear")
 
         assert config.act_fn_name in ["gelu", "relu"]
         self.act_fn = F.gelu if config.act_fn_name == "gelu" else F.relu
@@ -155,7 +138,6 @@ class ResidualMLPModel(HookedRootModule):
                     act_fn=self.act_fn,
                     in_bias=config.in_bias,
                     out_bias=config.out_bias,
-                    init_scale=config.init_scale,
                 )
                 for _ in range(config.n_layers)
             ]
@@ -243,6 +225,8 @@ class ResidualMLPModel(HookedRootModule):
         with open(paths.resid_mlp_train_config) as f:
             resid_mlp_train_config_dict = yaml.safe_load(f)
 
+        resid_mlp_train_config_dict["resid_mlp_config"].pop("init_scale", None)  # Deprecated
+
         with open(paths.label_coeffs) as f:
             label_coeffs = torch.tensor(json.load(f))
 
@@ -279,9 +263,8 @@ class ResidualMLPSPDConfig(BaseModel):
     apply_output_act_fn: bool
     in_bias: bool
     out_bias: bool
-    init_scale: float
-    C: PositiveInt
-    m: PositiveInt | None = None
+    m: PositiveInt
+    n_gate_hidden_neurons: PositiveInt | None = None
     init_type: Literal["kaiming_uniform", "xavier_normal"] = "xavier_normal"
 
 
@@ -294,40 +277,46 @@ class ResidualMLPSPDModel(SPDModel):
         self.config = config
         self.n_features = config.n_features  # Required for backward compatibility
         self.n_instances = config.n_instances  # Required for backward compatibility
-        self.C = config.C  # Required for backward compatibility
+        self.m = config.m
 
         assert config.act_fn_name in ["gelu", "relu"]
         self.act_fn = F.gelu if config.act_fn_name == "gelu" else F.relu
 
         self.W_E = nn.Parameter(torch.empty(config.n_instances, config.n_features, config.d_embed))
         self.W_U = nn.Parameter(torch.empty(config.n_instances, config.d_embed, config.n_features))
-        init_param_(self.W_E, init_type=config.init_type)
-        init_param_(self.W_U, init_type=config.init_type)
+        init_param_(self.W_E, fan_val=config.n_features, nonlinearity="linear")
+        init_param_(self.W_U, fan_val=config.d_embed, nonlinearity="linear")
 
-        self.m = min(config.d_embed, config.d_mlp) if config.m is None else config.m
+        self.layers = nn.ModuleList()
 
-        self.layers = nn.ModuleList(
-            [
+        # Use GateMLP if n_gate_hidden_neurons is provided, otherwise use Gate
+        gate_class = GateMLP if config.n_gate_hidden_neurons is not None else Gate
+        gate_kwargs = {"m": self.m, "n_instances": config.n_instances}
+        if config.n_gate_hidden_neurons is not None:
+            gate_kwargs["n_gate_hidden_neurons"] = config.n_gate_hidden_neurons
+
+        self.gates = nn.ModuleDict()
+        for i in range(config.n_layers):
+            self.layers.append(
                 MLP(
                     n_instances=config.n_instances,
                     d_model=config.d_embed,
                     d_mlp=config.d_mlp,
-                    init_type=config.init_type,
-                    init_scale=config.init_scale,
                     in_bias=config.in_bias,
                     out_bias=config.out_bias,
                     act_fn=self.act_fn,
-                    spd_kwargs={"C": config.C, "m": self.m},
+                    spd_kwargs={"m": self.m},
                 )
-                for _ in range(config.n_layers)
-            ]
-        )
+            )
+            self.gates[f"layers-{i}-mlp_in"] = gate_class(**gate_kwargs)
+            self.gates[f"layers-{i}-mlp_out"] = gate_class(**gate_kwargs)
+
         self.setup()
 
     def forward(
         self,
         x: Float[Tensor, "batch n_instances n_features"],
-        topk_mask: Float[Tensor, "batch n_instances C"] | None = None,
+        masks: dict[str, Float[Tensor, "batch n_instances m"]] | None = None,
     ) -> Float[Tensor, "batch n_instances d_embed"]:
         """
         Returns:
@@ -338,8 +327,12 @@ class ResidualMLPSPDModel(SPDModel):
             self.W_E,
             "batch n_instances n_features, n_instances n_features d_embed -> batch n_instances d_embed",
         )
-        for layer in self.layers:
-            residual = residual + layer(residual, topk_mask)
+        for i, layer in enumerate(self.layers):
+            mlp_in_mask = masks[f"layers.{i}.mlp_in"] if masks is not None else None
+            mlp_out_mask = masks[f"layers.{i}.mlp_out"] if masks is not None else None
+            residual = residual + layer(
+                residual, mlp_in_mask=mlp_in_mask, mlp_out_mask=mlp_out_mask
+            )
         out = einops.einsum(
             residual,
             self.W_U,
@@ -406,13 +399,7 @@ class ResidualMLPSPDModel(SPDModel):
         with open(paths.final_config) as f:
             final_config_dict = yaml.safe_load(f)
 
-        # Old configs didn't have post_relu_act_recon
-        if (
-            "post_relu_act_recon" not in final_config_dict
-            and final_config_dict["act_recon_coeff"] is not None
-        ):
-            final_config_dict["post_relu_act_recon"] = True
-
+        final_config_dict.pop("post_relu_act_recon", None)
         config = Config(**final_config_dict)
 
         with open(paths.resid_mlp_train_config) as f:
@@ -423,7 +410,9 @@ class ResidualMLPSPDModel(SPDModel):
 
         assert isinstance(config.task_config, ResidualMLPTaskConfig)
         resid_mlp_spd_config = ResidualMLPSPDConfig(
-            **resid_mlp_train_config_dict["resid_mlp_config"], C=config.C, m=config.m
+            **resid_mlp_train_config_dict["resid_mlp_config"],
+            m=config.m,
+            n_gate_hidden_neurons=config.n_gate_hidden_neurons,
         )
         model = cls(config=resid_mlp_spd_config)
         params = torch.load(paths.checkpoint, weights_only=True, map_location="cpu")
