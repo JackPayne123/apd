@@ -2,6 +2,7 @@
 Defines a SSModel class that is a wrapper around a llama model from SimpleStories
 """
 
+import fnmatch
 from typing import Any
 
 import torch.nn as nn
@@ -20,9 +21,11 @@ class LinearComponentWithBias(nn.Module):
         super().__init__()
         self.linear_component = linear_component
         self.bias = bias
-        self.mask: Float[Tensor, "batch pos m"] | None = None  # Gets set on sparse forward passes
+        self.mask: Float[Tensor, "... m"] | None = None  # Gets set on sparse forward passes
 
-    def forward(self, x: Float[Tensor, "batch d_in"]) -> Float[Tensor, "batch d_out"]:
+    def forward(self, x: Float[Tensor, "... d_in"]) -> Float[Tensor, "... d_out"]:
+        # Note: We assume bias is added *after* the component multiplication
+        # Also assume input is (batch, seq_len, d_in)
         out = self.linear_component(x, mask=self.mask)
         if self.bias is not None:
             out += self.bias
@@ -45,13 +48,22 @@ def nn_linear_to_components(linear_module: nn.Linear, m: int) -> LinearComponent
     return LinearComponentWithBias(linear_component, bias)
 
 
-# Create LinearComponentWithBias objects for gate_proj in each layer
-def create_gate_proj_components(model: Llama, rank: int) -> dict[str, LinearComponentWithBias]:
+def create_target_components(
+    model: Llama, rank: int, target_module_patterns: list[str]
+) -> dict[str, LinearComponentWithBias]:
+    """Create LinearComponentWithBias objects for nn.Linear modules matching the patterns."""
     components = {}
-    for i in range(len(model.transformer.h)):
-        gate_proj = model.transformer.h[i].mlp.gate_proj
-        module_name = f"model.transformer.h.{i}.mlp.gate_proj"
-        components[module_name] = nn_linear_to_components(gate_proj, m=rank)
+    for name, module in model.named_modules():
+        for pattern in target_module_patterns:
+            if fnmatch.fnmatch(name, pattern):
+                # If a module name matches a pattern, assert it's a Linear layer
+                assert isinstance(module, nn.Linear), (
+                    f"Module '{name}' matched pattern '{pattern}' but is not nn.Linear. "
+                    f"Found type: {type(module)}"
+                )
+                components[name] = nn_linear_to_components(module, m=rank)
+                # Module matched and processed, move to the next module
+                break
     return components
 
 

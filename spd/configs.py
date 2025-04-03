@@ -36,6 +36,18 @@ class ResidualMLPTaskConfig(BaseModel):
     pretrained_model_path: ModelPath  # e.g. wandb:spd-resid-mlp/runs/j9kmavzi
 
 
+class LMTaskConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    task_name: Literal["lm"] = "lm"
+    model_size: str  # e.g. "1.25M"
+    max_seq_len: PositiveInt = 512
+    buffer_size: PositiveInt = 1000
+    dataset_name: str = "lennart-finke/SimpleStories"
+    dataset_split: str = "train"
+    # List of fnmatch patterns for nn.Linear modules to decompose
+    target_module_patterns: list[str] = ["transformer.h.*.mlp.*_proj"]
+
+
 class Config(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
     wandb_project: str | None = None
@@ -68,7 +80,9 @@ class Config(BaseModel):
     unit_norm_matrices: bool = False
     attribution_type: Literal["gradient"] = "gradient"
     n_gate_hidden_neurons: PositiveInt | None = None
-    task_config: TMSTaskConfig | ResidualMLPTaskConfig = Field(..., discriminator="task_name")
+    task_config: TMSTaskConfig | ResidualMLPTaskConfig | LMTaskConfig = Field(
+        ..., discriminator="task_name"
+    )
 
     DEPRECATED_CONFIG_KEYS: ClassVar[list[str]] = []
     RENAMED_CONFIG_KEYS: ClassVar[dict[str, str]] = {}
