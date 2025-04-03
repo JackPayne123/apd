@@ -35,15 +35,7 @@ from spd.utils import (
 )
 from spd.wandb_utils import init_wandb
 
-# Define wandb_available at the module level
-wadb_available = False
-try:
-    import wandb
-
-    wandb.require("core")
-    wandb_available = True
-except ImportError:
-    logger.warning("wandb not installed, skipping wandb related code.")
+wandb.require("core")
 
 
 def get_run_name(
@@ -263,7 +255,7 @@ def optimize_lm(
         if step % config.print_freq == 0 or step == config.steps - 1:
             log_data.update(loss_terms)  # Add individual loss terms for logging
             pbar.set_postfix(log_data)
-            if config.wandb_project and wadb_available:
+            if config.wandb_project:
                 wandb.log(log_data, step=step)
             # Reset loss_terms part of log_data for next interval, keep LR
             log_data = {"lr": step_lr}
@@ -289,7 +281,7 @@ def optimize_lm(
                     config=config,
                     # Add any other necessary args for plotting like tokenizer, sample text?
                 )
-                if config.wandb_project and wadb_available and figures:
+                if config.wandb_project and figures:
                     wandb.log({f"plots/{k}": wandb.Image(v) for k, v in figures.items()}, step=step)
             # model.train() # Set back to train mode if needed
 
@@ -311,7 +303,7 @@ def optimize_lm(
             }
             torch.save(save_payload, checkpoint_path)
             logger.info(f"Saved checkpoint to {checkpoint_path}")
-            if config.wandb_project and wadb_available:
+            if config.wandb_project:
                 wandb.save(str(checkpoint_path), base_path=str(out_dir), policy="now")
 
     logger.info("Finished training loop.")
@@ -322,7 +314,7 @@ def main(
 ) -> None:
     config = load_config(config_path_or_obj, config_model=Config)
 
-    if config.wandb_project and wadb_available:
+    if config.wandb_project:
         config = init_wandb(config, config.wandb_project, sweep_config_path)
 
     set_seed(config.seed)
@@ -370,14 +362,12 @@ def main(
         tokenizer_file_path=None,
         hf_tokenizer_path=model_path,
         split=config.task_config.dataset_split,
-        n_ctx=config.task_config.max_seq_len,  # Use n_ctx as per DatasetConfig
-        is_tokenized=False,  # Assume dataset is tokenized
-        streaming=True,  # Use streaming as per default
+        n_ctx=config.task_config.max_seq_len,
+        is_tokenized=False,
+        streaming=False,
         column_name="story",
-        # Assuming default tokenizer path is okay
     )
-    # Note: SimpleStories dataloader might require specific DDP setup if used.
-    # Assuming single-process for now (ddp_rank=0, ddp_world_size=1)
+
     dataloader, tokenizer = create_data_loader(
         dataset_config=dataset_config,
         batch_size=config.batch_size,
@@ -388,7 +378,6 @@ def main(
     )
     logger.info("Dataset and tokenizer loaded.")
 
-    # --- Freeze Target Model --- #
     logger.info("Freezing target model parameters...")
     for param in ss_model.model.parameters():
         param.requires_grad = False
@@ -402,16 +391,10 @@ def main(
         ss_model.model,
         rank=config.m,
         target_module_patterns=config.task_config.target_module_patterns,
+        device=device,
     )
     logger.info(f"Created {len(components)} components: {list(components.keys())}")
 
-    # Move components to device (their parameters are registered within the LinearComponent)
-    for name, component in components.items():
-        logger.debug(f"Moving component {name} to {device}")
-        component.to(device)
-    logger.info("Components initialized and moved to device.")
-
-    # --- Run Optimization --- #
     logger.info("Starting optimization...")
     optimize_lm(
         model=ss_model,
@@ -425,7 +408,7 @@ def main(
 
     logger.info("Optimization finished.")
 
-    if config.wandb_project and wadb_available:
+    if config.wandb_project:
         wandb.finish()
 
 

@@ -49,7 +49,7 @@ def nn_linear_to_components(linear_module: nn.Linear, m: int) -> LinearComponent
 
 
 def create_target_components(
-    model: Llama, rank: int, target_module_patterns: list[str]
+    model: Llama, rank: int, target_module_patterns: list[str], device: str
 ) -> dict[str, LinearComponentWithBias]:
     """Create LinearComponentWithBias objects for nn.Linear modules matching the patterns."""
     components = {}
@@ -61,7 +61,7 @@ def create_target_components(
                     f"Module '{name}' matched pattern '{pattern}' but is not nn.Linear. "
                     f"Found type: {type(module)}"
                 )
-                components[name] = nn_linear_to_components(module, m=rank)
+                components[name] = nn_linear_to_components(module, m=rank).to(device)
                 # Module matched and processed, move to the next module
                 break
     return components
@@ -74,11 +74,7 @@ class SSModel(nn.Module):
         super().__init__()
         self.model = llama_model
 
-    def forward(
-        self,
-        *args: Any,
-        **kwargs: Any,
-    ) -> Any:
+    def forward(self, *args: Any, **kwargs: Any) -> Any:
         """Regular forward pass of the (target) model."""
         return self.model(*args, **kwargs)
 
@@ -92,20 +88,20 @@ class SSModel(nn.Module):
         """Forward pass with temporary component replacement."""
         old_modules = {}
         for module_name, component in components.items():
-            old_module = get_nested_module_attr(self, module_name)
+            old_module = get_nested_module_attr(self.model, module_name)
             assert old_module is not None
             old_modules[module_name] = old_module
 
             if masks is not None:
                 assert module_name in masks, f"Mask for {module_name} not found"
                 component.mask = masks[module_name]
-            set_nested_module_attr(self, module_name, component)
+            set_nested_module_attr(self.model, module_name, component)
 
         out = self.model(*args, **kwargs)
 
         # Restore the original modules
         for module_name, old_module in old_modules.items():
-            set_nested_module_attr(self, module_name, old_module)
+            set_nested_module_attr(self.model, module_name, old_module)
 
         # Remove the masks attribute from the components
         for component in components.values():
