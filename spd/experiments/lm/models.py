@@ -5,6 +5,7 @@ Defines a SSModel class that is a wrapper around a llama model from SimpleStorie
 from typing import Any
 
 import torch.nn as nn
+from jaxtyping import Float
 from simple_stories_train.models.llama import Llama
 from torch import Tensor
 
@@ -19,9 +20,10 @@ class LinearComponentWithBias(nn.Module):
         super().__init__()
         self.linear_component = linear_component
         self.bias = bias
+        self.mask: Float[Tensor, "batch pos m"] | None = None  # Gets set on sparse forward passes
 
-    def forward(self, x: Tensor) -> Tensor:
-        out = self.linear_component(x)
+    def forward(self, x: Float[Tensor, "batch d_in"]) -> Float[Tensor, "batch d_out"]:
+        out = self.linear_component(x, mask=self.mask)
         if self.bias is not None:
             out += self.bias
         return out
@@ -29,7 +31,7 @@ class LinearComponentWithBias(nn.Module):
 
 def nn_linear_to_components(linear_module: nn.Linear, m: int) -> LinearComponentWithBias:
     """Replace a nn.Linear module with a LinearComponentWithBias module."""
-    d_in, d_out = linear_module.weight.shape
+    d_out, d_in = linear_module.weight.shape
 
     linear_component = LinearComponent(d_in=d_in, d_out=d_out, m=m, n_instances=None)
 
@@ -63,21 +65,38 @@ class SSModel(nn.Module):
     def forward(
         self,
         *args: Any,
-        components: dict[str, LinearComponentWithBias] | None = None,
         **kwargs: Any,
     ) -> Any:
-        if components is None:
-            return self.model(*args, **kwargs)
+        """Regular forward pass of the (target) model."""
+        return self.model(*args, **kwargs)
 
-        old_components = {}
+    def forward_with_components(
+        self,
+        *args: Any,
+        components: dict[str, LinearComponentWithBias],
+        masks: dict[str, Float[Tensor, "batch pos m"]] | None = None,
+        **kwargs: Any,
+    ) -> Any:
+        """Forward pass with temporary component replacement."""
+        old_modules = {}
         for module_name, component in components.items():
-            old_component = get_nested_module_attr(self, module_name)
-            assert old_component is not None
-            old_components[module_name] = old_component
+            old_module = get_nested_module_attr(self, module_name)
+            assert old_module is not None
+            old_modules[module_name] = old_module
+
+            if masks is not None:
+                assert module_name in masks, f"Mask for {module_name} not found"
+                component.mask = masks[module_name]
             set_nested_module_attr(self, module_name, component)
 
         out = self.model(*args, **kwargs)
 
-        for module_name, component in old_components.items():
-            set_nested_module_attr(self, module_name, component)
+        # Restore the original modules
+        for module_name, old_module in old_modules.items():
+            set_nested_module_attr(self, module_name, old_module)
+
+        # Remove the masks attribute from the components
+        for component in components.values():
+            component.mask = None
+
         return out

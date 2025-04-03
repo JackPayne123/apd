@@ -1,4 +1,5 @@
 # %%
+import torch
 from simple_stories_train.models.llama import Llama
 from simple_stories_train.models.model_configs import MODEL_CONFIGS
 from transformers import AutoTokenizer
@@ -21,9 +22,9 @@ model.eval()
 
 ss_model = SSModel(model)
 
-
+m = 17
 # Create components with rank=10 (adjust as needed)
-gate_proj_components = create_gate_proj_components(model, rank=17)
+gate_proj_components = create_gate_proj_components(model, rank=m)
 
 # %%
 # Load tokenizer
@@ -46,9 +47,26 @@ eos_token_id = 1
 # %%
 
 # logits, _ = ss_model.forward(input_ids, components=gate_proj_components)
-logits, _ = ss_model.model(input_ids, targets=targets)
+logits, _ = ss_model.forward(input_ids)
 print("inputs_shape", input_ids.shape)
 print("logits", logits)
 print("logits shape", logits.shape)
 
+logits, _ = ss_model.forward_with_components(input_ids, components=gate_proj_components)
+
+print("Component logits shape", logits.shape)
+print("Component logits", logits)
+
+# Create some dummy masks
+masks = {
+    f"model.transformer.h.{i}.mlp.gate_proj": torch.randn(1, input_ids.shape[-1], m)
+    for i in range(len(model.transformer.h))
+}
+
+logits, _ = ss_model.forward_with_components(
+    input_ids, components=gate_proj_components, masks=masks
+)
+
+print("Masked component logits shape", logits.shape)
+print("Masked component logits", logits)
 # %%
