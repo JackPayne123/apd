@@ -11,7 +11,6 @@ from simple_stories_train.models.llama import Llama
 from torch import Tensor
 
 from spd.models.components import LinearComponent
-from spd.module_utils import get_nested_module_attr, set_nested_module_attr
 
 
 class LinearComponentWithBias(nn.Module):
@@ -48,31 +47,40 @@ def nn_linear_to_components(linear_module: nn.Linear, m: int) -> LinearComponent
     return LinearComponentWithBias(linear_component, bias)
 
 
-def create_target_components(
-    model: Llama, rank: int, target_module_patterns: list[str], device: str
-) -> dict[str, LinearComponentWithBias]:
-    """Create LinearComponentWithBias objects for nn.Linear modules matching the patterns."""
-    components = {}
-    for name, module in model.named_modules():
-        for pattern in target_module_patterns:
-            if fnmatch.fnmatch(name, pattern):
-                # If a module name matches a pattern, assert it's a Linear layer
-                assert isinstance(module, nn.Linear), (
-                    f"Module '{name}' matched pattern '{pattern}' but is not nn.Linear. "
-                    f"Found type: {type(module)}"
-                )
-                components[name] = nn_linear_to_components(module, m=rank).to(device)
-                # Module matched and processed, move to the next module
-                break
-    return components
-
-
+# class SSModel(HookedRootModule):
 class SSModel(nn.Module):
     """Wrapper around a llama model from SimpleStories for running SPD."""
 
-    def __init__(self, llama_model: Llama):
+    def __init__(self, llama_model: Llama, target_module_patterns: list[str], m: int):
         super().__init__()
         self.model = llama_model
+        self.components = self.create_target_components(
+            target_module_patterns=target_module_patterns, m=m
+        )
+        # self.setup()
+
+    def create_target_components(
+        self, target_module_patterns: list[str], m: int
+    ) -> dict[str, LinearComponentWithBias]:
+        """Create target components for the model."""
+        components = {}
+        for name, module in self.model.named_modules():
+            for pattern in target_module_patterns:
+                if fnmatch.fnmatch(name, pattern):
+                    assert isinstance(module, nn.Linear), (
+                        f"Module '{name}' matched pattern '{pattern}' but is not nn.Linear. "
+                        f"Found type: {type(module)}"
+                    )
+                    components[name] = nn_linear_to_components(module, m=m)
+                    break
+        return components
+
+    def to(self, *args: Any, **kwargs: Any) -> "SSModel":
+        """Move the model and components to a device."""
+        self.model.to(*args, **kwargs)
+        for component in self.components.values():
+            component.to(*args, **kwargs)
+        return self
 
     def forward(self, *args: Any, **kwargs: Any) -> Any:
         """Regular forward pass of the (target) model."""
@@ -81,30 +89,29 @@ class SSModel(nn.Module):
     def forward_with_components(
         self,
         *args: Any,
-        components: dict[str, LinearComponentWithBias],
         masks: dict[str, Float[Tensor, "batch pos m"]] | None = None,
         **kwargs: Any,
     ) -> Any:
         """Forward pass with temporary component replacement."""
         old_modules = {}
-        for module_name, component in components.items():
-            old_module = get_nested_module_attr(self.model, module_name)
+        for module_name, component in self.components.items():
+            old_module = self.model.get_submodule(module_name)
             assert old_module is not None
             old_modules[module_name] = old_module
 
             if masks is not None:
                 assert module_name in masks, f"Mask for {module_name} not found"
                 component.mask = masks[module_name]
-            set_nested_module_attr(self.model, module_name, component)
+            self.model.set_submodule(module_name, component)
 
         out = self.model(*args, **kwargs)
 
         # Restore the original modules
         for module_name, old_module in old_modules.items():
-            set_nested_module_attr(self.model, module_name, old_module)
+            self.model.set_submodule(module_name, old_module)
 
         # Remove the masks attribute from the components
-        for component in components.values():
+        for component in self.components.values():
             component.mask = None
 
         return out
