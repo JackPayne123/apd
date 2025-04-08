@@ -91,8 +91,8 @@ def calc_component_acts(
 
 
 def calc_recon_mse_lm(
-    out1: Float[Tensor, "batch seq vocab"],
-    out2: Float[Tensor, "batch seq vocab"],
+    out1: Float[Tensor, "batch pos vocab"],
+    out2: Float[Tensor, "batch pos vocab"],
 ) -> Float[Tensor, ""]:
     """Calculate the Mean Squared Error reconstruction loss for LM logits."""
     assert out1.shape == out2.shape
@@ -100,7 +100,7 @@ def calc_recon_mse_lm(
     return ((out1 - out2) ** 2).sum(dim=-1).mean()
 
 
-def calc_param_match_loss(
+def calc_param_match_loss_lm(
     components: dict[str, LinearComponentWithBias],
     target_model: Llama,
     n_params: int,
@@ -128,7 +128,7 @@ def calc_param_match_loss(
     return param_mse
 
 
-def calc_layerwise_recon_loss(
+def calc_layerwise_recon_loss_lm(
     model: SSModel,
     batch: Float[Tensor, "batch pos"],
     device: str,
@@ -146,6 +146,27 @@ def calc_layerwise_recon_loss(
             loss = calc_recon_mse_lm(modified_out, target_out)
             total_loss += loss
     return total_loss / (n_modified_components * len(masks))
+
+
+def calc_lp_sparsity_loss_lm(
+    relud_masks: dict[str, Float[Tensor, "batch pos m"]], pnorm: float
+) -> Float[Tensor, ""]:
+    """Calculate the Lp sparsity loss on the attributions.
+
+    Args:
+        relud_masks: Dictionary of relu masks for each layer.
+        pnorm: The pnorm to use for the sparsity loss.
+    Returns:
+        The Lp sparsity loss.
+    """
+    # Initialize with zeros matching the shape of first mask
+    total_loss = torch.zeros_like(next(iter(relud_masks.values())))
+
+    for layer_relud_mask in relud_masks.values():
+        total_loss = total_loss + layer_relud_mask**pnorm
+
+    # Sum over the m dimension and mean over the batch and pos dimensions
+    return total_loss.sum(dim=-1).mean(dim=[0, 1])
 
 
 def optimize_lm(
@@ -216,19 +237,6 @@ def optimize_lm(
             data_iter = iter(dataloader)
             batch = next(data_iter)["input_ids"].to(device)
 
-        # # Forward pass with target model
-        # target_cache_filter = lambda k: k.endswith((".hook_pre", ".hook_post")) and any(
-        #     k.startswith("model." + module_name) for module_name in model.components
-        # )
-        # target_out, target_cache = model.run_with_cache(batch, names_filter=target_cache_filter)
-        # I want to do a forward pass on model.model, but applying pre_forward_hooks to each of the
-        # keys in models.components. The pre_forward_hooks should simply cache the activations that
-        # go into each of the components.
-
-        # # Forward pass with all subnetworks
-        # out = model(batch)
-
-        # pre_weight_acts = {k: v for k, v in target_cache.items() if k.endswith("hook_pre")}
         (target_out, _), pre_weight_acts = model.forward_with_pre_forward_cache_hooks(
             batch, module_names=list(model.components.keys())
         )
@@ -256,7 +264,7 @@ def optimize_lm(
         loss_terms = {}
 
         ####### param match loss #######
-        param_match_loss_val = calc_param_match_loss(
+        param_match_loss_val = calc_param_match_loss_lm(
             components=model.components,
             target_model=model.model,
             n_params=n_params,
@@ -267,7 +275,7 @@ def optimize_lm(
 
         ####### layerwise recon loss #######
         if config.layerwise_recon_coeff is not None:
-            layerwise_recon_loss = calc_layerwise_recon_loss(
+            layerwise_recon_loss = calc_layerwise_recon_loss_lm(
                 model=model,
                 batch=batch,
                 device=device,
@@ -282,7 +290,7 @@ def optimize_lm(
             layerwise_random_masks = calc_random_masks(
                 masks=masks, n_random_masks=config.n_random_masks
             )
-            layerwise_random_recon_loss = calc_layerwise_recon_loss(
+            layerwise_random_recon_loss = calc_layerwise_recon_loss_lm(
                 model=model,
                 batch=batch,
                 device=device,
@@ -291,6 +299,11 @@ def optimize_lm(
             )
             total_loss += config.layerwise_random_recon_coeff * layerwise_random_recon_loss
             loss_terms["loss/layerwise_random_reconstruction"] = layerwise_random_recon_loss.item()
+
+        ####### lp sparsity loss #######
+        lp_sparsity_loss = calc_lp_sparsity_loss_lm(relud_masks=relud_masks, pnorm=config.pnorm)
+        total_loss += config.lp_sparsity_coeff * lp_sparsity_loss
+        loss_terms["loss/lp_sparsity_loss"] = lp_sparsity_loss.item()
 
         ####### out recon loss #######
         if config.out_recon_coeff is not None:
@@ -310,20 +323,6 @@ def optimize_lm(
             recon_loss = calc_recon_mse_lm(component_logits, target_logits)
             total_loss += config.out_recon_coeff * recon_loss
             loss_terms["loss/reconstruction"] = recon_loss.item()
-
-        # 2. Sparsity Loss (Lp norm on component parameters)
-        # Note: Using p=config.pnorm. The original optimize used relud_masks from gates.
-        lp_sparsity_loss_val = None
-        if config.lp_sparsity_coeff > 0:
-            lp_norm = torch.tensor(0.0, device=device)
-            for component in model.components.values():
-                # Apply Lp loss to A and B matrices
-                lp_norm += torch.norm(component.linear_component.A, p=config.pnorm)
-                lp_norm += torch.norm(component.linear_component.B, p=config.pnorm)
-
-            lp_sparsity_loss_val = lp_norm
-            total_loss += config.lp_sparsity_coeff * lp_sparsity_loss_val
-            loss_terms[f"loss/sparsity_l{config.pnorm}_params"] = lp_sparsity_loss_val.item()
 
         # # --- Placeholder Losses (Mimicking run_spd.optimize structure) ---
         # masked_recon_loss_val = None
