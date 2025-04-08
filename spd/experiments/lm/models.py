@@ -3,14 +3,16 @@ Defines a SSModel class that is a wrapper around a llama model from SimpleStorie
 """
 
 import fnmatch
+from functools import partial
 from typing import Any
 
+import torch
 import torch.nn as nn
 from jaxtyping import Float
 from simple_stories_train.models.llama import Llama
 from torch import Tensor
 
-from spd.models.components import LinearComponent
+from spd.models.components import Gate, GateMLP, LinearComponent
 
 
 class LinearComponentWithBias(nn.Module):
@@ -51,12 +53,29 @@ def nn_linear_to_components(linear_module: nn.Linear, m: int) -> LinearComponent
 class SSModel(nn.Module):
     """Wrapper around a llama model from SimpleStories for running SPD."""
 
-    def __init__(self, llama_model: Llama, target_module_patterns: list[str], m: int):
+    def __init__(
+        self,
+        llama_model: Llama,
+        target_module_patterns: list[str],
+        m: int,
+        n_gate_hidden_neurons: int | None,
+    ):
         super().__init__()
         self.model = llama_model
         self.components = self.create_target_components(
             target_module_patterns=target_module_patterns, m=m
         )
+
+        # Use GateMLP if n_gate_hidden_neurons is provided, otherwise use Gate
+        gate_class = GateMLP if n_gate_hidden_neurons is not None else Gate
+        gate_kwargs = {"m": m}
+        if n_gate_hidden_neurons is not None:
+            gate_kwargs["n_gate_hidden_neurons"] = n_gate_hidden_neurons
+
+        self.gates = nn.ModuleDict()
+        for name in self.components:
+            self.gates[name.replace(".", "-")] = gate_class(**gate_kwargs)
+
         # self.setup()
 
     def create_target_components(
@@ -80,11 +99,34 @@ class SSModel(nn.Module):
         self.model.to(*args, **kwargs)
         for component in self.components.values():
             component.to(*args, **kwargs)
+        for gate in self.gates.values():
+            gate.to(*args, **kwargs)
         return self
 
     def forward(self, *args: Any, **kwargs: Any) -> Any:
         """Regular forward pass of the (target) model."""
         return self.model(*args, **kwargs)
+
+    def forward_with_component(
+        self,
+        *args: Any,
+        module_name: str,
+        mask: Float[Tensor, "batch pos m"] | None = None,
+        **kwargs: Any,
+    ) -> Any:
+        """Forward pass with a single component replacement."""
+        old_module = self.model.get_submodule(module_name)
+        assert old_module is not None
+
+        component = self.components[module_name]
+        self.model.set_submodule(module_name, component)
+        if mask is not None:
+            component.mask = mask
+
+        out = self.model(*args, **kwargs)
+
+        self.model.set_submodule(module_name, old_module)
+        return out
 
     def forward_with_components(
         self,
@@ -115,3 +157,32 @@ class SSModel(nn.Module):
             component.mask = None
 
         return out
+
+    def forward_with_pre_forward_cache_hooks(
+        self, *args: Any, module_names: list[str], **kwargs: Any
+    ) -> tuple[Any, dict[str, Tensor]]:
+        """Forward pass with caching at in the input to the modules given by `module_names`.
+
+        Args:
+            module_names: List of module names to cache the inputs to.
+        """
+        cache = {}
+
+        def cache_hook(module: nn.Module, input: tuple[Tensor, ...], param_name: str) -> Tensor:
+            cache[param_name] = input[0]
+            return input[0]
+
+        handles: list[torch.utils.hooks.RemovableHandle] = []
+        for module_name in module_names:
+            module = self.model.get_submodule(module_name)
+            assert module is not None
+            handles.append(
+                module.register_forward_pre_hook(partial(cache_hook, param_name=module_name))
+            )
+
+        out = self.forward(*args, **kwargs)
+
+        for handle in handles:
+            handle.remove()
+
+        return out, cache

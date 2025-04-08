@@ -15,7 +15,7 @@ from jaxtyping import Float
 from simple_stories_train.dataloaders import DatasetConfig, create_data_loader
 from simple_stories_train.models.llama import Llama
 from simple_stories_train.models.model_configs import MODEL_CONFIGS
-from torch import Tensor
+from torch import Tensor, nn
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
@@ -25,7 +25,8 @@ from spd.experiments.lm.models import (
     SSModel,
 )
 from spd.log import logger
-from spd.run_spd import _calc_param_mse, get_common_run_name_suffix
+from spd.models.components import Gate, GateMLP
+from spd.run_spd import _calc_param_mse, calc_masks, calc_random_masks, get_common_run_name_suffix
 from spd.utils import (
     get_device,
     get_lr_schedule_fn,
@@ -71,6 +72,24 @@ def lm_plot_results_fn(
     return fig_dict
 
 
+def calc_component_acts(
+    pre_weight_acts: dict[str, Float[Tensor, "... d_in"]],
+    As: dict[str, Float[nn.Parameter, "d_in m"]],
+) -> dict[str, Float[Tensor, "batch m"]]:
+    """Calculate the component acts for each layer. I.e. (pre_weight_acts @ A).
+
+    Args:
+        pre_weight_acts: The activations before each layer in the target model.
+        As: The A matrix at each layer.
+    """
+    component_acts = {}
+    for param_name in pre_weight_acts:
+        component_acts[param_name] = einops.einsum(
+            pre_weight_acts[param_name], As[param_name], "... d_in, ... d_in m -> ... m"
+        )
+    return component_acts
+
+
 def calc_recon_mse_lm(
     out1: Float[Tensor, "batch seq vocab"],
     out2: Float[Tensor, "batch seq vocab"],
@@ -109,6 +128,26 @@ def calc_param_match_loss(
     return param_mse
 
 
+def calc_layerwise_recon_loss(
+    model: SSModel,
+    batch: Float[Tensor, "batch pos"],
+    device: str,
+    masks: list[dict[str, Float[Tensor, "batch pos m"]]],
+    target_out: Float[Tensor, "batch pos vocab"],
+) -> Float[Tensor, ""]:
+    """Calculate the recon loss when augmenting the model one (masked) component at a time."""
+    n_modified_components = len(masks[0])
+    total_loss = torch.tensor(0.0, device=device)
+    for mask_info in masks:
+        for module_name in mask_info:
+            modified_out, _ = model.forward_with_component(
+                batch, module_name=module_name, mask=mask_info[module_name]
+            )
+            loss = calc_recon_mse_lm(modified_out, target_out)
+            total_loss += loss
+    return total_loss / (n_modified_components * len(masks))
+
+
 def optimize_lm(
     model: SSModel,
     config: Config,
@@ -118,6 +157,12 @@ def optimize_lm(
     out_dir: Path | None,
 ) -> None:
     """Run the optimization loop for LM decomposition."""
+
+    # We used "-" instead of "." as module names can't have "." in them
+    gates: dict[str, Gate | GateMLP] = {
+        k.removeprefix("gates.").replace("-", "."): v for k, v in model.gates.items()
+    }  # type: ignore
+
     component_params = []
     param_names_to_optimize = []
     for name, component in model.components.items():
@@ -184,9 +229,12 @@ def optimize_lm(
         # out = model(batch)
 
         # pre_weight_acts = {k: v for k, v in target_cache.items() if k.endswith("hook_pre")}
+        (target_out, _), pre_weight_acts = model.forward_with_pre_forward_cache_hooks(
+            batch, module_names=list(model.components.keys())
+        )
         As = {module_name: v.linear_component.A for module_name, v in model.components.items()}
 
-        # target_component_acts = calc_component_acts(pre_weight_acts=pre_weight_acts, As=As)
+        target_component_acts = calc_component_acts(pre_weight_acts=pre_weight_acts, As=As)
         # attributions = calc_grad_attributions(
         #     target_out=target_out,
         #     pre_weight_acts=pre_weight_acts,
@@ -196,17 +244,18 @@ def optimize_lm(
         # )
         attributions = None
 
-        # masks, relud_masks = calc_masks(
-        #     gates=dates,
-        #     target_component_acts=target_component_acts,
-        #     attributions=attributions,
-        #     detach_inputs=False,
-        # )
+        masks, relud_masks = calc_masks(
+            gates=gates,
+            target_component_acts=target_component_acts,
+            attributions=attributions,
+            detach_inputs=False,
+        )
 
         # --- Calculate Losses --- #
         total_loss = torch.tensor(0.0, device=device)
         loss_terms = {}
 
+        ####### param match loss #######
         param_match_loss_val = calc_param_match_loss(
             components=model.components,
             target_model=model.model,
@@ -216,8 +265,35 @@ def optimize_lm(
         total_loss += config.param_match_coeff * param_match_loss_val
         loss_terms["loss/parameter_matching"] = param_match_loss_val.item()
 
-        # 1. Reconstruction Loss (comparing logits)
-        if config.out_recon_coeff is not None and config.out_recon_coeff > 0:
+        ####### layerwise recon loss #######
+        if config.layerwise_recon_coeff is not None:
+            layerwise_recon_loss = calc_layerwise_recon_loss(
+                model=model,
+                batch=batch,
+                device=device,
+                masks=[masks],
+                target_out=target_out,
+            )
+            total_loss += config.layerwise_recon_coeff * layerwise_recon_loss
+            loss_terms["loss/layerwise_reconstruction"] = layerwise_recon_loss.item()
+
+        ####### layerwise random recon loss #######
+        if config.layerwise_random_recon_coeff is not None:
+            layerwise_random_masks = calc_random_masks(
+                masks=masks, n_random_masks=config.n_random_masks
+            )
+            layerwise_random_recon_loss = calc_layerwise_recon_loss(
+                model=model,
+                batch=batch,
+                device=device,
+                masks=layerwise_random_masks,
+                target_out=target_out,
+            )
+            total_loss += config.layerwise_random_recon_coeff * layerwise_random_recon_loss
+            loss_terms["loss/layerwise_random_reconstruction"] = layerwise_random_recon_loss.item()
+
+        ####### out recon loss #######
+        if config.out_recon_coeff is not None:
             # Get target logits (no gradients needed for target model)
             with torch.no_grad():
                 target_logits, _ = model.forward(batch)
@@ -225,9 +301,8 @@ def optimize_lm(
                 target_logits = target_logits.detach()
 
             # Get component logits
-            component_logits, _ = model.forward_with_components(batch, components=model.components)
+            component_logits, _ = model.forward_with_components(batch, masks=masks)
 
-            # Ensure shapes match (Batch, SeqLen-1, VocabSize)
             assert component_logits.shape == target_logits.shape, (
                 f"Shape mismatch: {component_logits.shape} vs {target_logits.shape}"
             )
@@ -250,51 +325,43 @@ def optimize_lm(
             total_loss += config.lp_sparsity_coeff * lp_sparsity_loss_val
             loss_terms[f"loss/sparsity_l{config.pnorm}_params"] = lp_sparsity_loss_val.item()
 
-        # --- Placeholder Losses (Mimicking run_spd.optimize structure) ---
-        # These require a mechanism for calculating masks specific to the LM setup.
-        masks = None  # Placeholder: Masks are needed for the following losses
-        masked_recon_loss_val = None
-        if config.masked_recon_coeff is not None and config.masked_recon_coeff > 0:
-            logger.warning("masked_recon_loss requires mask calculation implementation.")
-            # TODO: Calculate masked_recon_loss_val using masks
-            # e.g., component_logits_masked = model.forward_with_components(..., masks=masks)
-            #       masked_recon_loss_val = calc_recon_mse_lm(component_logits_masked, target_logits)
-            loss_terms["loss/masked_reconstruction"] = None  # Or 0.0 if calculated
+        # # --- Placeholder Losses (Mimicking run_spd.optimize structure) ---
+        # masked_recon_loss_val = None
+        # if config.masked_recon_coeff is not None and config.masked_recon_coeff > 0:
+        #     logger.warning("masked_recon_loss requires mask calculation implementation.")
+        #     # TODO: Calculate masked_recon_loss_val using masks
+        #     # e.g., component_logits_masked = model.forward_with_components(..., masks=masks)
+        #     #       masked_recon_loss_val = calc_recon_mse_lm(component_logits_masked, target_logits)
+        #     loss_terms["loss/masked_reconstruction"] = None  # Or 0.0 if calculated
 
-        act_recon_loss_val = None
-        if config.act_recon_coeff is not None and config.act_recon_coeff > 0:
-            logger.warning("act_recon_loss requires mask and target activation calculation.")
-            # TODO: Implement act_recon_loss_val
-            loss_terms["loss/activation_reconstruction"] = None
+        # act_recon_loss_val = None
+        # if config.act_recon_coeff is not None and config.act_recon_coeff > 0:
+        #     logger.warning("act_recon_loss requires mask and target activation calculation.")
+        #     # TODO: Implement act_recon_loss_val
+        #     loss_terms["loss/activation_reconstruction"] = None
 
-        random_masks_loss_val = None
-        if config.random_mask_recon_coeff is not None and config.random_mask_recon_coeff > 0:
-            logger.warning("random_masks_loss requires mask calculation implementation.")
-            # TODO: Implement random_masks_loss_val
-            loss_terms["loss/random_mask_reconstruction"] = None
+        # random_masks_loss_val = None
+        # if config.random_mask_recon_coeff is not None and config.random_mask_recon_coeff > 0:
+        #     logger.warning("random_masks_loss requires mask calculation implementation.")
+        #     # TODO: Implement random_masks_loss_val
+        #     loss_terms["loss/random_mask_reconstruction"] = None
 
-        layerwise_recon_loss_val = None
-        if config.layerwise_recon_coeff is not None and config.layerwise_recon_coeff > 0:
-            logger.warning("layerwise_recon_loss requires mask calculation and layerwise hooks.")
-            # TODO: Implement layerwise_recon_loss_val
-            loss_terms["loss/layerwise_reconstruction"] = None
+        # layerwise_recon_loss_val = None
+        # if config.layerwise_recon_coeff is not None and config.layerwise_recon_coeff > 0:
+        #     logger.warning("layerwise_recon_loss requires mask calculation and layerwise hooks.")
+        #     # TODO: Implement layerwise_recon_loss_val
+        #     loss_terms["loss/layerwise_reconstruction"] = None
 
-        layerwise_random_recon_loss_val = None
-        if (
-            config.layerwise_random_recon_coeff is not None
-            and config.layerwise_random_recon_coeff > 0
-        ):
-            logger.warning(
-                "layerwise_random_recon_loss requires mask calculation and layerwise hooks."
-            )
-            # TODO: Implement layerwise_random_recon_loss_val
-            loss_terms["loss/layerwise_random_reconstruction"] = None
-
-        # Add placeholder losses to total_loss if they were calculated (currently they are not)
-        # Example if masked_recon_loss_val was calculated:
-        # if masked_recon_loss_val is not None:
-        #     total_loss += config.masked_recon_coeff * masked_recon_loss_val
-        # Repeat for other placeholder losses...
+        # layerwise_random_recon_loss_val = None
+        # if (
+        #     config.layerwise_random_recon_coeff is not None
+        #     and config.layerwise_random_recon_coeff > 0
+        # ):
+        #     logger.warning(
+        #         "layerwise_random_recon_loss requires mask calculation and layerwise hooks."
+        #     )
+        #     # TODO: Implement layerwise_random_recon_loss_val
+        #     loss_terms["loss/layerwise_random_reconstruction"] = None
 
         log_data["loss/total"] = total_loss.item()
         log_data.update(loss_terms)
@@ -406,6 +473,7 @@ def main(
         llama_model=model,
         target_module_patterns=config.task_config.target_module_patterns,
         m=config.m,
+        n_gate_hidden_neurons=config.n_gate_hidden_neurons,
     )
     ss_model.to(device)
     logger.info("Model loaded.")

@@ -17,7 +17,7 @@ from tqdm import tqdm
 from spd.configs import Config
 from spd.hooks import HookedRootModule
 from spd.models.base import SPDModel
-from spd.models.components import Gate, Linear, LinearComponent
+from spd.models.components import Gate, GateMLP, Linear, LinearComponent
 from spd.module_utils import collect_nested_module_attrs, get_nested_module_attr
 from spd.utils import calc_recon_mse, get_lr_schedule_fn, get_lr_with_warmup
 
@@ -141,7 +141,7 @@ def calc_act_recon_mse(
 
 
 def calc_masks(
-    gates: dict[str, Gate],
+    gates: dict[str, Gate | GateMLP],
     target_component_acts: dict[
         str, Float[Tensor, "batch m"] | Float[Tensor, "batch n_instances m"]
     ],
