@@ -136,7 +136,6 @@ def calc_layerwise_recon_loss_lm(
     target_out: Float[Tensor, "batch pos vocab"],
 ) -> Float[Tensor, ""]:
     """Calculate the recon loss when augmenting the model one (masked) component at a time."""
-    n_modified_components = len(masks[0])
     total_loss = torch.tensor(0.0, device=device)
     for mask_info in masks:
         for module_name in mask_info:
@@ -145,6 +144,7 @@ def calc_layerwise_recon_loss_lm(
             )
             loss = calc_recon_mse_lm(modified_out, target_out)
             total_loss += loss
+    n_modified_components = len(masks[0])
     return total_loss / (n_modified_components * len(masks))
 
 
@@ -323,44 +323,6 @@ def optimize_lm(
             recon_loss = calc_recon_mse_lm(component_logits, target_logits)
             total_loss += config.out_recon_coeff * recon_loss
             loss_terms["loss/reconstruction"] = recon_loss.item()
-
-        # # --- Placeholder Losses (Mimicking run_spd.optimize structure) ---
-        # masked_recon_loss_val = None
-        # if config.masked_recon_coeff is not None and config.masked_recon_coeff > 0:
-        #     logger.warning("masked_recon_loss requires mask calculation implementation.")
-        #     # TODO: Calculate masked_recon_loss_val using masks
-        #     # e.g., component_logits_masked = model.forward_with_components(..., masks=masks)
-        #     #       masked_recon_loss_val = calc_recon_mse_lm(component_logits_masked, target_logits)
-        #     loss_terms["loss/masked_reconstruction"] = None  # Or 0.0 if calculated
-
-        # act_recon_loss_val = None
-        # if config.act_recon_coeff is not None and config.act_recon_coeff > 0:
-        #     logger.warning("act_recon_loss requires mask and target activation calculation.")
-        #     # TODO: Implement act_recon_loss_val
-        #     loss_terms["loss/activation_reconstruction"] = None
-
-        # random_masks_loss_val = None
-        # if config.random_mask_recon_coeff is not None and config.random_mask_recon_coeff > 0:
-        #     logger.warning("random_masks_loss requires mask calculation implementation.")
-        #     # TODO: Implement random_masks_loss_val
-        #     loss_terms["loss/random_mask_reconstruction"] = None
-
-        # layerwise_recon_loss_val = None
-        # if config.layerwise_recon_coeff is not None and config.layerwise_recon_coeff > 0:
-        #     logger.warning("layerwise_recon_loss requires mask calculation and layerwise hooks.")
-        #     # TODO: Implement layerwise_recon_loss_val
-        #     loss_terms["loss/layerwise_reconstruction"] = None
-
-        # layerwise_random_recon_loss_val = None
-        # if (
-        #     config.layerwise_random_recon_coeff is not None
-        #     and config.layerwise_random_recon_coeff > 0
-        # ):
-        #     logger.warning(
-        #         "layerwise_random_recon_loss requires mask calculation and layerwise hooks."
-        #     )
-        #     # TODO: Implement layerwise_random_recon_loss_val
-        #     loss_terms["loss/layerwise_random_reconstruction"] = None
 
         log_data["loss/total"] = total_loss.item()
         log_data.update(loss_terms)
