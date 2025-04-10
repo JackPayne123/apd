@@ -132,15 +132,20 @@ def calc_layerwise_recon_loss_lm(
     model: SSModel,
     batch: Float[Tensor, "batch pos"],
     device: str,
+    components: dict[str, LinearComponentWithBias],
     masks: list[dict[str, Float[Tensor, "batch pos m"]]],
     target_out: Float[Tensor, "batch pos vocab"],
 ) -> Float[Tensor, ""]:
     """Calculate the recon loss when augmenting the model one (masked) component at a time."""
     total_loss = torch.tensor(0.0, device=device)
     for mask_info in masks:
-        for module_name in mask_info:
+        for component_name, component in components.items():
+            module_name = component_name.replace("-", ".")
             modified_out, _ = model.forward_with_component(
-                batch, module_name=module_name, mask=mask_info[module_name]
+                batch,
+                module_name=module_name,
+                component=component,
+                mask=mask_info.get(component_name, None),
             )
             loss = calc_recon_mse_lm(modified_out, target_out)
             total_loss += loss
@@ -183,10 +188,13 @@ def optimize_lm(
     gates: dict[str, Gate | GateMLP] = {
         k.removeprefix("gates.").replace("-", "."): v for k, v in model.gates.items()
     }  # type: ignore
+    components: dict[str, LinearComponentWithBias] = {
+        k.removeprefix("components.").replace("-", "."): v for k, v in model.components.items()
+    }  # type: ignore
 
     component_params = []
     param_names_to_optimize = []
-    for name, component in model.components.items():
+    for name, component in components.items():
         component_params.extend(list(component.parameters()))
         param_names_to_optimize.extend(
             [f"{name}.{p_name}" for p_name, _ in component.named_parameters()]
@@ -204,7 +212,7 @@ def optimize_lm(
     logger.info(f"Base LR scheduler created: {config.lr_schedule}")
 
     n_params = 0
-    for module_name in model.components:
+    for module_name in components:
         weight = model.model.get_parameter(module_name + ".weight")
         n_params += weight.numel()
 
@@ -238,9 +246,9 @@ def optimize_lm(
             batch = next(data_iter)["input_ids"].to(device)
 
         (target_out, _), pre_weight_acts = model.forward_with_pre_forward_cache_hooks(
-            batch, module_names=list(model.components.keys())
+            batch, module_names=list(components.keys())
         )
-        As = {module_name: v.linear_component.A for module_name, v in model.components.items()}
+        As = {module_name: v.linear_component.A for module_name, v in components.items()}
 
         target_component_acts = calc_component_acts(pre_weight_acts=pre_weight_acts, As=As)
         # attributions = calc_grad_attributions(
@@ -265,7 +273,7 @@ def optimize_lm(
 
         ####### param match loss #######
         param_match_loss_val = calc_param_match_loss_lm(
-            components=model.components,
+            components=components,
             target_model=model.model,
             n_params=n_params,
             device=device,
@@ -279,6 +287,7 @@ def optimize_lm(
                 model=model,
                 batch=batch,
                 device=device,
+                components=components,
                 masks=[masks],
                 target_out=target_out,
             )
@@ -294,6 +303,7 @@ def optimize_lm(
                 model=model,
                 batch=batch,
                 device=device,
+                components=components,
                 masks=layerwise_random_masks,
                 target_out=target_out,
             )
@@ -314,7 +324,9 @@ def optimize_lm(
                 target_logits = target_logits.detach()
 
             # Get component logits
-            component_logits, _ = model.forward_with_components(batch, masks=masks)
+            component_logits, _ = model.forward_with_components(
+                batch, components=components, masks=masks
+            )
 
             assert component_logits.shape == target_logits.shape, (
                 f"Shape mismatch: {component_logits.shape} vs {target_logits.shape}"
@@ -349,7 +361,7 @@ def optimize_lm(
             with torch.no_grad():
                 fig_dict = plot_results_fn(
                     model=model,  # Pass the SSModel wrapper
-                    components=model.components,
+                    components=components,
                     step=step,
                     out_dir=out_dir,
                     device=device,
@@ -371,13 +383,9 @@ def optimize_lm(
             (config.save_freq is not None and step % config.save_freq == 0 and step > 0)
             or step == config.steps
         ) and out_dir is not None:
-            checkpoint_dir = out_dir / "checkpoints"
-            checkpoint_dir.mkdir(exist_ok=True)
-            checkpoint_path = checkpoint_dir / f"components_step_{step}.pt"
-            # Save only component state dicts
-            component_state_dicts = {n: c.state_dict() for n, c in model.components.items()}
+            checkpoint_path = out_dir / f"model_{step}.pth"
             save_payload = {
-                "components": component_state_dicts,
+                "model": model.state_dict(),
                 "optimizer": optimizer.state_dict(),
                 "step": step,
                 "config": config.model_dump(mode="json"),

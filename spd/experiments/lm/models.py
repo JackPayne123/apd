@@ -49,7 +49,6 @@ def nn_linear_to_components(linear_module: nn.Linear, m: int) -> LinearComponent
     return LinearComponentWithBias(linear_component, bias)
 
 
-# class SSModel(HookedRootModule):
 class SSModel(nn.Module):
     """Wrapper around a llama model from SimpleStories for running SPD."""
 
@@ -72,17 +71,11 @@ class SSModel(nn.Module):
         if n_gate_hidden_neurons is not None:
             gate_kwargs["n_gate_hidden_neurons"] = n_gate_hidden_neurons
 
-        self.gates = nn.ModuleDict()
-        for name in self.components:
-            self.gates[name.replace(".", "-")] = gate_class(**gate_kwargs)
+        self.gates = nn.ModuleDict({name: gate_class(**gate_kwargs) for name in self.components})
 
-        # self.setup()
-
-    def create_target_components(
-        self, target_module_patterns: list[str], m: int
-    ) -> dict[str, LinearComponentWithBias]:
+    def create_target_components(self, target_module_patterns: list[str], m: int) -> nn.ModuleDict:
         """Create target components for the model."""
-        components = {}
+        components: dict[str, LinearComponentWithBias] = {}
         for name, module in self.model.named_modules():
             for pattern in target_module_patterns:
                 if fnmatch.fnmatch(name, pattern):
@@ -90,9 +83,10 @@ class SSModel(nn.Module):
                         f"Module '{name}' matched pattern '{pattern}' but is not nn.Linear. "
                         f"Found type: {type(module)}"
                     )
-                    components[name] = nn_linear_to_components(module, m=m)
+                    # Replace "." with "-" in the name to avoid issues with module dict keys
+                    components[name.replace(".", "-")] = nn_linear_to_components(module, m=m)
                     break
-        return components
+        return nn.ModuleDict(components)
 
     def to(self, *args: Any, **kwargs: Any) -> "SSModel":
         """Move the model and components to a device."""
@@ -111,14 +105,15 @@ class SSModel(nn.Module):
         self,
         *args: Any,
         module_name: str,
+        component: LinearComponentWithBias,
         mask: Float[Tensor, "batch pos m"] | None = None,
         **kwargs: Any,
     ) -> Any:
         """Forward pass with a single component replacement."""
+        # Note that module_name uses "." separators but self.components use "-" separators
         old_module = self.model.get_submodule(module_name)
         assert old_module is not None
 
-        component = self.components[module_name]
         self.model.set_submodule(module_name, component)
         if mask is not None:
             component.mask = mask
@@ -131,19 +126,22 @@ class SSModel(nn.Module):
     def forward_with_components(
         self,
         *args: Any,
+        components: dict[str, LinearComponentWithBias],
         masks: dict[str, Float[Tensor, "batch pos m"]] | None = None,
         **kwargs: Any,
     ) -> Any:
         """Forward pass with temporary component replacement."""
+        # Note that components and masks uses "-" separators
         old_modules = {}
-        for module_name, component in self.components.items():
+        for component_name, component in components.items():
+            module_name = component_name.replace("-", ".")
+            # component: LinearComponentWithBias = self.components[module_name.replace(".", "-")]
             old_module = self.model.get_submodule(module_name)
             assert old_module is not None
             old_modules[module_name] = old_module
 
             if masks is not None:
-                assert module_name in masks, f"Mask for {module_name} not found"
-                component.mask = masks[module_name]
+                component.mask = masks.get(component_name, None)
             self.model.set_submodule(module_name, component)
 
         out = self.model(*args, **kwargs)
@@ -153,7 +151,7 @@ class SSModel(nn.Module):
             self.model.set_submodule(module_name, old_module)
 
         # Remove the masks attribute from the components
-        for component in self.components.values():
+        for component in components.values():
             component.mask = None
 
         return out
