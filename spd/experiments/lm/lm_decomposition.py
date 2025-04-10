@@ -20,10 +20,7 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 from spd.configs import Config, LMTaskConfig
-from spd.experiments.lm.models import (
-    LinearComponentWithBias,
-    SSModel,
-)
+from spd.experiments.lm.models import LinearComponentWithBias, SSModel
 from spd.log import logger
 from spd.models.components import Gate, GateMLP
 from spd.run_spd import _calc_param_mse, calc_masks, calc_random_masks, get_common_run_name_suffix
@@ -383,17 +380,14 @@ def optimize_lm(
             (config.save_freq is not None and step % config.save_freq == 0 and step > 0)
             or step == config.steps
         ) and out_dir is not None:
-            checkpoint_path = out_dir / f"model_{step}.pth"
-            save_payload = {
-                "model": model.state_dict(),
-                "optimizer": optimizer.state_dict(),
-                "step": step,
-                "config": config.model_dump(mode="json"),
-            }
-            torch.save(save_payload, checkpoint_path)
-            logger.info(f"Saved checkpoint to {checkpoint_path}")
+            torch.save(model.state_dict(), out_dir / f"model_{step}.pth")
+            torch.save(optimizer.state_dict(), out_dir / f"optimizer_{step}.pth")
+            logger.info(f"Saved model, optimizer, and out_dir to {out_dir}")
             if config.wandb_project:
-                wandb.save(str(checkpoint_path), base_path=str(out_dir), policy="now")
+                wandb.save(str(out_dir / f"model_{step}.pth"), base_path=str(out_dir), policy="now")
+                wandb.save(
+                    str(out_dir / f"optimizer_{step}.pth"), base_path=str(out_dir), policy="now"
+                )
 
         # --- Backward Pass & Optimize --- #
         # Skip gradient step if we are at the last step (last step just for plotting and logging)

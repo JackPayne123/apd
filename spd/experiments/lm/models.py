@@ -10,7 +10,9 @@ from typing import Any
 import torch
 import torch.nn as nn
 import wandb
+import yaml
 from jaxtyping import Float
+from pydantic import BaseModel
 from simple_stories_train.models.llama import Llama
 from simple_stories_train.models.model_configs import MODEL_CONFIGS
 from torch import Tensor
@@ -58,6 +60,14 @@ def nn_linear_to_components(linear_module: nn.Linear, m: int) -> LinearComponent
     bias = linear_module.bias.clone() if linear_module.bias is not None else None  # type: ignore
 
     return LinearComponentWithBias(linear_component, bias)
+
+
+class SSModelPaths(BaseModel):
+    """Paths to output files from a SSModel training run."""
+
+    model: Path
+    optimizer: Path
+    config: Path
 
 
 class SSModel(nn.Module):
@@ -196,22 +206,50 @@ class SSModel(nn.Module):
 
         return out, cache
 
+    @staticmethod
+    def _download_wandb_files(wandb_project_run_id: str) -> SSModelPaths:
+        """Download the relevant files from a wandb run."""
+        api = wandb.Api()
+        run: Run = api.run(wandb_project_run_id)
+
+        checkpoint = fetch_latest_wandb_checkpoint(run, prefix="model")
+
+        run_dir = fetch_wandb_run_dir(run.id)
+
+        final_config_path = download_wandb_file(run, run_dir, "final_config.yaml")
+        checkpoint_path = download_wandb_file(run, run_dir, checkpoint.name)
+
+        # Get the step number from the path
+        step = int(Path(checkpoint_path).stem.split("_")[-1])
+
+        return SSModelPaths(
+            model=checkpoint_path,
+            optimizer=download_wandb_file(run, run_dir, f"optimizer_{step}.pth"),
+            config=final_config_path,
+        )
+
     @classmethod
-    def from_pretrained(cls, path: ModelPath) -> tuple["SSModel", Config]:
+    def from_pretrained(cls, path: ModelPath) -> tuple["SSModel", Config, Path]:
         if isinstance(path, str) and path.startswith(WANDB_PATH_PREFIX):
             wandb_path = path.removeprefix(WANDB_PATH_PREFIX)
             api = wandb.Api()
             run: Run = api.run(wandb_path)
-            checkpoint_file_obj = fetch_latest_wandb_checkpoint(run, prefix="model")
-
-            run_dir = fetch_wandb_run_dir(run.id)
-            checkpoint_path = download_wandb_file(run, run_dir, checkpoint_file_obj.name)
+            paths = cls._download_wandb_files(run.id)
+            out_dir = fetch_wandb_run_dir(run.id)
 
         else:
-            checkpoint_path = Path(path)  # local path
+            # Get the step number from the path
+            step = int(Path(path).stem.split("_")[-1])
+            paths = SSModelPaths(
+                model=Path(path),
+                optimizer=Path(path).parent / f"optimizer_{step}.pth",
+                config=Path(path).parent / "final_config.yaml",
+            )
+            out_dir = Path(path).parent
 
-        checkpoint_dict = torch.load(checkpoint_path, map_location="cpu")
-        config = Config(**checkpoint_dict["config"])
+        model_weights = torch.load(paths.model, map_location="cpu", weights_only=True)
+        with open(paths.config) as f:
+            config = Config(**yaml.safe_load(f))
 
         assert isinstance(config.task_config, LMTaskConfig)
         model_config_dict = MODEL_CONFIGS[config.task_config.model_size]
@@ -224,5 +262,5 @@ class SSModel(nn.Module):
             m=config.m,
             n_gate_hidden_neurons=config.n_gate_hidden_neurons,
         )
-        ss_model.load_state_dict(checkpoint_dict["model"])
-        return ss_model, config
+        ss_model.load_state_dict(model_weights)
+        return ss_model, config, out_dir
