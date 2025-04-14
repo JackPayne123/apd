@@ -333,6 +333,17 @@ def init_As_and_Bs_(model: SPDModel, target_model: HookedRootModule) -> None:
         B.data[:] = B.data * m_norms.unsqueeze(-1)
 
 
+def calc_mask_l_zero(
+    masks: dict[str, Float[Tensor, "batch n_instances m"] | Float[Tensor, "batch m"]],
+) -> dict[str, float]:
+    """Calculate the L0 loss on the masks, summed over the m dimension."""
+    mask_l_zero = {}
+    for layer_name, mask in masks.items():
+        mean_dims = tuple(range(mask.ndim - 1))
+        mask_l_zero[layer_name] = (mask != 0.0).float().mean(dim=mean_dims).sum().item()
+    return mask_l_zero
+
+
 def optimize(
     model: SPDModel,
     config: Config,
@@ -523,6 +534,7 @@ def optimize(
 
         # Logging
         if step % config.print_freq == 0:
+            mask_l_zero = calc_mask_l_zero(masks=masks)
             tqdm.write(f"Step {step}")
             tqdm.write(f"Total loss: {loss.item()}")
             tqdm.write(f"lr: {step_lr}")
@@ -536,6 +548,7 @@ def optimize(
                     "pnorm": config.pnorm,
                     "lr": step_lr,
                     "total_loss": loss.item(),
+                    **{"mask_l_zero_" + k: v for k, v in mask_l_zero.items()},
                     **{
                         name: val.mean().item() if val is not None else None
                         for name, (val, _) in loss_terms.items()
