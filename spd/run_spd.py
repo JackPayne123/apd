@@ -337,7 +337,7 @@ def init_As_and_Bs_(model: SPDModel, target_model: HookedRootModule) -> None:
 
 def calc_mask_l_zero(
     masks: dict[str, Float[Tensor, "batch n_instances m"] | Float[Tensor, "batch m"]],
-    cutoff: float = 1e-1,
+    cutoff: float = 1e-2,
 ) -> dict[str, float]:
     """Calculate the L0 loss on the masks, summed over the m dimension."""
     mask_l_zero = {}
