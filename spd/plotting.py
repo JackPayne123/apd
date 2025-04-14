@@ -10,7 +10,7 @@ from torch import Tensor
 
 from spd.hooks import HookedRootModule
 from spd.models.base import SPDModel
-from spd.models.components import Gate
+from spd.models.components import Gate, GateMLP
 from spd.module_utils import collect_nested_module_attrs
 from spd.run_spd import calc_component_acts, calc_masks
 
@@ -48,7 +48,7 @@ def permute_to_identity(
 def plot_mask_vals(
     model: SPDModel,
     target_model: HookedRootModule,
-    gates: dict[str, Gate],
+    gates: dict[str, Gate | GateMLP],
     device: str,
     input_magnitude: float,
 ) -> tuple[plt.Figure, dict[str, Float[Tensor, "n_instances m"]]]:
@@ -146,7 +146,7 @@ def plot_subnetwork_attributions_statistics(
             ax.set_ylabel("Count")
 
         ax.set_xlabel("Number of active subnetworks")
-        ax.set_title(f"Instance {i+1}")
+        ax.set_title(f"Instance {i + 1}")
 
         # Add value annotations on top of each bar
         for bar in bars:
@@ -212,9 +212,9 @@ def plot_AB_matrices(
     # Verify that A and B matrices have matching names
     A_names = set(As.keys())
     B_names = set(Bs.keys())
-    assert (
-        A_names == B_names
-    ), f"A and B matrices must have matching names. Found A: {A_names}, B: {B_names}"
+    assert A_names == B_names, (
+        f"A and B matrices must have matching names. Found A: {A_names}, B: {B_names}"
+    )
 
     n_layers = len(As)
 

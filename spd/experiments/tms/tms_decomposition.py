@@ -20,7 +20,7 @@ from torch import Tensor
 from spd.configs import Config, TMSTaskConfig
 from spd.experiments.tms.models import TMSModel, TMSModelConfig, TMSSPDModel, TMSSPDModelConfig
 from spd.log import logger
-from spd.models.components import Gate
+from spd.models.components import Gate, GateMLP
 from spd.plotting import plot_AB_matrices, plot_mask_vals
 from spd.run_spd import get_common_run_name_suffix, optimize
 from spd.utils import (
@@ -54,7 +54,7 @@ def make_plots(
     out_dir: Path,
     device: str,
     config: Config,
-    gates: dict[str, Gate],
+    gates: dict[str, Gate | GateMLP],
     masks: dict[str, Float[Tensor, "batch n_instances m"]],
     batch: Float[Tensor, "batch n_instances n_features"],
     **_,
