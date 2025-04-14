@@ -98,12 +98,14 @@ def calc_param_match_loss(
 def calc_lp_sparsity_loss(
     relud_masks: dict[str, Float[Tensor, "batch m"] | Float[Tensor, "batch n_instances m"]],
     pnorm: float,
+    eps: float = 1e-8,
 ) -> Float[Tensor, ""] | Float[Tensor, " n_instances"]:
     """Calculate the Lp sparsity loss on the attributions.
 
     Args:
         relud_masks: Dictionary of relu masks for each layer.
         pnorm: The pnorm to use for the sparsity loss.
+        eps: A small epsilon to avoid division by zero when calculating gradients.
     Returns:
         The Lp sparsity loss. Will have an n_instances dimension if the model has an n_instances
             dimension.
@@ -112,7 +114,7 @@ def calc_lp_sparsity_loss(
     total_loss = torch.zeros_like(next(iter(relud_masks.values())))
 
     for layer_relud_mask in relud_masks.values():
-        total_loss = total_loss + layer_relud_mask**pnorm
+        total_loss = total_loss + (layer_relud_mask.abs() + eps).pow(pnorm)
 
     # Sum over the m dimension and mean over the batch dimension
     return total_loss.sum(dim=-1).mean(dim=0)
@@ -171,7 +173,7 @@ def calc_masks(
         if detach_inputs:
             gate_input = gate_input.detach()
         masks[layer_name] = gates[layer_name].forward(gate_input)
-        relud_masks[layer_name] = gates[layer_name].forward_relu(gate_input)
+        relud_masks[layer_name] = gates[layer_name].forward_unclamped(gate_input)
     return masks, relud_masks
 
 
@@ -331,6 +333,18 @@ def init_As_and_Bs_(model: SPDModel, target_model: HookedRootModule) -> None:
         # Scale B by m_norms. We leave A as is since this may get scaled with the unit_norm_matrices
         # config options.
         B.data[:] = B.data * m_norms.unsqueeze(-1)
+
+
+def calc_mask_l_zero(
+    masks: dict[str, Float[Tensor, "batch n_instances m"] | Float[Tensor, "batch m"]],
+    cutoff: float = 1e-1,
+) -> dict[str, float]:
+    """Calculate the L0 loss on the masks, summed over the m dimension."""
+    mask_l_zero = {}
+    for layer_name, mask in masks.items():
+        mean_dims = tuple(range(mask.ndim - 1))
+        mask_l_zero[layer_name] = (mask > cutoff).float().mean(dim=mean_dims).sum().item()
+    return mask_l_zero
 
 
 def optimize(
@@ -523,6 +537,7 @@ def optimize(
 
         # Logging
         if step % config.print_freq == 0:
+            mask_l_zero = calc_mask_l_zero(masks=masks)
             tqdm.write(f"Step {step}")
             tqdm.write(f"Total loss: {loss.item()}")
             tqdm.write(f"lr: {step_lr}")
@@ -536,6 +551,7 @@ def optimize(
                     "pnorm": config.pnorm,
                     "lr": step_lr,
                     "total_loss": loss.item(),
+                    **{"mask_l0_" + k: v for k, v in mask_l_zero.items()},
                     **{
                         name: val.mean().item() if val is not None else None
                         for name, (val, _) in loss_terms.items()
