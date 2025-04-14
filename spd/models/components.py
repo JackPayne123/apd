@@ -59,12 +59,11 @@ class GateMLP(nn.Module):
         out_bias_shape = (n_instances, m) if n_instances is not None else (m,)
 
         self.mlp_in = nn.Parameter(torch.empty(shape))
-        self.in_bias = nn.Parameter(torch.empty(in_bias_shape))
+        self.in_bias = nn.Parameter(torch.zeros(in_bias_shape))
         self.mlp_out = nn.Parameter(torch.empty(shape))
         self.out_bias = nn.Parameter(torch.zeros(out_bias_shape))
 
         init_param_(self.mlp_in, fan_val=1, nonlinearity="relu")
-        init_param_(self.in_bias, fan_val=1, nonlinearity="relu")
         init_param_(self.mlp_out, fan_val=n_gate_hidden_neurons, nonlinearity="linear")
 
     def _compute_pre_activation(
