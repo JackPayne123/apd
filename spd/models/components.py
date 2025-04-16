@@ -10,8 +10,13 @@ from spd.hooks import HookPoint
 from spd.module_utils import init_param_
 
 
-def hard_sigmoid(x: Tensor) -> Tensor:
-    return F.relu(torch.clamp(x, max=1))
+def leaky_relu(x: Tensor, alpha: float = 0.01) -> Tensor:
+    return torch.where(x > 0, x, alpha * x)
+
+
+def double_leaky_relu(x: Tensor, alpha: float = 0.01) -> Tensor:
+    """Small slope in the positive and negative regions."""
+    return torch.where(x > 1, 1 + alpha * (x - 1), leaky_relu(x, alpha))
 
 
 class Gate(nn.Module):
@@ -29,12 +34,12 @@ class Gate(nn.Module):
     def forward(
         self, x: Float[Tensor, "batch m"] | Float[Tensor, "batch n_instances m"]
     ) -> Float[Tensor, "batch m"] | Float[Tensor, "batch n_instances m"]:
-        return hard_sigmoid(x * self.weight + self.bias)
+        return leaky_relu(torch.clamp(x * self.weight + self.bias, max=1))
 
-    def forward_relu(
+    def forward_unclamped(
         self, x: Float[Tensor, "batch m"] | Float[Tensor, "batch n_instances m"]
     ) -> Float[Tensor, "batch m"] | Float[Tensor, "batch n_instances m"]:
-        return F.relu(x * self.weight + self.bias)
+        return double_leaky_relu(x * self.weight + self.bias)
 
 
 class GateMLP(nn.Module):
@@ -59,12 +64,11 @@ class GateMLP(nn.Module):
         out_bias_shape = (n_instances, m) if n_instances is not None else (m,)
 
         self.mlp_in = nn.Parameter(torch.empty(shape))
-        self.in_bias = nn.Parameter(torch.empty(in_bias_shape))
+        self.in_bias = nn.Parameter(torch.zeros(in_bias_shape))
         self.mlp_out = nn.Parameter(torch.empty(shape))
         self.out_bias = nn.Parameter(torch.zeros(out_bias_shape))
 
         init_param_(self.mlp_in, fan_val=1, nonlinearity="relu")
-        init_param_(self.in_bias, fan_val=1, nonlinearity="relu")
         init_param_(self.mlp_out, fan_val=n_gate_hidden_neurons, nonlinearity="linear")
 
     def _compute_pre_activation(
@@ -92,12 +96,12 @@ class GateMLP(nn.Module):
     def forward(
         self, x: Float[Tensor, "batch m"] | Float[Tensor, "batch n_instances m"]
     ) -> Float[Tensor, "batch m"] | Float[Tensor, "batch n_instances m"]:
-        return hard_sigmoid(self._compute_pre_activation(x))
+        return leaky_relu(torch.clamp(self._compute_pre_activation(x), max=1))
 
-    def forward_relu(
+    def forward_unclamped(
         self, x: Float[Tensor, "batch m"] | Float[Tensor, "batch n_instances m"]
     ) -> Float[Tensor, "batch m"] | Float[Tensor, "batch n_instances m"]:
-        return F.relu(self._compute_pre_activation(x))
+        return double_leaky_relu(self._compute_pre_activation(x))
 
 
 class Linear(nn.Module):

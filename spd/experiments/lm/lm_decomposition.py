@@ -23,7 +23,13 @@ from spd.configs import Config, LMTaskConfig
 from spd.experiments.lm.models import LinearComponentWithBias, SSModel
 from spd.log import logger
 from spd.models.components import Gate, GateMLP
-from spd.run_spd import _calc_param_mse, calc_masks, calc_random_masks, get_common_run_name_suffix
+from spd.run_spd import (
+    _calc_param_mse,
+    calc_mask_l_zero,
+    calc_masks,
+    calc_random_masks,
+    get_common_run_name_suffix,
+)
 from spd.utils import (
     get_device,
     get_lr_schedule_fn,
@@ -346,6 +352,9 @@ def optimize_lm(
                     tqdm.write(f"{name}: {value:.7f}")
 
             if config.wandb_project:
+                mask_l_zero = calc_mask_l_zero(masks=masks)
+                for layer_name, layer_mask_l_zero in mask_l_zero.items():
+                    log_data[f"mask_l0/{layer_name}"] = layer_mask_l_zero
                 wandb.log(log_data, step=step)
 
         # --- Plotting --- #
