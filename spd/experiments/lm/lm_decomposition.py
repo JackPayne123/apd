@@ -348,8 +348,10 @@ def optimize_lm(
             if config.wandb_project:
                 mask_l_zero = calc_mask_l_zero(masks=masks)
                 for layer_name, layer_mask_l_zero in mask_l_zero.items():
-                    log_data[f"mask_l0/{layer_name}"] = layer_mask_l_zero
-                log_data["mean_n_active_components_per_token"] = mean_n_active_components_per_token
+                    log_data[f"{layer_name}/mask_l0"] = layer_mask_l_zero
+                    log_data[f"{layer_name}/mean_n_active_components_per_token"] = (
+                        mean_n_active_components_per_token[layer_name]
+                    )
                 wandb.log(log_data, step=step)
 
         # --- Plotting --- #

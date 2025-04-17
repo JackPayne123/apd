@@ -54,6 +54,19 @@ eos_token_id = 1
 
 # %%
 
+# # Generate text
+# with torch.no_grad():
+#     output_ids = model.generate(
+#         idx=input_ids, max_new_tokens=20, temperature=0.7, top_k=40, eos_token_id=eos_token_id
+#     )
+
+# # Decode output
+# output_text = tokenizer.decode(output_ids[0], skip_special_tokens=True)
+# print(f"Generated text:\n{output_text}")
+
+
+# %%
+
 # logits, _ = ss_model.forward(input_ids, components=gate_proj_components)
 logits, _ = ss_model.forward(input_ids)
 print("inputs_shape", input_ids.shape)
