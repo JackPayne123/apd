@@ -82,6 +82,7 @@ class SSModel(nn.Module):
     ):
         super().__init__()
         self.model = llama_model
+        self.m = m
         self.components = self.create_target_components(
             target_module_patterns=target_module_patterns, m=m
         )
@@ -234,7 +235,7 @@ class SSModel(nn.Module):
             wandb_path = path.removeprefix(WANDB_PATH_PREFIX)
             api = wandb.Api()
             run: Run = api.run(wandb_path)
-            paths = cls._download_wandb_files(run.id)
+            paths = cls._download_wandb_files(wandb_path)
             out_dir = fetch_wandb_run_dir(run.id)
 
         else:

@@ -4,7 +4,7 @@ from simple_stories_train.models.llama import Llama
 from simple_stories_train.models.model_configs import MODEL_CONFIGS
 from transformers import AutoTokenizer
 
-from spd.experiments.lm.models import SSModel, create_target_components
+from spd.experiments.lm.models import LinearComponentWithBias, SSModel
 
 # %%
 # Select the model size you want to use
@@ -20,14 +20,20 @@ model = Llama.from_pretrained(model_path, model_config)
 model.eval()
 # %%
 
-ss_model = SSModel(model)
-
-m = 17
-# Create components with rank=10 (adjust as needed)
-gate_proj_components = create_target_components(
-    model, rank=m, target_module_patterns=["model.transformer.h.*.mlp.gate_proj"]
+ss_model = SSModel(
+    llama_model=model,
+    target_module_patterns=["model.transformer.h.*.mlp.gate_proj"],
+    m=17,
+    n_gate_hidden_neurons=None,
 )
 
+# # Create components with rank=10 (adjust as needed)
+# gate_proj_components = create_target_components(
+#     model, rank=m, target_module_patterns=["model.transformer.h.*.mlp.gate_proj"]
+# )
+gate_proj_components: dict[str, LinearComponentWithBias] = {
+    k.removeprefix("components.").replace("-", "."): v for k, v in ss_model.components.items()
+}  # type: ignore
 # %%
 # Load tokenizer
 tokenizer = AutoTokenizer.from_pretrained(model_path, legacy=False)
@@ -61,7 +67,7 @@ print("Component logits", logits)
 
 # Create some dummy masks
 masks = {
-    f"model.transformer.h.{i}.mlp.gate_proj": torch.randn(1, input_ids.shape[-1], m)
+    f"model.transformer.h.{i}.mlp.gate_proj": torch.randn(1, input_ids.shape[-1], ss_model.m)
     for i in range(len(model.transformer.h))
 }
 

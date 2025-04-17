@@ -12,6 +12,7 @@ from torch import Tensor
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
+from spd.configs import LMTaskConfig
 from spd.experiments.lm.lm_decomposition import calc_component_acts
 from spd.experiments.lm.models import LinearComponentWithBias, SSModel
 from spd.log import logger
@@ -38,16 +39,14 @@ def component_activation_statistics(
 
     n_tokens = {module_name.replace("-", "."): 0 for module_name in components}
     total_n_active_components = {module_name.replace("-", "."): 0 for module_name in components}
-    component_activation_counts = {module_name.replace("-", "."): 0 for module_name in components}
+    component_activation_counts = {
+        module_name.replace("-", "."): torch.zeros(model.m, device=device)
+        for module_name in components
+    }
     data_iter = iter(dataloader)
     for _ in tqdm(range(n_steps), ncols=0):
         # --- Get Batch --- #
-        try:
-            batch = next(data_iter)["input_ids"].to(device)
-        except StopIteration:
-            logger.warning("Dataloader exhausted, resetting iterator.")
-            data_iter = iter(dataloader)
-            batch = next(data_iter)["input_ids"].to(device)
+        batch = next(data_iter)["input_ids"].to(device)
 
         _, pre_weight_acts = model.forward_with_pre_forward_cache_hooks(
             batch, module_names=list(components.keys())
@@ -67,12 +66,12 @@ def component_activation_statistics(
             n_tokens[module_name] += mask.shape[0] * mask.shape[1]
             # Count the number of components that are active at all
             active_components = mask > 0
-            total_n_active_components[module_name] += active_components.sum()
+            total_n_active_components[module_name] += int(active_components.sum().item())
             component_activation_counts[module_name] += active_components.sum(dim=(0, 1))
 
     # Show the mean number of components
     mean_n_active_components_per_token: dict[str, float] = {
-        module_name: (total_n_active_components[module_name] / n_tokens[module_name]).item()
+        module_name: (total_n_active_components[module_name] / n_tokens[module_name])
         for module_name in components
     }
     mean_component_activation_counts: dict[str, Float[Tensor, " m"]] = {
@@ -80,24 +79,24 @@ def component_activation_statistics(
         for module_name in components
     }
 
-    print(mean_n_active_components_per_token)
-    print(mean_component_activation_counts)
+    logger.info(f"n_components: {model.m}")
+    logger.info(f"mean_n_active_components_per_token: {mean_n_active_components_per_token}")
+    logger.info(f"mean_component_activation_counts: {mean_component_activation_counts}")
     for module_name, counts in mean_component_activation_counts.items():
         name = module_name.replace(".", "-")
         plt.hist(counts.detach().cpu().numpy(), bins=100)
         plt.savefig(out_dir / f"{name}_mean_component_activation_counts.png")
         print("Saved plot to", out_dir / f"{name}_mean_component_activation_counts.png")
-    print("...")
 
 
 def main(path: ModelPath) -> None:
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    ss_model, config, checkpoint_dict = SSModel.from_pretrained(path)
+    ss_model, config, checkpoint_path = SSModel.from_pretrained(path)
     ss_model.to(device)
 
-    out_dir = Path(checkpoint_dict["out_dir"])
-    out_dir.mkdir(parents=True, exist_ok=True)
+    out_dir = checkpoint_path
 
+    assert isinstance(config.task_config, LMTaskConfig)
     dataset_config = DatasetConfig(
         name=config.task_config.dataset_name,
         tokenizer_file_path=None,
@@ -130,5 +129,5 @@ def main(path: ModelPath) -> None:
 
 
 if __name__ == "__main__":
-    path = "wandb:spd-lm/runs/ttpa8pl5"
+    path = "wandb:spd-lm/runs/fuff71ef"
     main(path)
