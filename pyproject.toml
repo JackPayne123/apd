@@ -21,6 +21,8 @@ dependencies = [
     "python-dotenv",
     "wandb<=0.17.7", # due to https://github.com/wandb/wandb/issues/8248
     "sympy",
+    "streamlit",
+    "streamlit-antd-components",
 ]
 
 [project.optional-dependencies]
