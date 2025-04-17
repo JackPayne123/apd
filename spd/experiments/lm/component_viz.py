@@ -2,7 +2,7 @@
 Vizualises the components of the model.
 """
 
-from pathlib import Path
+import math
 
 import torch
 from jaxtyping import Float
@@ -10,14 +10,12 @@ from matplotlib import pyplot as plt
 from simple_stories_train.dataloaders import DatasetConfig, create_data_loader
 from torch import Tensor
 from torch.utils.data import DataLoader
-from tqdm import tqdm
 
 from spd.configs import LMTaskConfig
-from spd.experiments.lm.lm_decomposition import calc_component_acts
 from spd.experiments.lm.models import LinearComponentWithBias, SSModel
 from spd.log import logger
 from spd.models.components import Gate, GateMLP
-from spd.run_spd import calc_masks
+from spd.run_spd import calc_component_acts, calc_masks
 from spd.types import ModelPath
 
 
@@ -26,8 +24,7 @@ def component_activation_statistics(
     dataloader: DataLoader[Float[Tensor, "batch pos"]],
     n_steps: int,
     device: str,
-    out_dir: Path,
-) -> None:
+) -> tuple[dict[str, float], dict[str, Float[Tensor, " m"]]]:
     """Get the number and strength of the masks over the full dataset."""
     # We used "-" instead of "." as module names can't have "." in them
     gates: dict[str, Gate | GateMLP] = {
@@ -44,7 +41,7 @@ def component_activation_statistics(
         for module_name in components
     }
     data_iter = iter(dataloader)
-    for _ in tqdm(range(n_steps), ncols=0):
+    for _ in range(n_steps):
         # --- Get Batch --- #
         batch = next(data_iter)["input_ids"].to(device)
 
@@ -53,7 +50,7 @@ def component_activation_statistics(
         )
         As = {module_name: v.linear_component.A for module_name, v in components.items()}
 
-        target_component_acts = calc_component_acts(pre_weight_acts=pre_weight_acts, As=As)
+        target_component_acts = calc_component_acts(pre_weight_acts=pre_weight_acts, As=As)  # type: ignore
 
         masks, relud_masks = calc_masks(
             gates=gates,
@@ -79,14 +76,40 @@ def component_activation_statistics(
         for module_name in components
     }
 
-    logger.info(f"n_components: {model.m}")
-    logger.info(f"mean_n_active_components_per_token: {mean_n_active_components_per_token}")
-    logger.info(f"mean_component_activation_counts: {mean_component_activation_counts}")
-    for module_name, counts in mean_component_activation_counts.items():
-        name = module_name.replace(".", "-")
-        plt.hist(counts.detach().cpu().numpy(), bins=100)
-        plt.savefig(out_dir / f"{name}_mean_component_activation_counts.png")
-        print("Saved plot to", out_dir / f"{name}_mean_component_activation_counts.png")
+    return mean_n_active_components_per_token, mean_component_activation_counts
+
+
+def plot_mean_component_activation_counts(
+    mean_component_activation_counts: dict[str, Float[Tensor, " m"]],
+) -> plt.Figure:
+    """Plots the mean activation counts for each component module in a grid."""
+    n_modules = len(mean_component_activation_counts)
+    max_cols = 6
+    n_cols = min(n_modules, max_cols)
+    # Calculate the number of rows needed, rounding up
+    n_rows = math.ceil(n_modules / n_cols)
+
+    # Create a figure with the calculated number of rows and columns
+    fig, axs = plt.subplots(n_rows, n_cols, figsize=(5 * n_cols, 5 * n_rows), squeeze=False)
+    # Ensure axs is always a 2D array for consistent indexing, even if n_modules is 1
+    axs = axs.flatten()  # Flatten the axes array for easy iteration
+
+    # Iterate through modules and plot each histogram on its corresponding axis
+    for i, (module_name, counts) in enumerate(mean_component_activation_counts.items()):
+        ax = axs[i]
+        ax.hist(counts.detach().cpu().numpy(), bins=100)
+        ax.set_title(module_name)  # Add module name as title to each subplot
+        ax.set_xlabel("Mean Activation Count")
+        ax.set_ylabel("Frequency")
+
+    # Hide any unused subplots if the grid isn't perfectly filled
+    for i in range(n_modules, n_rows * n_cols):
+        axs[i].axis("off")
+
+    # Adjust layout to prevent overlapping titles/labels
+    fig.tight_layout()
+
+    return fig
 
 
 def main(path: ModelPath) -> None:
@@ -101,7 +124,7 @@ def main(path: ModelPath) -> None:
         name=config.task_config.dataset_name,
         tokenizer_file_path=None,
         hf_tokenizer_path=f"chandan-sreedhara/SimpleStories-{config.task_config.model_size}",
-        split=config.task_config.dataset_split,
+        split=config.task_config.train_data_split,
         n_ctx=config.task_config.max_seq_len,
         is_tokenized=False,
         streaming=False,
@@ -119,15 +142,26 @@ def main(path: ModelPath) -> None:
     # print(ss_model)
     print(config)
 
-    component_activation_statistics(
-        model=ss_model,
-        dataloader=dataloader,
-        n_steps=100,
-        device=device,
-        out_dir=out_dir,
+    mean_n_active_components_per_token, mean_component_activation_counts = (
+        component_activation_statistics(
+            model=ss_model,
+            dataloader=dataloader,
+            n_steps=100,
+            device=device,
+        )
     )
+    logger.info(f"n_components: {ss_model.m}")
+    logger.info(f"mean_n_active_components_per_token: {mean_n_active_components_per_token}")
+    logger.info(f"mean_component_activation_counts: {mean_component_activation_counts}")
+    fig = plot_mean_component_activation_counts(
+        mean_component_activation_counts=mean_component_activation_counts,
+    )
+    # Save the entire figure once
+    save_path = out_dir / "modules_mean_component_activation_counts.png"
+    fig.savefig(save_path)
+    logger.info(f"Saved combined plot to {str(save_path)}")
 
 
 if __name__ == "__main__":
-    path = "wandb:spd-lm/runs/fuff71ef"
+    path = "wandb:spd-lm/runs/hmjepm9b"
     main(path)

@@ -13,7 +13,7 @@ m: 10000 # Rank of the decomposition / number of components per layer
 # Set coeffs to null if the loss shouldn't be computed
 param_match_coeff: 1.0
 out_recon_coeff: 0.0 # Reconstruction loss based on output logits (MSE)
-lp_sparsity_coeff: 1e-3 # Coefficient for Lp sparsity loss (applied to component params A & B)
+lp_sparsity_coeff: 1e-1 # Coefficient for Lp sparsity loss (applied to component params A & B)
 pnorm: 2.0 # p-value for the Lp sparsity norm
 layerwise_random_recon_coeff: 1 # Layer-wise reconstruction loss with random masks
 
@@ -27,8 +27,8 @@ n_random_masks: 1 # Number of random masks if random_mask_recon_coeff is used
 n_gate_hidden_neurons: null # Not applicable as there are no gates currently
 
 # --- Training ---
-batch_size: 8 # Adjust based on GPU memory
-steps: 1000 # Total training steps
+batch_size: 4 # Adjust based on GPU memory
+steps: 10_000 # Total training steps
 lr: 1e-3 # Learning rate
 lr_schedule: cosine # LR schedule type (constant, linear, cosine, exponential)
 lr_warmup_pct: 0.01 # Percentage of steps for linear LR warmup
@@ -48,9 +48,11 @@ task_config:
   max_seq_len: 512 # Maximum sequence length for truncation/padding
   buffer_size: 1000 # Buffer size for streaming dataset shuffling
   dataset_name: "lennart-finke/SimpleStories" # HuggingFace dataset name
-  dataset_split: "train" # Dataset split to use
+  train_data_split: "train" # Dataset split to use
+  eval_data_split: "test" # Dataset split to use
+  n_eval_steps: 100 # Number of evaluation steps
   # List of fnmatch patterns for nn.Linear modules to decompose
-  target_module_patterns: ["transformer.h.2.mlp.gate_proj"]
+  target_module_patterns: ["transformer.h.0.mlp.gate_proj"]
   # Example: Decompose only gate_proj: ["transformer.h.*.mlp.gate_proj"]
   # Example: Decompose gate_proj and up_proj: ["transformer.h.*.mlp.gate_proj", "transformer.h.*.mlp.up_proj"]
   # Example: Decompose all MLP layers: ["transformer.h.*.mlp.*_proj"] 

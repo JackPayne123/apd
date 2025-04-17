@@ -15,16 +15,21 @@ from jaxtyping import Float
 from simple_stories_train.dataloaders import DatasetConfig, create_data_loader
 from simple_stories_train.models.llama import Llama
 from simple_stories_train.models.model_configs import MODEL_CONFIGS
-from torch import Tensor, nn
+from torch import Tensor
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 from spd.configs import Config, LMTaskConfig
+from spd.experiments.lm.component_viz import (
+    component_activation_statistics,
+    plot_mean_component_activation_counts,
+)
 from spd.experiments.lm.models import LinearComponentWithBias, SSModel
 from spd.log import logger
 from spd.models.components import Gate, GateMLP
 from spd.run_spd import (
     _calc_param_mse,
+    calc_component_acts,
     calc_mask_l_zero,
     calc_masks,
     calc_random_masks,
@@ -73,24 +78,6 @@ def lm_plot_results_fn(
     # Example: Potentially plot A/B matrix norms or sparsity patterns?
     # fig_dict["component_norms"] = plot_component_norms(components, out_dir, step)
     return fig_dict
-
-
-def calc_component_acts(
-    pre_weight_acts: dict[str, Float[Tensor, "... d_in"]],
-    As: dict[str, Float[nn.Parameter, "d_in m"]],
-) -> dict[str, Float[Tensor, "batch m"]]:
-    """Calculate the component acts for each layer. I.e. (pre_weight_acts @ A).
-
-    Args:
-        pre_weight_acts: The activations before each layer in the target model.
-        As: The A matrix at each layer.
-    """
-    component_acts = {}
-    for param_name in pre_weight_acts:
-        component_acts[param_name] = einops.einsum(
-            pre_weight_acts[param_name], As[param_name], "... d_in, ... d_in m -> ... m"
-        )
-    return component_acts
 
 
 def calc_recon_mse_lm(
@@ -181,7 +168,9 @@ def optimize_lm(
     model: SSModel,
     config: Config,
     device: str,
-    dataloader: DataLoader[tuple[Float[Tensor, "batch pos"], Float[Tensor, "batch pos"]]],
+    train_loader: DataLoader[Float[Tensor, "batch pos"]],
+    eval_loader: DataLoader[Float[Tensor, "batch pos"]],
+    n_eval_steps: int,
     plot_results_fn: Callable[..., dict[str, plt.Figure]],
     out_dir: Path | None,
 ) -> None:
@@ -220,7 +209,7 @@ def optimize_lm(
         n_params += weight.numel()
 
     log_data = {}
-    data_iter = iter(dataloader)
+    data_iter = iter(train_loader)
 
     # Use tqdm directly in the loop, iterate one extra step for final logging/plotting/saving
     for step in tqdm(range(config.steps + 1), ncols=0):
@@ -245,7 +234,7 @@ def optimize_lm(
             batch = next(data_iter)["input_ids"].to(device)
         except StopIteration:
             logger.warning("Dataloader exhausted, resetting iterator.")
-            data_iter = iter(dataloader)
+            data_iter = iter(train_loader)
             batch = next(data_iter)["input_ids"].to(device)
 
         (target_out, _), pre_weight_acts = model.forward_with_pre_forward_cache_hooks(
@@ -253,7 +242,7 @@ def optimize_lm(
         )
         As = {module_name: v.linear_component.A for module_name, v in components.items()}
 
-        target_component_acts = calc_component_acts(pre_weight_acts=pre_weight_acts, As=As)
+        target_component_acts = calc_component_acts(pre_weight_acts=pre_weight_acts, As=As)  # type: ignore
         # attributions = calc_grad_attributions(
         #     target_out=target_out,
         #     pre_weight_acts=pre_weight_acts,
@@ -351,10 +340,16 @@ def optimize_lm(
                 if value is not None:
                     tqdm.write(f"{name}: {value:.7f}")
 
+            mean_n_active_components_per_token = component_activation_statistics(
+                model=model, dataloader=eval_loader, n_steps=n_eval_steps, device=device
+            )[0]
+            tqdm.write(f"Mean n active components per token: {mean_n_active_components_per_token}")
+
             if config.wandb_project:
                 mask_l_zero = calc_mask_l_zero(masks=masks)
                 for layer_name, layer_mask_l_zero in mask_l_zero.items():
                     log_data[f"mask_l0/{layer_name}"] = layer_mask_l_zero
+                log_data["mean_n_active_components_per_token"] = mean_n_active_components_per_token
                 wandb.log(log_data, step=step)
 
         # --- Plotting --- #
@@ -373,6 +368,14 @@ def optimize_lm(
                     device=device,
                     config=config,
                     # Add any other necessary args for plotting like tokenizer, sample text?
+                )
+                mean_component_activation_counts = component_activation_statistics(
+                    model=model, dataloader=eval_loader, n_steps=n_eval_steps, device=device
+                )[1]
+                fig_dict["mean_component_activation_counts"] = (
+                    plot_mean_component_activation_counts(
+                        mean_component_activation_counts=mean_component_activation_counts,
+                    )
                 )
                 if config.wandb_project:
                     wandb.log(
@@ -472,25 +475,45 @@ def main(
 
     # --- Load Data --- #
     logger.info("Loading dataset...")
-    dataset_config = DatasetConfig(
+    train_data_config = DatasetConfig(
         name=config.task_config.dataset_name,
         tokenizer_file_path=None,
         hf_tokenizer_path=model_path,
-        split=config.task_config.dataset_split,
+        split=config.task_config.train_data_split,
         n_ctx=config.task_config.max_seq_len,
         is_tokenized=False,
         streaming=False,
         column_name="story",
     )
 
-    dataloader, tokenizer = create_data_loader(
-        dataset_config=dataset_config,
+    train_loader, tokenizer = create_data_loader(
+        dataset_config=train_data_config,
         batch_size=config.batch_size,
         buffer_size=config.task_config.buffer_size,
         global_seed=config.seed,
         ddp_rank=0,
         ddp_world_size=1,
     )
+
+    eval_data_config = DatasetConfig(
+        name=config.task_config.dataset_name,
+        tokenizer_file_path=None,
+        hf_tokenizer_path=model_path,
+        split=config.task_config.eval_data_split,
+        n_ctx=config.task_config.max_seq_len,
+        is_tokenized=False,
+        streaming=False,
+        column_name="story",
+    )
+    eval_loader, _ = create_data_loader(
+        dataset_config=eval_data_config,
+        batch_size=config.batch_size,
+        buffer_size=config.task_config.buffer_size,
+        global_seed=config.seed,
+        ddp_rank=0,
+        ddp_world_size=1,
+    )
+
     logger.info("Dataset and tokenizer loaded.")
 
     logger.info("Freezing target model parameters...")
@@ -503,7 +526,9 @@ def main(
         model=ss_model,
         config=config,
         device=device,
-        dataloader=dataloader,
+        train_loader=train_loader,
+        eval_loader=eval_loader,
+        n_eval_steps=config.task_config.n_eval_steps,
         out_dir=out_dir,
         plot_results_fn=lm_plot_results_fn,
     )

@@ -43,7 +43,9 @@ class LMTaskConfig(BaseModel):
     max_seq_len: PositiveInt = 512
     buffer_size: PositiveInt = 1000
     dataset_name: str = "lennart-finke/SimpleStories"
-    dataset_split: str = "train"
+    train_data_split: str = "train"
+    eval_data_split: str = "test"
+    n_eval_steps: PositiveInt = 100
     # List of fnmatch patterns for nn.Linear modules to decompose
     target_module_patterns: list[str] = ["transformer.h.*.mlp.*_proj"]
 
