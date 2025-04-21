@@ -45,6 +45,7 @@ def fetch_wandb_run_dir(run_id: str) -> Path:
     """
     # Default to REPO_ROOT/wandb if SPD_CACHE_DIR not set
     base_cache_dir = Path(os.environ.get("SPD_CACHE_DIR", REPO_ROOT / "wandb"))
+    base_cache_dir.mkdir(parents=True, exist_ok=True)
 
     # Set default wandb_run_dir
     wandb_run_dir = base_cache_dir / run_id / "files"
