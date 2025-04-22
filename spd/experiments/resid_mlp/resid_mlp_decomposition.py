@@ -23,7 +23,7 @@ from spd.experiments.resid_mlp.models import (
 )
 from spd.experiments.resid_mlp.resid_mlp_dataset import ResidualMLPDataset
 from spd.log import logger
-from spd.models.components import Gate
+from spd.models.components import Gate, GateMLP
 from spd.plotting import plot_AB_matrices, plot_mask_vals
 from spd.run_spd import get_common_run_name_suffix, optimize
 from spd.utils import (
@@ -107,7 +107,7 @@ def resid_mlp_plot_results_fn(
     out_dir: Path | None,
     device: str,
     config: Config,
-    gates: dict[str, Gate],
+    gates: dict[str, Gate | GateMLP],
     masks: dict[str, Float[Tensor, "batch_size m"]] | None,
     **_,
 ) -> dict[str, plt.Figure]:
@@ -161,9 +161,9 @@ def init_spd_model_from_target_model(
     for i in range(target_model.config.n_layers):
         # For mlp_in, m must equal d_mlp
         # TODO: This is broken, we shouldn't need m=d_mlp for this function.
-        assert (
-            m == target_model.config.d_mlp or m == target_model.config.d_embed
-        ), "m must be equal to d_mlp or d_embed"
+        assert m == target_model.config.d_mlp or m == target_model.config.d_embed, (
+            "m must be equal to d_mlp or d_embed"
+        )
 
         # For mlp_in: A = target weights, B = identity
         model.layers[i].mlp_in.A.data[:] = target_model.layers[i].mlp_in.weight.data.clone()
