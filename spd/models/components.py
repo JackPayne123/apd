@@ -14,9 +14,9 @@ def leaky_relu(x: Tensor, alpha: float = 0.01) -> Tensor:
     return torch.where(x > 0, x, alpha * x)
 
 
-def double_leaky_relu(x: Tensor, alpha: float = 0.01) -> Tensor:
+def upper_leaky_relu(x: Tensor, alpha: float = 0.01) -> Tensor:
     """Small slope in the positive and negative regions."""
-    return torch.where(x > 1, 1 + alpha * (x - 1), leaky_relu(x, alpha))
+    return torch.where(x > 1, 1 + alpha * (x - 1), F.relu(x))
 
 
 class Gate(nn.Module):
@@ -39,7 +39,7 @@ class Gate(nn.Module):
     def forward_unclamped(
         self, x: Float[Tensor, "batch m"] | Float[Tensor, "batch n_instances m"]
     ) -> Float[Tensor, "batch m"] | Float[Tensor, "batch n_instances m"]:
-        return double_leaky_relu(x * self.weight + self.bias)
+        return upper_leaky_relu(x * self.weight + self.bias)
 
 
 class GateMLP(nn.Module):
@@ -101,7 +101,7 @@ class GateMLP(nn.Module):
     def forward_unclamped(
         self, x: Float[Tensor, "batch m"] | Float[Tensor, "batch n_instances m"]
     ) -> Float[Tensor, "batch m"] | Float[Tensor, "batch n_instances m"]:
-        return double_leaky_relu(self._compute_pre_activation(x))
+        return upper_leaky_relu(self._compute_pre_activation(x))
 
 
 class Linear(nn.Module):
