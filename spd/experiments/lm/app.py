@@ -79,7 +79,7 @@ def initialize(model_path: ModelPath) -> AppData:
         split=task_config.eval_data_split,
         n_ctx=task_config.max_seq_len,
         is_tokenized=False,
-        streaming=False,  # Non-streaming might be simpler for iterator reset
+        streaming=True,
         column_name="story",
     )
 

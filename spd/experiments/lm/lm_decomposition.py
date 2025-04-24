@@ -484,7 +484,7 @@ def main(
         split=config.task_config.train_data_split,
         n_ctx=config.task_config.max_seq_len,
         is_tokenized=False,
-        streaming=False,
+        streaming=True,
         column_name="story",
     )
 
@@ -504,7 +504,7 @@ def main(
         split=config.task_config.eval_data_split,
         n_ctx=config.task_config.max_seq_len,
         is_tokenized=False,
-        streaming=False,
+        streaming=True,
         column_name="story",
     )
     eval_loader, _ = create_data_loader(
