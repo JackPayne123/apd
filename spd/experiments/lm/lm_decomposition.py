@@ -8,6 +8,7 @@ import einops
 import fire
 import matplotlib.pyplot as plt
 import torch
+import torch.nn.functional as F
 import torch.optim as optim
 import wandb
 import yaml
@@ -90,6 +91,18 @@ def calc_recon_mse_lm(
     return ((out1 - out2) ** 2).sum(dim=-1).mean()
 
 
+def calc_kl_divergence_lm(
+    pred: Float[Tensor, "batch pos vocab"],
+    target: Float[Tensor, "batch pos vocab"],
+) -> Float[Tensor, ""]:
+    """Calculate the KL divergence between two logits."""
+    assert pred.shape == target.shape
+    log_q = torch.log_softmax(pred, dim=-1)  # log Q
+    p = torch.softmax(target, dim=-1)  # P
+    kl = F.kl_div(log_q, p, reduction="none")  # P · (log P − log Q)
+    return kl.sum(dim=-1).mean()  # Σ_vocab / (batch·seq)
+
+
 def calc_param_match_loss_lm(
     components: dict[str, LinearComponentWithBias],
     target_model: Llama,
@@ -137,7 +150,7 @@ def calc_layerwise_recon_loss_lm(
                 component=component,
                 mask=mask_info.get(component_name, None),
             )
-            loss = calc_recon_mse_lm(modified_out, target_out)
+            loss = calc_kl_divergence_lm(pred=modified_out, target=target_out)
             total_loss += loss
     n_modified_components = len(masks[0])
     return total_loss / (n_modified_components * len(masks))
