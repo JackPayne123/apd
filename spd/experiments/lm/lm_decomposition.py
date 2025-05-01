@@ -1,6 +1,5 @@
 """Language Model decomposition script."""
 
-from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
 
@@ -63,21 +62,20 @@ def get_run_name(
     return config.wandb_run_name_prefix + run_suffix
 
 
-def lm_plot_results_fn(
+def plot_lm_results(
     model: SSModel,
-    components: dict[str, LinearComponentWithBias],
-    step: int | None,
-    out_dir: Path | None,
+    eval_loader: DataLoader[Float[Tensor, "batch pos"]],
+    n_eval_steps: int,
     device: str,
-    config: Config,
-    **_,
 ) -> dict[str, plt.Figure]:
-    """Plotting function for LM decomposition. Placeholder for now."""
-    # TODO: Implement actual plotting (e.g., component matrix values?)
-    logger.info(f"Plotting results at step {step}...")
+    """Plotting function for LM decomposition."""
     fig_dict: dict[str, plt.Figure] = {}
-    # Example: Potentially plot A/B matrix norms or sparsity patterns?
-    # fig_dict["component_norms"] = plot_component_norms(components, out_dir, step)
+    mean_component_activation_counts = component_activation_statistics(
+        model=model, dataloader=eval_loader, n_steps=n_eval_steps, device=device
+    )[1]
+    fig_dict["mean_component_activation_counts"] = plot_mean_component_activation_counts(
+        mean_component_activation_counts=mean_component_activation_counts,
+    )
     return fig_dict
 
 
@@ -184,7 +182,6 @@ def optimize_lm(
     train_loader: DataLoader[Float[Tensor, "batch pos"]],
     eval_loader: DataLoader[Float[Tensor, "batch pos"]],
     n_eval_steps: int,
-    plot_results_fn: Callable[..., dict[str, plt.Figure]],
     out_dir: Path | None,
 ) -> None:
     """Run the optimization loop for LM decomposition."""
@@ -375,23 +372,13 @@ def optimize_lm(
         ):
             logger.info(f"Step {step}: Generating plots...")
             with torch.no_grad():
-                fig_dict = plot_results_fn(
-                    model=model,  # Pass the SSModel wrapper
-                    components=components,
-                    step=step,
-                    out_dir=out_dir,
+                fig_dict = plot_lm_results(
+                    model=model,
+                    eval_loader=eval_loader,
+                    n_eval_steps=n_eval_steps,
                     device=device,
-                    config=config,
-                    # Add any other necessary args for plotting like tokenizer, sample text?
                 )
-                mean_component_activation_counts = component_activation_statistics(
-                    model=model, dataloader=eval_loader, n_steps=n_eval_steps, device=device
-                )[1]
-                fig_dict["mean_component_activation_counts"] = (
-                    plot_mean_component_activation_counts(
-                        mean_component_activation_counts=mean_component_activation_counts,
-                    )
-                )
+
                 if config.wandb_project:
                     wandb.log(
                         {k: wandb.Image(v) for k, v in fig_dict.items()},
@@ -545,7 +532,6 @@ def main(
         eval_loader=eval_loader,
         n_eval_steps=config.task_config.n_eval_steps,
         out_dir=out_dir,
-        plot_results_fn=lm_plot_results_fn,
     )
 
     logger.info("Optimization finished.")
