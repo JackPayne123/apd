@@ -410,11 +410,12 @@ def optimize_lm(
 
             if step % config.print_freq == 0 and config.wandb_project:
                 # Calculate gradient norm
-                grad_norm: float = 0.0
+                grad_norm: Float[Tensor, ""] = torch.zeros((), device=device)
                 for param in model.parameters():
                     if param.grad is not None:
-                        grad_norm += param.grad.data.norm()  # type: ignore
-                wandb.log({"grad_norm": grad_norm}, step=step)
+                        grad_norm += param.grad.data.flatten().pow(2).sum()  # type: ignore
+                grad_norm_val = grad_norm.sqrt().item()
+                wandb.log({"grad_norm": grad_norm_val}, step=step)
 
             if config.unit_norm_matrices:
                 model.fix_normalized_adam_gradients()
