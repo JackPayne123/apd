@@ -98,6 +98,7 @@ def plot_mean_component_activation_counts(
     for i, (module_name, counts) in enumerate(mean_component_activation_counts.items()):
         ax = axs[i]
         ax.hist(counts.detach().cpu().numpy(), bins=100)
+        ax.set_yscale("log")
         ax.set_title(module_name)  # Add module name as title to each subplot
         ax.set_xlabel("Mean Activation Count")
         ax.set_ylabel("Frequency")
