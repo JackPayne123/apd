@@ -362,11 +362,24 @@ def optimize_lm(
             )
             target_ce_loss = F.cross_entropy(input=target_logits, target=flat_batch)
 
+            # --- CE when every component is fully masked (all-zero masks) --- #
+            zero_masks = {k: torch.zeros_like(v) for k, v in masks.items()}
+            zero_masked_component_logits, _ = model.forward_with_components(
+                batch, components=components, masks=zero_masks
+            )
+            flat_zero_masked_component_logits = einops.rearrange(
+                zero_masked_component_logits, "batch pos vocab -> (batch pos) vocab"
+            )
+            zero_masked_ce_loss = F.cross_entropy(
+                input=flat_zero_masked_component_logits[:-1], target=flat_batch[1:]
+            )
+
             log_data["misc/unmasked_kl_loss_vs_target"] = unmasked_kl_loss.item()
             log_data["misc/masked_kl_loss_vs_target"] = masked_kl_loss.item()
             log_data["misc/unmasked_ce_loss_vs_labels"] = unmasked_ce_loss.item()
             log_data["misc/masked_ce_loss_vs_labels"] = masked_ce_loss.item()
             log_data["misc/target_ce_loss_vs_labels"] = target_ce_loss.item()
+            log_data["misc/zero_masked_ce_loss_vs_labels"] = zero_masked_ce_loss.item()
 
             if config.wandb_project:
                 mask_l_zero = calc_mask_l_zero(masks=masks)
