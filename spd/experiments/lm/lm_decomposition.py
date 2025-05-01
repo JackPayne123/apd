@@ -334,9 +334,9 @@ def optimize_lm(
                 f"Shape mismatch: {component_logits.shape} vs {target_logits.shape}"
             )
 
-            recon_loss = calc_recon_mse_lm(component_logits, target_logits)
-            total_loss += config.out_recon_coeff * recon_loss
-            loss_terms["loss/reconstruction"] = recon_loss.item()
+            kl_loss = calc_kl_divergence_lm(pred=component_logits, target=target_logits)
+            total_loss += config.out_recon_coeff * kl_loss
+            loss_terms["loss/reconstruction_kl"] = kl_loss.item()
 
         log_data["loss/total"] = total_loss.item()
         log_data.update(loss_terms)
