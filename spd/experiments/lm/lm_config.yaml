@@ -23,7 +23,7 @@ random_mask_recon_coeff: null # Reconstruction loss averaged over random masks
 layerwise_recon_coeff: null # Layer-wise reconstruction loss
 
 n_random_masks: 1 # Number of random masks if random_mask_recon_coeff is used
-n_gate_hidden_neurons: null # Not applicable as there are no gates currently
+n_gate_hidden_neurons: 16
 
 # --- Training ---
 batch_size: 4 # Adjust based on GPU memory
@@ -51,7 +51,8 @@ task_config:
   eval_data_split: "test" # Dataset split to use
   n_eval_steps: 100 # Number of evaluation steps
   # List of fnmatch patterns for nn.Linear modules to decompose
-  target_module_patterns: ["transformer.h.0.mlp.gate_proj"]
+  # target_module_patterns: ["transformer.h.0.mlp.gate_proj"]
+  target_module_patterns: ["transformer.wte"]
   # Example: Decompose only gate_proj: ["transformer.h.*.mlp.gate_proj"]
   # Example: Decompose only the token embedding: ["transformer.wte"]
   # Example: Decompose gate_proj and up_proj: ["transformer.h.*.mlp.gate_proj", "transformer.h.*.mlp.up_proj"]
