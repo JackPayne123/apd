@@ -360,7 +360,11 @@ def optimize_lm(
             masked_ce_loss = F.cross_entropy(
                 input=flat_masked_component_logits[:-1], target=flat_batch[1:]
             )
-            target_ce_loss = F.cross_entropy(input=target_logits, target=flat_batch)
+
+            flat_target_logits = einops.rearrange(
+                target_logits, "batch pos vocab -> (batch pos) vocab"
+            )
+            target_ce_loss = F.cross_entropy(input=flat_target_logits[:-1], target=flat_batch[1:])
 
             # --- CE when every component is fully masked (all-zero masks) --- #
             zero_masks = {k: torch.zeros_like(v) for k, v in masks.items()}
