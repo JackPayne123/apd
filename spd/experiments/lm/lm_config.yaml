@@ -12,7 +12,6 @@ m: 10000 # Rank of the decomposition / number of components per layer
 # --- Loss Coefficients ---
 # Set coeffs to null if the loss shouldn't be computed
 param_match_coeff: 1.0
-out_recon_coeff: 0.0 # Reconstruction loss based on output logits (MSE)
 lp_sparsity_coeff: 1e-1 # Coefficient for Lp sparsity loss (applied to component params A & B)
 pnorm: 2.0 # p-value for the Lp sparsity norm
 layerwise_random_recon_coeff: 1 # Layer-wise reconstruction loss with random masks

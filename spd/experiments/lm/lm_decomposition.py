@@ -311,23 +311,6 @@ def optimize_lm(
         total_loss += config.lp_sparsity_coeff * lp_sparsity_loss
         loss_terms["loss/lp_sparsity_loss"] = lp_sparsity_loss.item()
 
-        ####### out recon loss #######
-        if config.out_recon_coeff is not None:
-            # Get target logits (no gradients needed for target model)
-            with torch.no_grad():
-                target_logits, _ = model.forward(batch)
-                # Detach target logits to ensure no grads flow back
-                target_logits = target_logits.detach()
-
-            # Get component logits
-            component_logits, _ = model.forward_with_components(
-                batch, components=components, masks=masks
-            )
-
-            kl_loss = calc_kl_divergence_lm(pred=component_logits, target=target_logits)
-            total_loss += config.out_recon_coeff * kl_loss
-            loss_terms["loss/reconstruction_kl"] = kl_loss.item()
-
         log_data["loss/total"] = total_loss.item()
         log_data.update(loss_terms)
 
@@ -344,6 +327,40 @@ def optimize_lm(
                 model=model, dataloader=eval_loader, n_steps=n_eval_steps, device=device
             )[0]
             tqdm.write(f"Mean n active components per token: {mean_n_active_components_per_token}")
+
+            masked_component_logits, _ = model.forward_with_components(
+                batch, components=components, masks=masks
+            )
+            unmasked_component_logits, _ = model.forward_with_components(
+                batch, components=components, masks=None
+            )
+
+            ####### kl div vs target logits #######
+            with torch.no_grad():
+                target_logits, _ = model.forward(batch)
+
+            unmasked_kl_loss = calc_kl_divergence_lm(
+                pred=unmasked_component_logits, target=target_logits
+            )
+            masked_kl_loss = calc_kl_divergence_lm(
+                pred=masked_component_logits, target=target_logits
+            )
+
+            ###### CE vs true labels #######
+            flat_all_component_logits = einops.rearrange(
+                unmasked_component_logits, "batch pos vocab -> (batch pos) vocab"
+            )
+            flat_masked_component_logits = einops.rearrange(
+                masked_component_logits, "batch pos vocab -> (batch pos) vocab"
+            )
+            flat_batch = einops.rearrange(batch, "batch pos -> (batch pos)")
+            unmasked_ce_loss = F.cross_entropy(input=flat_all_component_logits, target=flat_batch)
+            masked_ce_loss = F.cross_entropy(input=flat_masked_component_logits, target=flat_batch)
+
+            log_data["misc/unmasked_kl_loss_vs_target"] = unmasked_kl_loss.item()
+            log_data["misc/masked_kl_loss_vs_target"] = masked_kl_loss.item()
+            log_data["misc/unmasked_ce_loss_vs_labels"] = unmasked_ce_loss.item()
+            log_data["misc/masked_ce_loss_vs_labels"] = masked_ce_loss.item()
 
             if config.wandb_project:
                 mask_l_zero = calc_mask_l_zero(masks=masks)
