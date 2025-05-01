@@ -21,7 +21,7 @@ from torch import Tensor
 from transformers import AutoTokenizer
 
 from spd.configs import Config, LMTaskConfig
-from spd.experiments.lm.models import LinearComponentWithBias, SSModel
+from spd.experiments.lm.models import EmbeddingComponent, LinearComponentWithBias, SSModel
 from spd.log import logger
 from spd.models.components import Gate, GateMLP
 from spd.run_spd import calc_component_acts, calc_masks
@@ -40,7 +40,7 @@ class AppData:
     config: Config
     dataloader_iter_fn: Callable[[], Iterator[dict[str, Any]]]
     gates: dict[str, Gate | GateMLP]
-    components: dict[str, LinearComponentWithBias]
+    components: dict[str, LinearComponentWithBias | EmbeddingComponent]
     target_layer_names: list[str]
     device: str
 
@@ -138,7 +138,7 @@ def initialize(model_path: ModelPath) -> AppData:
     gates: dict[str, Gate | GateMLP] = {
         k.removeprefix("gates.").replace("-", "."): v for k, v in ss_model.gates.items()
     }  # type: ignore[reportAssignmentType]
-    components: dict[str, LinearComponentWithBias] = {
+    components: dict[str, LinearComponentWithBias | EmbeddingComponent] = {
         k.removeprefix("components.").replace("-", "."): v for k, v in ss_model.components.items()
     }  # type: ignore[reportAssignmentType]
     target_layer_names = sorted(list(components.keys()))

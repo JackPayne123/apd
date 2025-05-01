@@ -8,6 +8,7 @@ import einops
 import matplotlib.pyplot as plt
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import wandb
 from jaxtyping import Float
 from torch import Tensor
@@ -232,8 +233,16 @@ def calc_component_acts(
     component_acts = {}
     for param_name in pre_weight_acts:
         raw_name = param_name.removesuffix(".hook_pre")
+        if pre_weight_acts[param_name].ndim == 2:
+            # Must be an embedding. TODO: Handle this much more cleanly in future
+            acts = F.one_hot(pre_weight_acts[param_name], num_classes=As[raw_name].shape[0]).to(
+                dtype=As[raw_name].dtype
+            )
+        else:
+            # Linear layer
+            acts = pre_weight_acts[param_name]
         component_acts[raw_name] = einops.einsum(
-            pre_weight_acts[param_name], As[raw_name], "... d_in, ... d_in m -> ... m"
+            acts, As[raw_name], "... d_in, ... d_in m -> ... m"
         )
     return component_acts
 
@@ -252,8 +261,16 @@ def calc_masked_target_component_acts(
         masked_As = einops.einsum(
             As[raw_name], masks[raw_name], "... d_in m, batch ... m -> batch ... d_in m"
         )
+        if pre_weight_acts[param_name].ndim == 2:
+            # Must be an embedding. TODO: Handle this much more cleanly in future
+            acts = F.one_hot(pre_weight_acts[param_name], num_classes=As[raw_name].shape[0]).to(
+                dtype=As[raw_name].dtype
+            )
+        else:
+            # Linear layer
+            acts = pre_weight_acts[param_name]
         masked_target_component_acts[raw_name] = einops.einsum(
-            pre_weight_acts[param_name],
+            acts,
             masked_As,
             "batch ... d_in, batch ... d_in m -> batch ... m",
         )

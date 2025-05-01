@@ -53,6 +53,7 @@ task_config:
   # List of fnmatch patterns for nn.Linear modules to decompose
   target_module_patterns: ["transformer.h.0.mlp.gate_proj"]
   # Example: Decompose only gate_proj: ["transformer.h.*.mlp.gate_proj"]
+  # Example: Decompose only the token embedding: ["transformer.wte"]
   # Example: Decompose gate_proj and up_proj: ["transformer.h.*.mlp.gate_proj", "transformer.h.*.mlp.up_proj"]
   # Example: Decompose all MLP layers: ["transformer.h.*.mlp.*_proj"] 
 

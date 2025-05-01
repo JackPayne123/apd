@@ -7,6 +7,7 @@ import einops
 import fire
 import matplotlib.pyplot as plt
 import torch
+import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 import wandb
@@ -24,7 +25,7 @@ from spd.experiments.lm.component_viz import (
     component_activation_statistics,
     plot_mean_component_activation_counts,
 )
-from spd.experiments.lm.models import LinearComponentWithBias, SSModel
+from spd.experiments.lm.models import EmbeddingComponent, LinearComponentWithBias, SSModel
 from spd.log import logger
 from spd.models.components import Gate, GateMLP
 from spd.run_spd import (
@@ -102,7 +103,7 @@ def calc_kl_divergence_lm(
 
 
 def calc_param_match_loss_lm(
-    components: dict[str, LinearComponentWithBias],
+    components: dict[str, LinearComponentWithBias | EmbeddingComponent],
     target_model: Llama,
     n_params: int,
     device: str,
@@ -117,7 +118,13 @@ def calc_param_match_loss_lm(
             component.linear_component.B,
             "d_in m, m d_out -> d_in d_out",
         )
-        target_params[comp_name] = target_model.get_parameter(comp_name + ".weight").T
+        submodule = target_model.get_submodule(comp_name)
+        if isinstance(submodule, nn.Linear):
+            target_params[comp_name] = submodule.weight.T
+        elif isinstance(submodule, nn.Embedding):
+            target_params[comp_name] = submodule.weight
+        else:
+            raise ValueError(f"Submodule {comp_name} is not a nn.Linear or nn.Embedding")
         assert component_params[comp_name].shape == target_params[comp_name].shape
 
     param_mse = _calc_param_mse(
@@ -133,7 +140,7 @@ def calc_layerwise_recon_loss_lm(
     model: SSModel,
     batch: Float[Tensor, "batch pos"],
     device: str,
-    components: dict[str, LinearComponentWithBias],
+    components: dict[str, LinearComponentWithBias | EmbeddingComponent],
     masks: list[dict[str, Float[Tensor, "batch pos m"]]],
     target_out: Float[Tensor, "batch pos vocab"],
 ) -> Float[Tensor, ""]:
@@ -190,7 +197,7 @@ def optimize_lm(
     gates: dict[str, Gate | GateMLP] = {
         k.removeprefix("gates.").replace("-", "."): v for k, v in model.gates.items()
     }  # type: ignore
-    components: dict[str, LinearComponentWithBias] = {
+    components: dict[str, LinearComponentWithBias | EmbeddingComponent] = {
         k.removeprefix("components.").replace("-", "."): v for k, v in model.components.items()
     }  # type: ignore
 

@@ -9,7 +9,8 @@ parameters:
   lr:
     values: [1e-2]
   layerwise_random_recon_coeff:
-    values: [1e-1, 1e-2]
+    values: [1e-1]
+
 
 command:
 - ${env}

@@ -4,7 +4,7 @@ from simple_stories_train.models.llama import Llama
 from simple_stories_train.models.model_configs import MODEL_CONFIGS
 from transformers import AutoTokenizer
 
-from spd.experiments.lm.models import LinearComponentWithBias, SSModel
+from spd.experiments.lm.models import EmbeddingComponent, LinearComponentWithBias, SSModel
 
 # %%
 # Select the model size you want to use
@@ -31,7 +31,7 @@ ss_model = SSModel(
 # gate_proj_components = create_target_components(
 #     model, rank=m, target_module_patterns=["model.transformer.h.*.mlp.gate_proj"]
 # )
-gate_proj_components: dict[str, LinearComponentWithBias] = {
+gate_proj_components: dict[str, LinearComponentWithBias | EmbeddingComponent] = {
     k.removeprefix("components.").replace("-", "."): v for k, v in ss_model.components.items()
 }  # type: ignore
 # %%

@@ -9,6 +9,7 @@ from typing import Any
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import wandb
 import yaml
 from jaxtyping import Float
@@ -46,20 +47,50 @@ class LinearComponentWithBias(nn.Module):
         return out
 
 
-def nn_linear_to_components(linear_module: nn.Linear, m: int) -> LinearComponentWithBias:
-    """Replace a nn.Linear module with a LinearComponentWithBias module."""
+def linear_module_to_component(
+    linear_module: nn.Linear,
+    m: int,
+) -> LinearComponentWithBias:
+    """Convert an nn.Linear into a LinearComponentWithBias."""
     d_out, d_in = linear_module.weight.shape
-
     linear_component = LinearComponent(d_in=d_in, d_out=d_out, m=m, n_instances=None)
-
     # # Initialize with A = W (original weights) and B = I (identity)
     # # This provides a starting point where the component exactly equals the original
     # linear_component.A.data[:] = linear_module.weight.t()  # (d_in, m)
     # linear_component.B.data[:] = torch.eye(m)
-
     bias = linear_module.bias.clone() if linear_module.bias is not None else None  # type: ignore
-
     return LinearComponentWithBias(linear_component, bias)
+
+
+class EmbeddingComponent(nn.Module):
+    """A LinearComponent that first converts an index tensor to a one-hot encoding."""
+
+    def __init__(self, linear_component: LinearComponent):
+        super().__init__()
+        self.linear_component = linear_component
+        self.mask: Float[Tensor, "batch pos m"] | None = None  # Gets set on sparse forward passes
+
+    def forward(self, x: Float[Tensor, "batch pos"]):
+        one_hot = F.one_hot(x, num_classes=self.linear_component.A.shape[0]).to(
+            dtype=self.linear_component.A.dtype
+        )
+        out = self.linear_component(one_hot, mask=self.mask)
+
+        return out
+
+
+def embedding_module_to_component(
+    embedding_module: nn.Embedding,
+    m: int,
+) -> EmbeddingComponent:
+    """Convert an nn.Embedding into an EmbeddingComponent."""
+    linear_component = LinearComponent(
+        d_in=embedding_module.num_embeddings,
+        d_out=embedding_module.embedding_dim,
+        m=m,
+        n_instances=None,
+    )
+    return EmbeddingComponent(linear_component)
 
 
 class SSModelPaths(BaseModel):
@@ -97,16 +128,22 @@ class SSModel(nn.Module):
 
     def create_target_components(self, target_module_patterns: list[str], m: int) -> nn.ModuleDict:
         """Create target components for the model."""
-        components: dict[str, LinearComponentWithBias] = {}
+        components: dict[str, LinearComponentWithBias | EmbeddingComponent] = {}
         for name, module in self.model.named_modules():
             for pattern in target_module_patterns:
                 if fnmatch.fnmatch(name, pattern):
-                    assert isinstance(module, nn.Linear), (
-                        f"Module '{name}' matched pattern '{pattern}' but is not nn.Linear. "
-                        f"Found type: {type(module)}"
-                    )
-                    # Replace "." with "-" in the name to avoid issues with module dict keys
-                    components[name.replace(".", "-")] = nn_linear_to_components(module, m=m)
+                    if isinstance(module, nn.Linear):
+                        # Replace "." with "-" in the name to avoid issues with module dict keys
+                        components[name.replace(".", "-")] = linear_module_to_component(module, m=m)
+                    elif isinstance(module, nn.Embedding):
+                        components[name.replace(".", "-")] = embedding_module_to_component(
+                            module, m=m
+                        )
+                    else:
+                        raise ValueError(
+                            f"Module '{name}' matched pattern '{pattern}' but is not nn.Linear or "
+                            f"nn.Embedding. Found type: {type(module)}"
+                        )
                     break
         return nn.ModuleDict(components)
 
@@ -127,7 +164,7 @@ class SSModel(nn.Module):
         self,
         *args: Any,
         module_name: str,
-        component: LinearComponentWithBias,
+        component: LinearComponentWithBias | EmbeddingComponent,
         mask: Float[Tensor, "batch pos m"] | None = None,
         **kwargs: Any,
     ) -> Any:
@@ -148,7 +185,7 @@ class SSModel(nn.Module):
     def forward_with_components(
         self,
         *args: Any,
-        components: dict[str, LinearComponentWithBias],
+        components: dict[str, LinearComponentWithBias | EmbeddingComponent],
         masks: dict[str, Float[Tensor, "batch pos m"]] | None = None,
         **kwargs: Any,
     ) -> Any:

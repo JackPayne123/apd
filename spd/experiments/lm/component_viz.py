@@ -12,7 +12,7 @@ from torch import Tensor
 from torch.utils.data import DataLoader
 
 from spd.configs import LMTaskConfig
-from spd.experiments.lm.models import LinearComponentWithBias, SSModel
+from spd.experiments.lm.models import EmbeddingComponent, LinearComponentWithBias, SSModel
 from spd.log import logger
 from spd.models.components import Gate, GateMLP
 from spd.run_spd import calc_component_acts, calc_masks
@@ -30,7 +30,7 @@ def component_activation_statistics(
     gates: dict[str, Gate | GateMLP] = {
         k.removeprefix("gates.").replace("-", "."): v for k, v in model.gates.items()
     }  # type: ignore
-    components: dict[str, LinearComponentWithBias] = {
+    components: dict[str, LinearComponentWithBias | EmbeddingComponent] = {
         k.removeprefix("components.").replace("-", "."): v for k, v in model.components.items()
     }  # type: ignore
 
