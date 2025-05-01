@@ -354,8 +354,12 @@ def optimize_lm(
                 masked_component_logits, "batch pos vocab -> (batch pos) vocab"
             )
             flat_batch = einops.rearrange(batch, "batch pos -> (batch pos)")
-            unmasked_ce_loss = F.cross_entropy(input=flat_all_component_logits, target=flat_batch)
-            masked_ce_loss = F.cross_entropy(input=flat_masked_component_logits, target=flat_batch)
+            unmasked_ce_loss = F.cross_entropy(
+                input=flat_all_component_logits[:-1], target=flat_batch[1:]
+            )
+            masked_ce_loss = F.cross_entropy(
+                input=flat_masked_component_logits[:-1], target=flat_batch[1:]
+            )
 
             log_data["misc/unmasked_kl_loss_vs_target"] = unmasked_kl_loss.item()
             log_data["misc/masked_kl_loss_vs_target"] = masked_kl_loss.item()
