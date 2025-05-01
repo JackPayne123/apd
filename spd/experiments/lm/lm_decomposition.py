@@ -194,21 +194,15 @@ def optimize_lm(
         k.removeprefix("components.").replace("-", "."): v for k, v in model.components.items()
     }  # type: ignore
 
-    component_params = []
-    param_names_to_optimize = []
+    component_params: list[torch.nn.Parameter] = []
+    gate_params: list[torch.nn.Parameter] = []
     for name, component in components.items():
         component_params.extend(list(component.parameters()))
-        param_names_to_optimize.extend(
-            [f"{name}.{p_name}" for p_name, _ in component.named_parameters()]
-        )
-        logger.debug(f"Adding parameters from component: {name}")
+        gate_params.extend(list(gates[name].parameters()))
 
-    if not component_params:
-        logger.error("No parameters found in components to optimize. Exiting.")
-        return
+    assert len(component_params) > 0, "No parameters found in components to optimize"
 
-    optimizer = optim.AdamW(component_params, lr=config.lr, weight_decay=0.0)
-    logger.info(f"Optimizer created for params: {param_names_to_optimize}")
+    optimizer = optim.AdamW(component_params + gate_params, lr=config.lr, weight_decay=0.0)
 
     lr_schedule_fn = get_lr_schedule_fn(config.lr_schedule, config.lr_exponential_halflife)
     logger.info(f"Base LR scheduler created: {config.lr_schedule}")
@@ -328,10 +322,6 @@ def optimize_lm(
             # Get component logits
             component_logits, _ = model.forward_with_components(
                 batch, components=components, masks=masks
-            )
-
-            assert component_logits.shape == target_logits.shape, (
-                f"Shape mismatch: {component_logits.shape} vs {target_logits.shape}"
             )
 
             kl_loss = calc_kl_divergence_lm(pred=component_logits, target=target_logits)
