@@ -180,6 +180,9 @@ class SSModel(nn.Module):
         out = self.model(*args, **kwargs)
 
         self.model.set_submodule(module_name, old_module)
+
+        component.mask = None
+
         return out
 
     def forward_with_components(
