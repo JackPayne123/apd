@@ -203,7 +203,7 @@ class SSModel(nn.Module):
             old_modules[module_name] = old_module
 
             if masks is not None:
-                component.mask = masks.get(component_name, None)
+                component.mask = masks[component_name]
             self.model.set_submodule(module_name, component)
 
         out = self.model(*args, **kwargs)
