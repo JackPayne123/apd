@@ -153,7 +153,7 @@ def calc_layerwise_recon_loss_lm(
                 batch,
                 module_name=module_name,
                 component=component,
-                mask=mask_info.get(component_name, None),
+                mask=mask_info[component_name],
             )
             loss = calc_kl_divergence_lm(pred=modified_out, target=target_out)
             total_loss += loss
