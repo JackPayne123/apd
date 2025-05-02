@@ -64,16 +64,11 @@ def get_run_name(
 
 
 def plot_lm_results(
-    model: SSModel,
-    eval_loader: DataLoader[Float[Tensor, "batch pos"]],
-    n_eval_steps: int,
-    device: str,
+    mean_component_activation_counts: dict[str, Float[Tensor, " m"]],
 ) -> dict[str, plt.Figure]:
     """Plotting function for LM decomposition."""
     fig_dict: dict[str, plt.Figure] = {}
-    mean_component_activation_counts = component_activation_statistics(
-        model=model, dataloader=eval_loader, n_steps=n_eval_steps, device=device
-    )[1]
+
     fig_dict["mean_component_activation_counts"] = plot_mean_component_activation_counts(
         mean_component_activation_counts=mean_component_activation_counts,
     )
@@ -321,6 +316,7 @@ def optimize_lm(
         log_data["loss/total"] = total_loss.item()
         log_data.update(loss_terms)
 
+        mean_component_activation_counts = None
         # --- Logging --- #
         if step % config.print_freq == 0:
             tqdm.write(f"--- Step {step} ---")
@@ -330,9 +326,11 @@ def optimize_lm(
                 if value is not None:
                     tqdm.write(f"{name}: {value:.7f}")
 
-            mean_n_active_components_per_token = component_activation_statistics(
-                model=model, dataloader=eval_loader, n_steps=n_eval_steps, device=device
-            )[0]
+            mean_n_active_components_per_token, mean_component_activation_counts = (
+                component_activation_statistics(
+                    model=model, dataloader=eval_loader, n_steps=n_eval_steps, device=device
+                )
+            )
             tqdm.write(f"Mean n active components per token: {mean_n_active_components_per_token}")
 
             masked_component_logits, _ = model.forward_with_components(
@@ -409,11 +407,9 @@ def optimize_lm(
         ):
             logger.info(f"Step {step}: Generating plots...")
             with torch.no_grad():
+                assert mean_component_activation_counts is not None
                 fig_dict = plot_lm_results(
-                    model=model,
-                    eval_loader=eval_loader,
-                    n_eval_steps=n_eval_steps,
-                    device=device,
+                    mean_component_activation_counts=mean_component_activation_counts,
                 )
 
                 if config.wandb_project:
