@@ -37,7 +37,7 @@ lr_exponential_halflife: null # Required if lr_schedule is exponential
 init_from_target_model: false # Not implemented/applicable for this setup
 
 # --- Logging & Saving ---
-image_freq: 1000 # Frequency for generating/logging plots
+image_freq: 2000 # Frequency for generating/logging plots
 print_freq: 100 # Frequency for printing logs to console
 save_freq: 50_000 # Frequency for saving checkpoints
 image_on_first_step: true # Whether to log plots at step 0

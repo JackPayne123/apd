@@ -368,7 +368,6 @@ def optimize_lm(
         log_data["loss/total"] = total_loss.item()
         log_data.update(loss_terms)
 
-        mean_component_activation_counts = None
         with torch.inference_mode():
             # --- Logging --- #
             if step % config.print_freq == 0:
@@ -378,15 +377,6 @@ def optimize_lm(
                 for name, value in loss_terms.items():
                     if value is not None:
                         tqdm.write(f"{name}: {value:.7f}")
-
-                mean_n_active_components_per_token, mean_component_activation_counts = (
-                    component_activation_statistics(
-                        model=model, dataloader=eval_loader, n_steps=n_eval_steps, device=device
-                    )
-                )
-                tqdm.write(
-                    f"Mean n active components per token: {mean_n_active_components_per_token}"
-                )
 
                 masked_component_logits, _ = model.forward_with_components(
                     batch, components=components, masks=masks
@@ -450,9 +440,6 @@ def optimize_lm(
                     mask_l_zero = calc_mask_l_zero(masks=masks)
                     for layer_name, layer_mask_l_zero in mask_l_zero.items():
                         log_data[f"{layer_name}/mask_l0"] = layer_mask_l_zero
-                        log_data[f"{layer_name}/mean_n_active_components_per_token"] = (
-                            mean_n_active_components_per_token[layer_name]
-                        )
                     wandb.log(log_data, step=step)
 
             # --- Plotting --- #
@@ -462,6 +449,9 @@ def optimize_lm(
                 and (step > 0 or config.image_on_first_step)
             ):
                 logger.info(f"Step {step}: Generating plots...")
+                mean_component_activation_counts = component_activation_statistics(
+                    model=model, dataloader=eval_loader, n_steps=n_eval_steps, device=device
+                )[1]
                 assert mean_component_activation_counts is not None
                 fig_dict = plot_lm_results(
                     mean_component_activation_counts=mean_component_activation_counts,
