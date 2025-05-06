@@ -369,96 +369,99 @@ def optimize_lm(
         log_data.update(loss_terms)
 
         mean_component_activation_counts = None
-        # --- Logging --- #
-        if step % config.print_freq == 0:
-            tqdm.write(f"--- Step {step} ---")
-            tqdm.write(f"LR: {step_lr:.6f}")
-            tqdm.write(f"Total Loss: {log_data['loss/total']:.7f}")
-            for name, value in loss_terms.items():
-                if value is not None:
-                    tqdm.write(f"{name}: {value:.7f}")
+        with torch.inference_mode():
+            # --- Logging --- #
+            if step % config.print_freq == 0:
+                tqdm.write(f"--- Step {step} ---")
+                tqdm.write(f"LR: {step_lr:.6f}")
+                tqdm.write(f"Total Loss: {log_data['loss/total']:.7f}")
+                for name, value in loss_terms.items():
+                    if value is not None:
+                        tqdm.write(f"{name}: {value:.7f}")
 
-            mean_n_active_components_per_token, mean_component_activation_counts = (
-                component_activation_statistics(
-                    model=model, dataloader=eval_loader, n_steps=n_eval_steps, device=device
+                mean_n_active_components_per_token, mean_component_activation_counts = (
+                    component_activation_statistics(
+                        model=model, dataloader=eval_loader, n_steps=n_eval_steps, device=device
+                    )
                 )
-            )
-            tqdm.write(f"Mean n active components per token: {mean_n_active_components_per_token}")
+                tqdm.write(
+                    f"Mean n active components per token: {mean_n_active_components_per_token}"
+                )
 
-            masked_component_logits, _ = model.forward_with_components(
-                batch, components=components, masks=masks
-            )
-            unmasked_component_logits, _ = model.forward_with_components(
-                batch, components=components, masks=None
-            )
+                masked_component_logits, _ = model.forward_with_components(
+                    batch, components=components, masks=masks
+                )
+                unmasked_component_logits, _ = model.forward_with_components(
+                    batch, components=components, masks=None
+                )
 
-            ####### kl div vs target logits #######
-            with torch.no_grad():
+                ####### kl div vs target logits #######
                 target_logits, _ = model.forward(batch)
 
-            unmasked_kl_loss = calc_kl_divergence_lm(
-                pred=unmasked_component_logits, target=target_logits
-            )
-            masked_kl_loss = calc_kl_divergence_lm(
-                pred=masked_component_logits, target=target_logits
-            )
+                unmasked_kl_loss = calc_kl_divergence_lm(
+                    pred=unmasked_component_logits, target=target_logits
+                )
+                masked_kl_loss = calc_kl_divergence_lm(
+                    pred=masked_component_logits, target=target_logits
+                )
 
-            ###### CE vs true labels #######
-            flat_all_component_logits = einops.rearrange(
-                unmasked_component_logits, "batch pos vocab -> (batch pos) vocab"
-            )
-            flat_masked_component_logits = einops.rearrange(
-                masked_component_logits, "batch pos vocab -> (batch pos) vocab"
-            )
-            flat_batch = einops.rearrange(batch, "batch pos -> (batch pos)")
-            unmasked_ce_loss = F.cross_entropy(
-                input=flat_all_component_logits[:-1], target=flat_batch[1:]
-            )
-            masked_ce_loss = F.cross_entropy(
-                input=flat_masked_component_logits[:-1], target=flat_batch[1:]
-            )
+                ###### CE vs true labels #######
+                flat_all_component_logits = einops.rearrange(
+                    unmasked_component_logits, "batch pos vocab -> (batch pos) vocab"
+                )
+                flat_masked_component_logits = einops.rearrange(
+                    masked_component_logits, "batch pos vocab -> (batch pos) vocab"
+                )
+                flat_batch = einops.rearrange(batch, "batch pos -> (batch pos)")
+                unmasked_ce_loss = F.cross_entropy(
+                    input=flat_all_component_logits[:-1], target=flat_batch[1:]
+                )
+                masked_ce_loss = F.cross_entropy(
+                    input=flat_masked_component_logits[:-1], target=flat_batch[1:]
+                )
 
-            flat_target_logits = einops.rearrange(
-                target_logits, "batch pos vocab -> (batch pos) vocab"
-            )
-            target_ce_loss = F.cross_entropy(input=flat_target_logits[:-1], target=flat_batch[1:])
+                flat_target_logits = einops.rearrange(
+                    target_logits, "batch pos vocab -> (batch pos) vocab"
+                )
+                target_ce_loss = F.cross_entropy(
+                    input=flat_target_logits[:-1], target=flat_batch[1:]
+                )
 
-            # --- CE when every component is fully masked (all-zero masks) --- #
-            zero_masks = {k: torch.zeros_like(v) for k, v in masks.items()}
-            zero_masked_component_logits, _ = model.forward_with_components(
-                batch, components=components, masks=zero_masks
-            )
-            flat_zero_masked_component_logits = einops.rearrange(
-                zero_masked_component_logits, "batch pos vocab -> (batch pos) vocab"
-            )
-            zero_masked_ce_loss = F.cross_entropy(
-                input=flat_zero_masked_component_logits[:-1], target=flat_batch[1:]
-            )
+                # --- CE when every component is fully masked (all-zero masks) --- #
+                zero_masks = {k: torch.zeros_like(v) for k, v in masks.items()}
+                zero_masked_component_logits, _ = model.forward_with_components(
+                    batch, components=components, masks=zero_masks
+                )
+                flat_zero_masked_component_logits = einops.rearrange(
+                    zero_masked_component_logits, "batch pos vocab -> (batch pos) vocab"
+                )
+                zero_masked_ce_loss = F.cross_entropy(
+                    input=flat_zero_masked_component_logits[:-1], target=flat_batch[1:]
+                )
 
-            log_data["misc/unmasked_kl_loss_vs_target"] = unmasked_kl_loss.item()
-            log_data["misc/masked_kl_loss_vs_target"] = masked_kl_loss.item()
-            log_data["misc/unmasked_ce_loss_vs_labels"] = unmasked_ce_loss.item()
-            log_data["misc/masked_ce_loss_vs_labels"] = masked_ce_loss.item()
-            log_data["misc/target_ce_loss_vs_labels"] = target_ce_loss.item()
-            log_data["misc/zero_masked_ce_loss_vs_labels"] = zero_masked_ce_loss.item()
+                log_data["misc/unmasked_kl_loss_vs_target"] = unmasked_kl_loss.item()
+                log_data["misc/masked_kl_loss_vs_target"] = masked_kl_loss.item()
+                log_data["misc/unmasked_ce_loss_vs_labels"] = unmasked_ce_loss.item()
+                log_data["misc/masked_ce_loss_vs_labels"] = masked_ce_loss.item()
+                log_data["misc/target_ce_loss_vs_labels"] = target_ce_loss.item()
+                log_data["misc/zero_masked_ce_loss_vs_labels"] = zero_masked_ce_loss.item()
 
-            if config.wandb_project:
-                mask_l_zero = calc_mask_l_zero(masks=masks)
-                for layer_name, layer_mask_l_zero in mask_l_zero.items():
-                    log_data[f"{layer_name}/mask_l0"] = layer_mask_l_zero
-                    log_data[f"{layer_name}/mean_n_active_components_per_token"] = (
-                        mean_n_active_components_per_token[layer_name]
-                    )
-                wandb.log(log_data, step=step)
+                if config.wandb_project:
+                    mask_l_zero = calc_mask_l_zero(masks=masks)
+                    for layer_name, layer_mask_l_zero in mask_l_zero.items():
+                        log_data[f"{layer_name}/mask_l0"] = layer_mask_l_zero
+                        log_data[f"{layer_name}/mean_n_active_components_per_token"] = (
+                            mean_n_active_components_per_token[layer_name]
+                        )
+                    wandb.log(log_data, step=step)
 
-        # --- Plotting --- #
-        if (
-            config.image_freq is not None
-            and step % config.image_freq == 0
-            and (step > 0 or config.image_on_first_step)
-        ):
-            logger.info(f"Step {step}: Generating plots...")
-            with torch.no_grad():
+            # --- Plotting --- #
+            if (
+                config.image_freq is not None
+                and step % config.image_freq == 0
+                and (step > 0 or config.image_on_first_step)
+            ):
+                logger.info(f"Step {step}: Generating plots...")
                 assert mean_component_activation_counts is not None
                 fig_dict = plot_lm_results(
                     mean_component_activation_counts=mean_component_activation_counts,
