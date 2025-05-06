@@ -93,11 +93,13 @@ class GateMLP(nn.Module):
         out = out + self.out_bias
         return out
 
+    @torch.compile
     def forward(
         self, x: Float[Tensor, "batch m"] | Float[Tensor, "batch n_instances m"]
     ) -> Float[Tensor, "batch m"] | Float[Tensor, "batch n_instances m"]:
         return leaky_relu(torch.clamp(self._compute_pre_activation(x), max=1))
 
+    @torch.compile
     def forward_unclamped(
         self, x: Float[Tensor, "batch m"] | Float[Tensor, "batch n_instances m"]
     ) -> Float[Tensor, "batch m"] | Float[Tensor, "batch n_instances m"]:
@@ -167,6 +169,7 @@ class LinearComponent(nn.Module):
         """A @ B"""
         return einops.einsum(self.A, self.B, "... d_in m, ... m d_out -> ... d_in d_out")
 
+    @torch.compile
     def forward(
         self, x: Float[Tensor, "batch ... d_in"], mask: Float[Tensor, "batch ... m"] | None = None
     ) -> Float[Tensor, "batch ... d_out"]:
