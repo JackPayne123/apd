@@ -177,6 +177,43 @@ def calc_lp_sparsity_loss_lm(
     return total_loss.sum(dim=-1).mean(dim=[0, 1])
 
 
+def calc_embedding_recon_loss_lm(
+    model: SSModel,
+    batch: Float[Tensor, "batch pos"],
+    component: EmbeddingComponent,
+    masks: dict[str, Float[Tensor, "batch pos m"]] | None = None,
+) -> Float[Tensor, ""]:
+    """
+    Reconstruction loss that directly compares the outputs of the (optionally masked)
+    ``EmbeddingComponent``(s) to the outputs of the original ``nn.Embedding`` modules.
+
+    The loss is
+
+        MSE = 1/(B·P)·Σ_{b,p}·Σ_{d_emb}
+            (E_{b,p,d_emb}^{APD} - E_{b,p,d_emb}^{orig})^2
+
+    where B is the batch size and P the sequence length.
+    """
+    module_name = "transformer.wte"
+
+    # --- original embedding output --------------------------------------------------------- #
+    orig_module = model.model.get_submodule(module_name)
+    assert isinstance(orig_module, nn.Embedding), (
+        f"Module {module_name} expected to be nn.Embedding, got {type(orig_module)}"
+    )
+    target_out: Float[Tensor, "batch pos d_emb"] = orig_module(batch)
+
+    # --- APD-augmented embedding output ---------------------------------------------------- #
+    if masks is not None:
+        component.mask = masks[module_name]
+    apd_out: Float[Tensor, "batch pos d_emb"] = component(batch)  # type: ignore[arg-type]
+    component.mask = None
+
+    loss = ((apd_out - target_out) ** 2).sum(dim=-1).mean()
+
+    return loss
+
+
 def optimize_lm(
     model: SSModel,
     config: Config,
@@ -312,6 +349,21 @@ def optimize_lm(
         lp_sparsity_loss = calc_lp_sparsity_loss_lm(relud_masks=relud_masks, pnorm=config.pnorm)
         total_loss += config.lp_sparsity_coeff * lp_sparsity_loss
         loss_terms["loss/lp_sparsity_loss"] = lp_sparsity_loss.item()
+
+        ####### embedding recon loss #######
+        if config.embedding_recon_coeff is not None:
+            assert len(components) == 1, "Only one embedding component is supported"
+            component = list(components.values())[0]
+            assert isinstance(component, EmbeddingComponent)
+            random_masks = calc_random_masks(masks=masks, n_random_masks=config.n_random_masks)
+            embedding_recon_loss = calc_embedding_recon_loss_lm(
+                model=model,
+                batch=batch,
+                component=component,
+                masks=random_masks[0],
+            )
+            total_loss += config.embedding_recon_coeff * embedding_recon_loss
+            loss_terms["loss/embedding_reconstruction"] = embedding_recon_loss.item()
 
         log_data["loss/total"] = total_loss.item()
         log_data.update(loss_terms)

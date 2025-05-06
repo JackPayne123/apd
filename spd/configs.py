@@ -85,6 +85,7 @@ class Config(BaseModel):
     task_config: TMSTaskConfig | ResidualMLPTaskConfig | LMTaskConfig = Field(
         ..., discriminator="task_name"
     )
+    embedding_recon_coeff: float | None = None
 
     DEPRECATED_CONFIG_KEYS: ClassVar[list[str]] = []
     RENAMED_CONFIG_KEYS: ClassVar[dict[str, str]] = {}

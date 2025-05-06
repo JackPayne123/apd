@@ -4,12 +4,14 @@ metric:
   name: total_loss
   goal: minimize
 parameters:
-  seed:
-    values: [0]
-  lr:
-    values: [1e-2]
-  layerwise_random_recon_coeff:
-    values: [1e-1]
+  # seed:
+  #   values: [0]
+  # lr:
+  #   values: [1e-2]
+  # layerwise_random_recon_coeff:
+  #   values: [1e-1]
+  embedding_recon_coeff:
+    values: [1, 1e-2, 1e-4]
 
 
 command:
