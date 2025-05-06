@@ -158,8 +158,8 @@ class LinearComponent(nn.Module):
         self.hook_component_acts = HookPoint()  # (batch m) or (batch n_instances m)
         self.hook_post = HookPoint()  # (batch d_out) or (batch n_instances d_out)
 
-        init_param_(self.A, fan_val=d_in, nonlinearity="linear")
-        # init_param_(self.A, fan_val=d_out, nonlinearity="linear")
+        # init_param_(self.A, fan_val=d_in, nonlinearity="linear")
+        init_param_(self.A, fan_val=d_out, nonlinearity="linear")
         init_param_(self.B, fan_val=m, nonlinearity="linear")
 
     @property
