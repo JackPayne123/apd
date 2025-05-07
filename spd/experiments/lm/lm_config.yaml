@@ -15,7 +15,7 @@ param_match_coeff: 1.0
 lp_sparsity_coeff: 1e-6 # Coefficient for Lp sparsity loss (applied to component params A & B)
 pnorm: 2.0 # p-value for the Lp sparsity norm
 # layerwise_random_recon_coeff: null # Layer-wise reconstruction loss with random masks
-layerwise_random_recon_coeff: 1e-4 # Layer-wise reconstruction loss with random masks
+layerwise_random_recon_coeff: 2 # Layer-wise reconstruction loss with random masks
 # embedding_recon_coeff: 1  # Custom loss for testing the embedding reconstruction
 
 # Placeholder losses (set coeffs to null as they require mask calculation implementation)
