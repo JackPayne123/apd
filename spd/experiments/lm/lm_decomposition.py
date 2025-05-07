@@ -112,11 +112,7 @@ def calc_param_match_loss_lm(
     component_params: dict[str, Float[Tensor, "d_in d_out"]] = {}
 
     for comp_name, component in components.items():
-        component_params[comp_name] = einops.einsum(
-            component.linear_component.A,
-            component.linear_component.B,
-            "d_in m, m d_out -> d_in d_out",
-        )
+        component_params[comp_name] = component.linear_component.weight
         target_params[comp_name] = target_model.get_parameter(comp_name + ".weight").T
         assert component_params[comp_name].shape == target_params[comp_name].shape
 
