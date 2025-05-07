@@ -116,7 +116,6 @@ def calc_param_match_loss_lm(
             target_params[comp_name] = submodule.weight
         else:
             raise ValueError(f"Submodule {comp_name} is not a nn.Linear or nn.Embedding")
-        target_params[comp_name] = target_model.get_parameter(comp_name + ".weight").T
         assert component_params[comp_name].shape == target_params[comp_name].shape
 
     param_mse = _calc_param_mse(
