@@ -108,11 +108,7 @@ def calc_param_match_loss_lm(
     component_params: dict[str, Float[Tensor, "d_in d_out"]] = {}
 
     for comp_name, component in components.items():
-        component_params[comp_name] = einops.einsum(
-            component.linear_component.A,
-            component.linear_component.B,
-            "d_in m, m d_out -> d_in d_out",
-        )
+        component_params[comp_name] = component.linear_component.weight
         submodule = target_model.get_submodule(comp_name)
         if isinstance(submodule, nn.Linear):
             target_params[comp_name] = submodule.weight.T
@@ -120,6 +116,7 @@ def calc_param_match_loss_lm(
             target_params[comp_name] = submodule.weight
         else:
             raise ValueError(f"Submodule {comp_name} is not a nn.Linear or nn.Embedding")
+        target_params[comp_name] = target_model.get_parameter(comp_name + ".weight").T
         assert component_params[comp_name].shape == target_params[comp_name].shape
 
     param_mse = _calc_param_mse(
