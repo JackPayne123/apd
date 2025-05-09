@@ -113,8 +113,8 @@ def plot_embedding_mask_heatmap(masks: Float[Tensor, "vocab m"], out_dir: Path) 
     print(f"Saved first token histogram to {out_dir / 'first_token_histogram.png'} and .svg")
     plt.close()
 
-    n_dead_components = ((masks > 0.1).sum(dim=0) == 0).sum().item()
-    print(f"Number of components that have no value > 0.1: {n_dead_components}")
+    n_alive_components = ((masks > 0.1).any(dim=0)).sum().item()
+    print(f"Number of components that have any value > 0.1: {n_alive_components}")
     ...
 
 
