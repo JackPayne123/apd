@@ -12,7 +12,7 @@ import torch.nn.functional as F
 import torch.optim as optim
 import wandb
 import yaml
-from jaxtyping import Float
+from jaxtyping import Bool, Float
 from simple_stories_train.dataloaders import DatasetConfig, create_data_loader
 from simple_stories_train.models.llama import Llama
 from simple_stories_train.models.model_configs import MODEL_CONFIGS
@@ -250,6 +250,10 @@ def optimize_lm(
     log_data = {}
     data_iter = iter(train_loader)
 
+    alive_components: dict[str, Bool[Tensor, " m"]] = {
+        layer_name: torch.zeros(config.m, device=device).bool() for layer_name in components
+    }
+
     # Use tqdm directly in the loop, iterate one extra step for final logging/plotting/saving
     for step in tqdm(range(config.steps + 1), ncols=0):
         # --- LR Scheduling Step --- #
@@ -282,21 +286,17 @@ def optimize_lm(
         As = {module_name: v.linear_component.A for module_name, v in components.items()}
 
         target_component_acts = calc_component_acts(pre_weight_acts=pre_weight_acts, As=As)  # type: ignore
-        # attributions = calc_grad_attributions(
-        #     target_out=target_out,
-        #     pre_weight_acts=pre_weight_acts,
-        #     post_weight_acts={k: v for k, v in target_cache.items() if k.endswith("hook_post")},
-        #     target_component_acts=target_component_acts,
-        #     Bs=collect_nested_module_attrs(model, attr_name="B", include_attr_name=False),
-        # )
-        attributions = None
 
         masks, relud_masks = calc_masks(
             gates=gates,
             target_component_acts=target_component_acts,
-            attributions=attributions,
+            attributions=None,
             detach_inputs=False,
         )
+        for layer_name, mask in masks.items():
+            alive_components[layer_name] = alive_components[layer_name] | (mask > 0.1).any(
+                dim=(0, 1)
+            )
 
         # --- Calculate Losses --- #
         total_loss = torch.tensor(0.0, device=device)
@@ -380,6 +380,16 @@ def optimize_lm(
                 unmasked_component_logits, _ = model.forward_with_components(
                     batch, components=components, masks=None
                 )
+
+                for layer_name, layer_alive_components in alive_components.items():
+                    if step == 0:
+                        # Just say that all components are alive for the first step.
+                        log_data[f"{layer_name}/n_alive_components_01"] = config.m
+                    else:
+                        log_data[f"{layer_name}/n_alive_components_01"] = (
+                            layer_alive_components.sum().item()
+                        )
+                    alive_components[layer_name] = torch.zeros(config.m, device=device).bool()
 
                 ####### kl div vs target logits #######
                 target_logits, _ = model.forward(batch)
