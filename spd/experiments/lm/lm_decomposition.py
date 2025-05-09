@@ -428,15 +428,12 @@ def optimize_lm(
 
                 for layer_name, layer_alive_components in alive_components.items():
                     if step == 0:
-                        # Just say that all components are alive for the first step.
-                        log_data[f"{layer_name}/n_alive_components_01"] = config.m
-                    else:
-                        log_data[f"{layer_name}/n_alive_components_01"] = (
-                            layer_alive_components.sum().item()
-                        )
+                        break
+                    log_data[f"{layer_name}/n_alive_components_01"] = (
+                        layer_alive_components.sum().item()
+                    )
                     alive_components[layer_name] = torch.zeros(config.m, device=device).bool()
 
-                ####### kl div vs target logits #######
                 target_logits, _ = model.forward(batch)
 
                 unmasked_kl_loss = calc_kl_divergence_lm(
