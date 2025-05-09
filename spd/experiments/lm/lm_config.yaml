@@ -7,15 +7,15 @@ wandb_run_name_prefix: "" # Prefix for generated run name
 # --- General ---
 seed: 0
 unit_norm_matrices: false # Whether to enforce unit norm on A matrices (not typically used here)
-m: 10000 # Rank of the decomposition / number of components per layer
+m: 20000 # Rank of the decomposition / number of components per layer
 
 # --- Loss Coefficients ---
 # Set coeffs to null if the loss shouldn't be computed
 param_match_coeff: 1.0
-lp_sparsity_coeff: 1e-6 # Coefficient for Lp sparsity loss (applied to component params A & B)
+lp_sparsity_coeff: 1e-4 # Coefficient for Lp sparsity loss (applied to component params A & B)
 pnorm: 2.0 # p-value for the Lp sparsity norm
 # layerwise_random_recon_coeff: null # Layer-wise reconstruction loss with random masks
-layerwise_random_recon_coeff: 1e-4 # Layer-wise reconstruction loss with random masks
+layerwise_random_recon_coeff: 1.0 # Layer-wise reconstruction loss with random masks
 # embedding_recon_coeff: 1  # Custom loss for testing the embedding reconstruction
 
 # Placeholder losses (set coeffs to null as they require mask calculation implementation)
@@ -24,20 +24,20 @@ act_recon_coeff: null # Reconstruction loss on intermediate component activation
 random_mask_recon_coeff: null # Reconstruction loss averaged over random masks
 layerwise_recon_coeff: null # Layer-wise reconstruction loss
 
-n_random_masks: 1 # Number of random masks if random_mask_recon_coeff is used
+n_random_masks: 10 # Number of random masks if random_mask_recon_coeff is used
 n_gate_hidden_neurons: 16
 
 # --- Training ---
 batch_size: 4 # Adjust based on GPU memory
 steps: 50_000 # Total training steps
-lr: 1e-4 # Learning rate
+lr: 1e-3 # Learning rate
 lr_schedule: constant # LR schedule type (constant, linear, cosine, exponential)
 lr_warmup_pct: 0.01 # Percentage of steps for linear LR warmup
 lr_exponential_halflife: null # Required if lr_schedule is exponential
 init_from_target_model: false # Not implemented/applicable for this setup
 
 # --- Logging & Saving ---
-image_freq: 2000 # Frequency for generating/logging plots
+image_freq: 1000 # Frequency for generating/logging plots
 print_freq: 100 # Frequency for printing logs to console
 save_freq: 50_000 # Frequency for saving checkpoints
 image_on_first_step: true # Whether to log plots at step 0
