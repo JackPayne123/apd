@@ -276,7 +276,7 @@ def optimize_lm(
 
     assert len(component_params) > 0, "No parameters found in components to optimize"
 
-    optimizer = optim.AdamW(component_params + gate_params, lr=config.lr, weight_decay=0.01)
+    optimizer = optim.AdamW(component_params + gate_params, lr=config.lr, weight_decay=0)
 
     lr_schedule_fn = get_lr_schedule_fn(config.lr_schedule, config.lr_exponential_halflife)
     logger.info(f"Base LR scheduler created: {config.lr_schedule}")
