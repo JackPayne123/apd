@@ -87,6 +87,7 @@ class Config(BaseModel):
         ..., discriminator="task_name"
     )
     embedding_recon_coeff: float | None = None
+    is_embed_unembed_recon: bool = False
 
     DEPRECATED_CONFIG_KEYS: ClassVar[list[str]] = []
     RENAMED_CONFIG_KEYS: ClassVar[dict[str, str]] = {}

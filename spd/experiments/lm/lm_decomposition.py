@@ -217,17 +217,17 @@ def calc_embedding_recon_loss_lm(
     batch: Float[Tensor, "batch pos"],
     component: EmbeddingComponent,
     masks: dict[str, Float[Tensor, "batch pos m"]] | None = None,
+    unembed: bool = False,
 ) -> Float[Tensor, ""]:
     """
     Reconstruction loss that directly compares the outputs of the (optionally masked)
     ``EmbeddingComponent``(s) to the outputs of the original ``nn.Embedding`` modules.
 
-    The loss is
+    If ``unembed`` is ``True``, both the APD-augmented embedding output and the target embedding
+    output are unembedded using the ``lm_head`` module, and the KL divergence is used as the loss.
 
-        MSE = 1/(B·P)·Σ_{b,p}·Σ_{d_emb}
-            (E_{b,p,d_emb}^{APD} - E_{b,p,d_emb}^{orig})^2
-
-    where B is the batch size and P the sequence length.
+    If ``unembed`` is ``False``, the loss is the MSE between the APD-augmented embedding output
+    and the target embedding output is used as the loss.
     """
     module_name = "transformer.wte"
 
@@ -244,7 +244,12 @@ def calc_embedding_recon_loss_lm(
     apd_out: Float[Tensor, "batch pos d_emb"] = component(batch)  # type: ignore[arg-type]
     component.mask = None
 
-    loss = ((apd_out - target_out) ** 2).sum(dim=-1).mean()
+    if unembed:
+        target_out_unembed = model.model.lm_head(target_out)
+        apd_out_unembed = model.model.lm_head(apd_out)
+        loss = calc_kl_divergence_lm(pred=apd_out_unembed, target=target_out_unembed)
+    else:
+        loss = ((apd_out - target_out) ** 2).sum(dim=-1).mean()
 
     return loss
 
@@ -402,6 +407,7 @@ def optimize_lm(
                 batch=batch,
                 component=component,
                 masks=random_masks[0],
+                unembed=config.is_embed_unembed_recon,
             )
             total_loss += config.embedding_recon_coeff * embedding_recon_loss
             loss_terms["loss/embedding_reconstruction"] = embedding_recon_loss.item()
