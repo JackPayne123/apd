@@ -53,7 +53,8 @@ task_config:
   eval_data_split: "test" # Dataset split to use
   n_eval_steps: 100 # Number of evaluation steps
   # List of fnmatch patterns for nn.Linear modules to decompose
-  target_module_patterns: ["transformer.h.0.mlp.gate_proj"]
+  # target_module_patterns: ["transformer.h.0.mlp.gate_proj"]
+  target_module_patterns: ["transformer.wte"]
   # Example: Decompose only gate_proj: ["transformer.h.*.mlp.gate_proj"]
   # Example: Decompose only the token embedding: ["transformer.wte"]
   # Example: Decompose gate_proj and up_proj: ["transformer.h.*.mlp.gate_proj", "transformer.h.*.mlp.up_proj"]
