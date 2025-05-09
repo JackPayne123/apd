@@ -341,6 +341,14 @@ def optimize_lm(
                 batch, components=components, masks=None
             )
 
+            for layer_name, layer_alive_components in alive_components.items():
+                if step == 0:
+                    break
+                log_data[f"{layer_name}/n_alive_components_01"] = (
+                    layer_alive_components.sum().item()
+                )
+                alive_components[layer_name] = torch.zeros(config.m, device=device).bool()
+
             ####### kl div vs target logits #######
             with torch.no_grad():
                 target_logits, _ = model.forward(batch)
