@@ -5,7 +5,7 @@ metric:
   goal: minimize
 parameters:
   seed:
-    values: [0, 1, 2, 3, 4]
+    values: [0]
 command:
 - ${env}
 - ${interpreter}
