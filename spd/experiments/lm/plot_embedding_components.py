@@ -62,6 +62,33 @@ def collect_embedding_masks(model: SSModel, device: str) -> Float[Tensor, "vocab
     return all_masks
 
 
+def permute_to_identity(
+    mask: Float[Tensor, "vocab m"],
+) -> tuple[Float[Tensor, "vocab m"], Float[Tensor, "vocab"]]:
+    """Returns (permuted_mask, permutation_indices)"""
+    vocab, m = mask.shape
+    new_mask = mask.clone()
+    effective_rows = min(vocab, m)
+    # Store permutation indices for each instance
+    perm_indices = torch.zeros((m), dtype=torch.long, device=mask.device)
+
+    mat: Tensor = mask[:, :]
+    perm: list[int] = [0] * m
+    used: set[int] = set()
+    for i in range(effective_rows):
+        sorted_indices: list[int] = torch.argsort(mat[i, :], descending=True).tolist()
+        chosen: int = next((col for col in sorted_indices if col not in used), sorted_indices[0])
+        perm[i] = chosen
+        used.add(chosen)
+    remaining: list[int] = sorted(list(set(range(m)) - used))
+    for idx, col in enumerate(remaining):
+        perm[effective_rows + idx] = col
+    new_mask[:, :] = mat[:, perm]
+    perm_indices = torch.tensor(perm, device=mask.device)
+
+    return new_mask, perm_indices
+
+
 def plot_embedding_mask_heatmap(masks: Float[Tensor, "vocab m"], out_dir: Path) -> None:
     """Plot heatmap of embedding masks.
 
@@ -131,12 +158,12 @@ def main(model_path: str | Path) -> None:
 
     # Collect masks
     masks = collect_embedding_masks(model, device)
-
-    plot_embedding_mask_heatmap(masks, out_dir)
+    permuted_masks, perm_indices = permute_to_identity(masks)
+    plot_embedding_mask_heatmap(permuted_masks, out_dir)
 
 
 if __name__ == "__main__":
     # path = "wandb:spd-lm/runs/cllwvnmz" # Run with some components that always activate.
-    path = "wandb:spd-lm/runs/d5z5hgv1"  # Some components activate 0.175 of the time.
+    path = "wandb:spd-lm/runs/o1eqp841"  # Some components activate 0.175 of the time.
 
     main(path)
