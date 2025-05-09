@@ -7,7 +7,11 @@ parameters:
   seed:
     values: [0]
   lr:
-    values: [2e-3, 1e-3, 3e-4, 1e-4]
+    values: [1e-3]
+  layerwise_random_recon_coeff:
+    values: [1e-4]
+  lp_sparsity_coeff:
+    values: [1e-6, 1e-8, 1e-9]
   # layerwise_random_recon_coeff:
   #   values: [1e-1]
   # embedding_recon_coeff:

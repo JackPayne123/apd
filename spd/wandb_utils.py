@@ -110,6 +110,7 @@ def init_wandb(
         wandb.init(config=sweep_data, entity=os.getenv("WANDB_ENTITY"), save_code=True, name=name)
     else:
         wandb.init(project=project, entity=os.getenv("WANDB_ENTITY"), save_code=True, name=name)
+    wandb.run.log_code(REPO_ROOT)
 
     # Update the config with the hyperparameters for this sweep (if any)
     config = replace_pydantic_model(config, wandb.config)
