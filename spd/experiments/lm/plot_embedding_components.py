@@ -137,6 +137,6 @@ def main(model_path: str | Path) -> None:
 
 if __name__ == "__main__":
     # path = "wandb:spd-lm/runs/cllwvnmz" # Run with some components that always activate.
-    path = "wandb:spd-lm/runs/d5z5hgv1"  # Some components activate 0.175 of the time.
+    path = "wandb:spd-lm/runs/2oxloonx"  # Some components activate 0.175 of the time.
 
     main(path)
