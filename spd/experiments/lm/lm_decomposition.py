@@ -173,6 +173,45 @@ def calc_lp_sparsity_loss_lm(
     return total_loss.sum(dim=-1).mean(dim=[0, 1])
 
 
+def calc_schatten_loss_lm(
+    relud_masks: dict[str, Float[Tensor, "batch pos m"]],
+    pnorm: float,
+    components: dict[str, LinearComponentWithBias | EmbeddingComponent],
+    device: str,
+) -> Float[Tensor, ""]:
+    """Calculate the Schatten loss on the active components.
+
+    The Schatten loss is calculated as:
+        L = Σ_{components} mean(relu_mask^pnorm · (||A||_2^2 + ||B||_2^2))
+
+    where:
+        - relu_mask is the activation mask for each component
+        - pnorm is the power to raise the mask to
+        - A and B are the component matrices
+        - ||·||_2 is the L2 norm
+
+    Args:
+        relud_masks: Dictionary of relu masks for each layer.
+        pnorm: The pnorm to use for the sparsity loss. Must be positive.
+        components: Dictionary of components for each layer. All components must be LinearComponentWithBias.
+        device: The device to compute the loss on.
+
+    Returns:
+        The Schatten loss as a scalar tensor.
+    """
+
+    total_loss = torch.tensor(0.0, device=device)
+    for component_name, component in components.items():
+        A_norms = component.linear_component.A.square().sum(dim=-2)
+        B_norms = component.linear_component.B.square().sum(dim=-1)
+        schatten_norms = A_norms + B_norms
+        loss = einops.einsum(
+            relud_masks[component_name] ** pnorm, schatten_norms, "... m, m -> ..."
+        )
+        total_loss += loss.mean()
+    return total_loss
+
+
 def calc_embedding_recon_loss_lm(
     model: SSModel,
     batch: Float[Tensor, "batch pos"],
@@ -237,7 +276,7 @@ def optimize_lm(
 
     assert len(component_params) > 0, "No parameters found in components to optimize"
 
-    optimizer = optim.AdamW(component_params + gate_params, lr=config.lr, weight_decay=0.0)
+    optimizer = optim.AdamW(component_params + gate_params, lr=config.lr, weight_decay=0.01)
 
     lr_schedule_fn = get_lr_schedule_fn(config.lr_schedule, config.lr_exponential_halflife)
     logger.info(f"Base LR scheduler created: {config.lr_schedule}")
@@ -345,7 +384,13 @@ def optimize_lm(
         lp_sparsity_loss = calc_lp_sparsity_loss_lm(relud_masks=relud_masks, pnorm=config.pnorm)
         total_loss += config.lp_sparsity_coeff * lp_sparsity_loss
         loss_terms["loss/lp_sparsity_loss"] = lp_sparsity_loss.item()
-
+        ####### Schatten loss #######
+        if config.schatten_coeff is not None:
+            schatten_loss = calc_schatten_loss_lm(
+                relud_masks=relud_masks, pnorm=config.pnorm, components=components, device=device
+            )
+            total_loss += config.schatten_coeff * schatten_loss
+            loss_terms["loss/schatten_loss"] = schatten_loss.item()
         ####### embedding recon loss #######
         if config.embedding_recon_coeff is not None:
             assert len(components) == 1, "Only one embedding component is supported"

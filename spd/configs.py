@@ -71,6 +71,7 @@ class Config(BaseModel):
     layerwise_recon_coeff: NonNegativeFloat | None = None
     layerwise_random_recon_coeff: NonNegativeFloat | None = None
     lp_sparsity_coeff: NonNegativeFloat
+    schatten_coeff: NonNegativeFloat | None = None
     pnorm: PositiveFloat
     m: PositiveInt
     n_random_masks: PositiveInt
@@ -135,5 +136,9 @@ class Config(BaseModel):
             assert self.lr_exponential_halflife is not None, (
                 "lr_exponential_halflife must be set if lr_schedule is exponential"
             )
-
+        # Schatten norm schould be null unless the model is an LM
+        if self.task_config.task_name != "lm":
+            assert self.schatten_coeff is None, (
+                "schatten_coeff should be null unless the model is an LM"
+            )
         return self
