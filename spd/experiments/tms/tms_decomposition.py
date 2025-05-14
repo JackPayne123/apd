@@ -387,7 +387,16 @@ def save_target_model_info(
 def main(
     config_path_or_obj: Path | str | Config, sweep_config_path: Path | str | None = None
 ) -> None:
-    device = "cuda" if torch.cuda.is_available() else "cpu"
+    
+
+    # Setup device
+    if torch.cuda.is_available():
+        device = "cuda"
+    elif torch.backends.mps.is_available():
+        device = "mps"
+    else:
+        device = "cpu"
+    logger.info(f"Using device: {device}")
 
     config = load_config(config_path_or_obj, config_model=Config)
 
@@ -396,7 +405,6 @@ def main(
 
     task_config = config.task_config
     assert isinstance(task_config, TMSTaskConfig)
-
     set_seed(config.seed)
     logger.info(config)
 

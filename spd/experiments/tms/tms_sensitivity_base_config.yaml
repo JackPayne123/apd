@@ -1,0 +1,31 @@
+# Base configuration for TMS hyperparameter sensitivity analysis
+wandb_project: spd-tms-sensitivity-analysis # New project name
+wandb_run_name: null # Will be set by sweep or individual runs
+wandb_run_name_prefix: "hpsens_" # Prefix for run names
+unit_norm_matrices: false
+seed: 0 # Base seed, can be overridden by sweep if needed
+topk: 2.0
+C: 40
+batch_topk: true
+param_match_coeff: 1.0 # Faithfulness loss coefficient
+topk_recon_coeff: 10.0 # Minimality loss coefficient
+attribution_type: gradient
+pnorm: null
+schatten_pnorm: 0.9
+schatten_coeff: 15.0 # Simplicity loss coefficient
+batch_size: 2048
+steps: 20_000 # Consider reducing for faster sweeps initially, e.g., 10_000
+image_freq: 5_000
+print_freq: 1_000
+save_freq: 20_000
+lr: 1e-3
+lr_schedule: cosine
+lr_warmup_pct: 0.05
+task_config:
+  task_name: tms
+  bias_val: 0.0
+  train_bias: false
+  feature_probability: 0.05
+  data_generation_type: "at_least_zero_active"
+  # Ensure this path points to a trained TMS 40-10 model
+  pretrained_model_path: "wandb:jacktpayne51-macquarie-university/spd-train-tms-40-10-rank1/runs/74544bla" 

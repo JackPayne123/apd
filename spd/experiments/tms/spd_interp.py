@@ -221,15 +221,17 @@ def plot_combined(
 
 
 # %%
-device = "cuda" if torch.cuda.is_available() else "cpu"
+device = "mps" if torch.backends.mps.is_available() else "cpu"
 # path = "wandb:spd-tms/runs/bft0pgi8"  # Old 5-2 run with attributions from spd model # paper run
 # instance_idx = 0
 # path = "wandb:spd-tms/runs/sv9padmo"  # 10-5
 # path = "wandb:spd-tms/runs/vt0i4a22"  # 20-5
 # path = "wandb:spd-tms/runs/tyo4serm"  # 40-10 with topk=2, topk_recon_coeff=1e1, schatten_coeff=15# old paper run
 # path = "wandb:spd-tms/runs/9zzp2s68"  # 40-10 with topk=2, topk_recon_coeff=1e1, schatten_coeff=20
-path = "wandb:spd-tms/runs/08no00iq"  # 40-10 with topk=1, topk_recon_coeff=1e1, schatten_coeff=20# new paper run
-instance_idx = 2
+#path = "wandb:spd-tms/runs/08no00iq"  # 40-10 with topk=1, topk_recon_coeff=1e1, schatten_coeff=20# new paper run
+#path = "wandb:jacktpayne51-macquarie-university/spd-tms/runs/hmpiuws8"  # 40-10 with topk=1, topk_recon_coeff=1e1, schatten_coeff=20# new paper run
+path = "wandb:jacktpayne51-macquarie-university/spd-tms-rank1/runs/tt2xhkyz"  # 40-10 with topk=1, topk_recon_coeff=1e1, schatten_coeff=20# new paper run
+instance_idx = 0
 # path = "wandb:spd-tms/runs/014t4f9n"  # 40-10 with topk=1, topk_recon_coeff=1e1, schatten_coeff=1e1
 
 run_id = path.split("/")[-1]
@@ -325,6 +327,13 @@ gen_types: list[DataGenerationType] = [
     "exactly_two_active",
     "exactly_three_active",
     "exactly_four_active",
+    "exactly_five_active",
+    # "exactly_six_active",
+    # "exactly_seven_active",
+    # "exactly_eight_active",
+    # "exactly_nine_active",
+    # "exactly_ten_active",
+
 ]
 assert config.topk is not None
 results = collect_sparse_dataset_mse_losses(

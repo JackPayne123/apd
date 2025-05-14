@@ -27,11 +27,11 @@
 #   train_bias: false
 #   feature_probability: 0.05
 #   data_generation_type: "at_least_zero_active"
-#   pretrained_model_path: "wandb:spd-train-tms/runs/cv3g3z9d" # Local or wandb path
+#   pretrained_model_path: "wandb:spd-train-tms_5-2/runs/0sr78ole" # Local or wandb path
 
 # TMS 40-10
-wandb_project: spd-tms
-wandb_run_name: null
+wandb_project: spd-tms-rank1
+wandb_run_name: normal_rank
 wandb_run_name_prefix: ""
 unit_norm_matrices: false
 seed: 0
@@ -60,5 +60,5 @@ task_config:
   feature_probability: 0.05
   # feature_probability: 0.02 # synced inputs
   data_generation_type: "at_least_zero_active"
-  pretrained_model_path: "wandb:spd-train-tms/runs/tmzweoqk"
+  pretrained_model_path: "wandb:jacktpayne51-macquarie-university/spd-train-tms-40-10-rank1/runs/74544bla"
   # pretrained_model_path: "wandb:spd-train-tms/runs/rkflpubi" # synced inputs

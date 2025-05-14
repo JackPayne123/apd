@@ -1,0 +1,24 @@
+program: spd/experiments/tms/tms_decomposition.py
+method: grid # Or 'random' or 'bayes'
+metric:
+  name: final_closeness # Or another metric you care about from wandb logs
+  goal: minimize
+
+parameters:
+  schatten_coeff:
+    values: [10.0, 15.0, 20.0]
+  topk_recon_coeff:
+    values: [5.0, 10.0, 15.0]
+  lr:
+    values: [0.0005, 0.001, 0.002]
+  # You can add more parameters to sweep here, for example:
+  # topk:
+  #   values: [1.0, 2.0, 3.0]
+  # seed: # If you want to run each combination with multiple seeds
+  #   values: [0, 1, 2]
+
+command:
+  - ${env}
+  - ${interpreter}
+  - ${program}
+  - spd/experiments/tms/tms_sensitivity_base_config.yaml # This is our new base config 

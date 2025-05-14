@@ -292,6 +292,8 @@ class TMSSPDModel(SPDModel):
         )
         model = cls(config=tms_spd_config)
         params = torch.load(paths.checkpoint, weights_only=True, map_location="cpu")
-        params = replace_deprecated_param_names(params, {"A": "linear1.A", "B": "linear1.B"})
+        params = replace_deprecated_param_names(
+            params, {"linear1.linear1.A": "linear1.A", "linear1.linear1.B": "linear1.B"}
+        )
         model.load_state_dict(params)
         return model, spd_config

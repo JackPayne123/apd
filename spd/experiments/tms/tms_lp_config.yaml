@@ -1,24 +1,40 @@
-wandb_project: spd-tms
-wandb_run_name: null
+wandb_project: spd-tms-rank1
+wandb_run_name: "lp_variant_p1_0.5_p2_0.5"
 wandb_run_name_prefix: ""
-unit_norm_matrices: true
+unit_norm_matrices: false
 seed: 0
 topk: null
-m: 3
-C: 5
+#m: 3
+C: 40
 param_match_coeff: 1.0
-lp_sparsity_coeff: 7.0
-pnorm: 0.9
-schatten_pnorm: 1.0
-schatten_coeff: 1.0
+
+# --- Lp-penalty APD Variant Params (as per Appendix A.2.3) ---
+apd_variant: "lp_penalty"
+lp_p1: 0.5           # p1 for Ac(x)^p1 in both L_Lp_minimality and L_Lp_simplicity
+lp_p2: 0.5           # p2 for Schatten exponent in L_Lp_simplicity
+lp_minimality_coeff: 1.0 # Coefficient for L_Lp_minimality
+lp_simplicity_coeff: 0.5 # Coefficient for L_Lp_simplicity
+
+# --- General Lp Sparsity on Attributions (Optional addition) ---
+# This is the original lp_sparsity_coeff. Can be used on top of any variant.
+# Set to null or 0.0 if L_Lp_minimality is sufficient for attribution sparsity.
+lp_sparsity_coeff: null 
+pnorm: null # e.g., 0.9 if lp_sparsity_coeff is used
+
+# --- Original Schatten (Review if needed with lp_penalty variant) ---
+# L_Lp_simplicity already has a Schatten-like term.
+# This might be redundant or conflict. Setting to null for clarity with lp_penalty variant.
+schatten_pnorm: null 
+schatten_coeff: null 
+
 batch_size: 2048
 steps: 20_000
 image_freq: 5000
 print_freq: 500
 save_freq: 20_000
-lr: 0.3
-lr_schedule: constant
-lr_warmup_pct: 0.1
+lr: 1e-3 # Note: Lp-penalty might require different LR, e.g., lower than 0.3
+lr_schedule: cosine
+lr_warmup_pct: 0.05
 task_config:
   task_name: tms
   bias_val: 0.0
@@ -26,4 +42,4 @@ task_config:
   feature_probability: 0.05
   data_generation_type: "at_least_zero_active"
   # File obtained by running spd/experiments/tms/train_tms.py
-  pretrained_model_path: spd/experiments/tms/out/tms_n-features5_n-hidden2_n-instances12_seed0.pth/model.pth
+  pretrained_model_path: "wandb:jacktpayne51-macquarie-university/spd-train-tms-40-10-rank1/runs/74544bla"

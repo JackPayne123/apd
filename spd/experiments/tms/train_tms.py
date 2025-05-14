@@ -265,9 +265,9 @@ def run_train(config: TMSTrainConfig, device: str) -> None:
 
 if __name__ == "__main__":
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    # TMS 5-2
+   # TMS 5-2
     # config = TMSTrainConfig(
-    #     wandb_project="spd-train-tms",
+    #     wandb_project="spd-train-tms_5-2",
     #     tms_model_config=TMSModelConfig(
     #         n_features=5,
     #         n_hidden=2,
@@ -286,7 +286,7 @@ if __name__ == "__main__":
     # )
     # TMS 40-10
     config = TMSTrainConfig(
-        wandb_project="spd-train-tms",
+        wandb_project="spd-train-tms-40-10-rank1",
         tms_model_config=TMSModelConfig(
             n_features=40,
             n_hidden=10,
