@@ -1,16 +1,18 @@
 program: spd/experiments/tms/tms_decomposition.py
 method: grid # Or 'random' or 'bayes'
 metric:
-  name: final_closeness # Or another metric you care about from wandb logs
+  name: total_loss # Changed from final_closeness for now, as it's directly in the CSV
   goal: minimize
 
 parameters:
+  # lr:
+  #   values: [0.001]
   schatten_coeff:
-    values: [10.0, 15.0, 20.0]
-  topk_recon_coeff:
     values: [5.0, 10.0, 15.0]
-  lr:
-    values: [0.0005, 0.001, 0.002]
+  topk_recon_coeff:
+    values: [2.5, 5.0, 10.0]
+  schatten_pnorm:
+    values: [0.5, 0.7, 0.9]
   # You can add more parameters to sweep here, for example:
   # topk:
   #   values: [1.0, 2.0, 3.0]
@@ -21,4 +23,4 @@ command:
   - ${env}
   - ${interpreter}
   - ${program}
-  - spd/experiments/tms/tms_sensitivity_base_config.yaml # This is our new base config 
+  - spd/experiments/tms/tms_sensitivity_base_config.yaml # This is our base config for TMS40-10 

@@ -228,9 +228,11 @@ device = "mps" if torch.backends.mps.is_available() else "cpu"
 # path = "wandb:spd-tms/runs/vt0i4a22"  # 20-5
 # path = "wandb:spd-tms/runs/tyo4serm"  # 40-10 with topk=2, topk_recon_coeff=1e1, schatten_coeff=15# old paper run
 # path = "wandb:spd-tms/runs/9zzp2s68"  # 40-10 with topk=2, topk_recon_coeff=1e1, schatten_coeff=20
-#path = "wandb:spd-tms/runs/08no00iq"  # 40-10 with topk=1, topk_recon_coeff=1e1, schatten_coeff=20# new paper run
+#path = "wandb:apollo-interp/spd-tms/runs/08no00iq"  # 40-10 with topk=1, topk_recon_coeff=1e1, schatten_coeff=20# new paper run
 #path = "wandb:jacktpayne51-macquarie-university/spd-tms/runs/hmpiuws8"  # 40-10 with topk=1, topk_recon_coeff=1e1, schatten_coeff=20# new paper run
-path = "wandb:jacktpayne51-macquarie-university/spd-tms-rank1/runs/tt2xhkyz"  # 40-10 with topk=1, topk_recon_coeff=1e1, schatten_coeff=20# new paper run
+#path = "wandb:jacktpayne51-macquarie-university/spd-tms-sensitivity-analysis/runs/83ixn1e4"  # 40-10 with topk=1, topk_recon_coeff=1e1, schatten_coeff=20# new paper run
+#path = "wandb:jacktpayne51-macquarie-university/spd-tms-sensitivity-analysis/runs/psjknziz"  # 40-10 with topk=1, topk_recon_coeff=1e1, schatten_coeff=20# new paper run
+path = "wandb:jacktpayne51-macquarie-university/spd-tms-sensitivity-analysis/runs/2kk0lt8d"  # 40-10 with topk=1, topk_recon_coeff=1e1, schatten_coeff=20# new paper run
 instance_idx = 0
 # path = "wandb:spd-tms/runs/014t4f9n"  # 40-10 with topk=1, topk_recon_coeff=1e1, schatten_coeff=1e1
 
