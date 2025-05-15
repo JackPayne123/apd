@@ -1,6 +1,6 @@
 program: spd/experiments/tms/tms_decomposition.py
 method: grid # Or 'random' or 'bayes'
-metric:
+metric: 
   name: total_loss # Changed from final_closeness for now, as it's directly in the CSV
   goal: minimize
 
